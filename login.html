@@ -1,0 +1,77 @@
+<meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log In — Bear Roastery</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #1a1008; }
+    .login-card { background: #fff; border-radius: 16px; padding: 40px 36px; width: 100%; max-width: 400px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); }
+    .brand { text-align: center; margin-bottom: 32px; }
+    .brand-logo { font-size: 48px; margin-bottom: 10px; }
+    .brand-name { font-size: 22px; font-weight: 700; color: #1a1008; }
+    .brand-sub  { font-size: 13px; color: #c8a96e; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
+    .field { margin-bottom: 16px; }
+    label  { display: block; font-size: 12px; color: #888; margin-bottom: 5px; font-weight: 500; }
+    input  { width: 100%; padding: 11px 14px; border-radius: 8px; border: 1px solid #ddd; font-size: 15px; font-family: inherit; box-sizing: border-box; }
+    input:focus { outline: none; border-color: #c8a96e; box-shadow: 0 0 0 3px rgba(200,169,110,0.15); }
+    .btn-login { width: 100%; padding: 13px; background: #1a1008; color: #e8d5b0; border: none; border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 8px; font-family: inherit; }
+    .btn-login:hover    { background: #2d1e0f; }
+    .btn-login:disabled { background: #888; cursor: not-allowed; }
+    .msg-err  { background: #fff0ee; border: 1px solid #e05c2a; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #e05c2a; margin-top: 14px; }
+    .msg-info { background: #fff8ee; border: 1px solid #c8a96e; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #5a3e1b; margin-top: 14px; }
+    .login-footer { margin-top: 24px; text-align: center; font-size: 12px; color: #c8a96e; }
+  </style>
+
+
+  <div class="login-card">
+    <div class="brand">
+      <div class="brand-logo">🐻</div>
+      <div class="brand-name">Bear Roastery</div>
+      <div class="brand-sub">Operations Platform</div>
+    </div>
+    <div class="field">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="you@bearroastery.ie" autocomplete="email">
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn-login" id="login-btn">Log In</button>
+    <div id="msg" style="display:none"></div>
+  </div>
+  <div class="login-footer">Bear Roastery · Internal Use Only</div>
+  <script>
+    const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) window.location.href = "index.html";
+    });
+    const emailEl = document.getElementById("email");
+    const passwordEl = document.getElementById("password");
+    const loginBtn  = document.getElementById("login-btn");
+    const msgEl     = document.getElementById("msg");
+    function showMsg(text, type="err") {
+      msgEl.className = type==="err" ? "msg-err" : "msg-info";
+      msgEl.textContent = text;
+      msgEl.style.display = "block";
+    }
+    async function doLogin() {
+      const email = emailEl.value.trim(), password = passwordEl.value;
+      if (!email || !password) { showMsg("Please enter your email and password."); return; }
+      loginBtn.disabled = true; loginBtn.textContent = "Logging in…"; msgEl.style.display = "none";
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        const friendly = error.message.includes("Invalid login") ? "Incorrect email or password. Please try again."
+          : error.message.includes("Email not confirmed") ? "Please confirm your email address before logging in."
+          : error.message;
+        showMsg(friendly); loginBtn.disabled = false; loginBtn.textContent = "Log In";
+      } else {
+        showMsg("Logged in! Redirecting…", "info");
+        window.location.href = "index.html";
+      }
+    }
+    loginBtn.addEventListener("click", doLogin);
+    passwordEl.addEventListener("keydown", e => { if (e.key==="Enter") doLogin(); });
+    emailEl.addEventListener("keydown",    e => { if (e.key==="Enter") passwordEl.focus(); });
+  </script>
