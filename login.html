@@ -43,8 +43,8 @@
   </div>
   <div class="login-footer">Bear Roastery · Internal Use Only</div>
   <script>
-    const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
       if (session) window.location.href = "index.html";
     });
     const emailEl = document.getElementById("email");
@@ -60,7 +60,7 @@
       const email = emailEl.value.trim(), password = passwordEl.value;
       if (!email || !password) { showMsg("Please enter your email and password."); return; }
       loginBtn.disabled = true; loginBtn.textContent = "Logging in…"; msgEl.style.display = "none";
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
       if (error) {
         const friendly = error.message.includes("Invalid login") ? "Incorrect email or password. Please try again."
           : error.message.includes("Email not confirmed") ? "Please confirm your email address before logging in."
