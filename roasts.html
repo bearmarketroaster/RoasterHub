@@ -9,109 +9,61 @@
     body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
     input, select, button { font-family: inherit; font-size: 14px; }
     button { cursor: pointer; }
-
-    /* ── Header ── */
-    .header {
-      background: #1a1008; color: #e8d5b0;
-      padding: 16px 24px; display: flex; align-items: center; justify-content: space-between;
-    }
-    .header-left  { display: flex; align-items: center; gap: 12px; }
-    .header-back  { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; display: flex; align-items: center; gap: 6px; }
+    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; display: flex; align-items: center; gap: 6px; }
     .header-back:hover { color: #e8d5b0; }
     .header-title { font-weight: 700; font-size: 18px; letter-spacing: 0.5px; }
-    .header-sub   { font-size: 12px; color: #c8a96e; margin-top: 1px; }
-
-    .btn-logout {
-      background: none; border: 1px solid #c8a96e; color: #c8a96e;
-      border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
-    }
+    .header-sub { font-size: 12px; color: #c8a96e; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
     .btn-logout:hover { background: #c8a96e; color: #1a1008; }
-
-    /* ── Layout ── */
     .content { padding: 24px; max-width: 760px; margin: 0 auto; }
-
-    /* ── Cards ── */
     .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 12px; }
-
-    /* ── Form elements ── */
     label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
     input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; }
     input:focus, select:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; }
     input.big { font-size: 22px; padding: 12px; text-align: center; font-weight: 700; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
     .span-2 { grid-column: 1 / -1; }
-
-    /* ── Buttons ── */
     .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
-    .btn-dark  { background: #1a1008; }
+    .btn-dark { background: #1a1008; }
     .btn-green { background: #4a9e6b; }
-    .btn-amber { background: #c8a96e; }
-    .btn-grey  { background: #888; }
     .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
-    .btn-sm    { padding: 4px 10px; font-size: 12px; }
-    .btn-lg    { padding: 12px 24px; }
-    .btn-full  { width: 100%; padding: 12px; border-radius: 10px; }
-
-    /* ── Tags ── */
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-lg { padding: 12px 24px; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
     .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
-
-    /* ── Step indicator ── */
-    .steps { display: flex; gap: 0; margin-bottom: 24px; }
-    .step {
-      flex: 1; text-align: center; padding: 10px 8px; font-size: 12px; font-weight: 600;
-      border-bottom: 3px solid #e0d5c5; color: #aaa;
-    }
-    .step.active  { border-bottom-color: #1a1008; color: #1a1008; }
-    .step.done    { border-bottom-color: #4a9e6b; color: #4a9e6b; }
-
-    /* ── Batch rows ── */
-    .batch-row {
-      background: #f5f0eb; border-radius: 8px; padding: 14px;
-      margin-bottom: 10px;
-    }
-    .batch-header {
-      display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
-    }
-    .batch-num {
-      background: #1a1008; color: #e8d5b0; border-radius: 6px;
-      padding: 5px 10px; font-weight: 700; font-size: 13px; white-space: nowrap;
-    }
-
-    /* ── Yield ── */
+    .steps { display: flex; margin-bottom: 24px; }
+    .step { flex: 1; text-align: center; padding: 10px 8px; font-size: 12px; font-weight: 600; border-bottom: 3px solid #e0d5c5; color: #aaa; }
+    .step.active { border-bottom-color: #1a1008; color: #1a1008; }
+    .step.done { border-bottom-color: #4a9e6b; color: #4a9e6b; }
+    .batch-row { background: #f5f0eb; border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+    .batch-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .batch-num { background: #1a1008; color: #e8d5b0; border-radius: 6px; padding: 5px 10px; font-weight: 700; font-size: 13px; white-space: nowrap; }
     .yield-good { color: #4a9e6b; font-weight: 600; }
     .yield-warn { color: #e0a82a; font-weight: 600; }
-    .yield-bad  { color: #e05c2a; font-weight: 600; }
-
-    /* ── History cards ── */
-    .history-card {
-      background: #fff; border-radius: 8px; padding: 16px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 10px;
-      border-left: 4px solid #4a9e6b;
-    }
-
-    /* ── Misc ── */
-    .mono  { font-family: monospace; }
-    .err   { color: #e05c2a; font-size: 13px; margin-top: 8px; }
-    .hint  { color: #888; font-size: 13px; }
+    .yield-bad { color: #e05c2a; font-weight: 600; }
+    .history-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 10px; border-left: 4px solid #4a9e6b; }
+    .mono { font-family: monospace; }
+    .err { color: #e05c2a; font-size: 13px; margin-top: 8px; }
+    .hint { color: #888; font-size: 13px; }
     .flex-between { display: flex; justify-content: space-between; align-items: center; }
-    .flex-wrap    { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .gap-8  { gap: 8px; }
-    .mt-4   { margin-top: 4px; }
-    .mt-8   { margin-top: 8px; }
-    .mt-12  { margin-top: 12px; }
-    .mt-16  { margin-top: 16px; }
-    .mb-8   { margin-bottom: 8px; }
-    .mb-12  { margin-bottom: 12px; }
-    .mb-16  { margin-bottom: 16px; }
+    .flex-wrap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .mt-4 { margin-top: 4px; }
+    .mt-8 { margin-top: 8px; }
+    .mt-12 { margin-top: 12px; }
+    .mt-16 { margin-top: 16px; }
+    .mb-8 { margin-bottom: 8px; }
+    .mb-12 { margin-bottom: 12px; }
+    .mb-16 { margin-bottom: 16px; }
     h2 { color: #1a1008; }
     h3 { color: #1a1008; margin-bottom: 12px; }
     .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c8a96e; margin-bottom: 12px; }
     .empty { text-align: center; color: #aaa; padding: 40px 20px; }
     .empty .icon { font-size: 36px; margin-bottom: 8px; }
-
+    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
     @media (max-width: 600px) {
-      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .grid-2 { grid-template-columns: 1fr; }
       .content { padding: 16px; }
       .steps .step { font-size: 10px; padding: 8px 4px; }
     }
@@ -124,203 +76,157 @@
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // BEAR ROASTERY — Roasts Module
-//
-// Correct roasting flow:
+// Roasting flow:
 //   1. Pick coffee to roast + roast date
 //   2. Select container to fill + how many batches
 //   3. For each batch: enter Cropster roast ID + green weight going in
 //   4. After roasting: enter roasted weight of the full container
-//   5. Save — optionally transfer pre-fill data to Traceability
+//   5. Save to Supabase
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── AUTH ──────────────────────────────────────────────────────────────────────
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
 supabaseClient.auth.getSession().then(({ data: { session } }) => {
   if (!session) window.location.href = "login.html";
+  else init();
 });
 
-// ── CONSTANTS ─────────────────────────────────────────────────────────────────
-const COFFEES = [
-  "House Roast Dark Horse",
-  "Sugar Cane Arcadia (Decaf) BAR",
-  "Ethiopia Bezzabesh",
-  "Rwanda Kigali",
-  "Hermosa",
-  "Batch Brew",
-];
 const CONTAINER_SIZES = { XL: 80, L: 40, M: 20, S: 10 };
 
-// ── STATE ─────────────────────────────────────────────────────────────────────
 const state = {
-  view: "home",          // "home" | "new" | "history"
-  roastSessions: [],     // all saved sessions
-  // The session being built — reset on each new session
-  session: newSession(),
-  ui: { step: 1, err: "" }, // step 1=setup, 2=batches, 3=weigh-off
+  view:           "home",
+  roast_sessions: [],
+  coffees:        [],
+  loading:        true,
+  saving:         false,
+  session:        new_session(),
+  ui: { step: 1, err: "" },
 };
 
-function newSession() {
+function new_session() {
   return {
-    coffee:        "",
-    date:          today(),
-    containerId:   "",
-    containerSize: "XL",
-    batchCount:    1,
-    batches:       [],   // [{ id, greenWeight }]
-    roastedWeight: "",   // total weight of the filled container after roasting
+    coffee: "", date: today(), container_id: "", container_size: "XL",
+    batch_count: 1, batches: [], roasted_weight: "",
   };
 }
 
-// ── HELPERS ───────────────────────────────────────────────────────────────────
 function today() { return new Date().toISOString().split("T")[0]; }
-function esc(s)  { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-function genId() { return `RST-${today().replace(/-/g,"")}-${String(state.roastSessions.length+1).padStart(3,"0")}`; }
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function gen_session_id() { return `RST-${today().replace(/-/g,"")}-${String(state.roast_sessions.length + 1).padStart(3,"0")}`; }
+function yield_pct(green, roasted) { if (!Number(green)||!Number(roasted)) return null; return Math.round((Number(roasted)/Number(green))*100); }
+function yield_class(pct) { if (pct===null) return "hint"; if (pct>=80&&pct<=90) return "yield-good"; if (pct>=75) return "yield-warn"; return "yield-bad"; }
 
-// Yield % = roasted out / green in
-function yieldPct(green, roasted) {
-  if (!Number(green) || !Number(roasted)) return null;
-  return Math.round((Number(roasted) / Number(green)) * 100);
-}
-function yieldClass(pct) {
-  if (pct === null) return "hint";
-  if (pct >= 80 && pct <= 90) return "yield-good";
-  if (pct >= 75)               return "yield-warn";
-  return "yield-bad";
+async function load_data() {
+  const { data: settings } = await supabaseClient.from("settings").select("coffees").eq("id",1).single();
+  state.coffees = settings?.coffees || [];
+  const { data: sessions, error } = await supabaseClient.from("roast_sessions").select("*, roast_batches(*)").order("date", { ascending: false });
+  if (error) { console.error("Failed to load roast sessions:", error); return; }
+  state.roast_sessions = (sessions||[]).map(s => ({ ...s, batches: (s.roast_batches||[]).sort((a,b) => a.batch_number - b.batch_number) }));
 }
 
-// Push pre-fill data to localStorage for Traceability to pick up
-function transferToTraceability(session) {
-  const payload = {
-    coffee:      session.coffee,
-    date:        session.date,
-    containerId: session.containerId,
-    roastIds:    session.batches.map(b => b.id).filter(Boolean),
-    source:      "roasts-module",
-    transferredAt: new Date().toISOString(),
-  };
-  try { localStorage.setItem("traceability_prefill", JSON.stringify(payload)); }
-  catch (e) { console.warn("localStorage unavailable", e); }
+async function save_session() {
+  state.saving = true; render();
+  const s = state.session;
+  const id = gen_session_id();
+  const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
+    id, coffee: s.coffee, date: s.date, container_id: s.container_id,
+    container_size: s.container_size, roasted_weight: Number(s.roasted_weight),
+  });
+  if (session_err) { state.saving = false; state.ui.err = "Failed to save session. Please try again."; render(); return; }
+  const batches = s.batches.map((b,i) => ({
+    id: `${id}-B${i+1}`, roast_session_id: id, batch_number: i+1,
+    cropster_id: b.cropster_id || null, green_weight: Number(b.green_weight) || null,
+  }));
+  await supabaseClient.from("roast_batches").insert(batches);
+  const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
+  if (total_green > 0) {
+    await supabaseClient.from("stock_adjustments").insert({
+      id: `ADJ-${id}`, date: s.date, coffee: s.coffee, change_kg: -total_green,
+      reason: "roast", note: `Auto-deducted from roast session ${id}`, auto: true, roast_session_id: id,
+    });
+    const { data: stock_item } = await supabaseClient.from("stock_items").select("id, current_kg").eq("coffee", s.coffee).single();
+    if (stock_item) {
+      await supabaseClient.from("stock_items").update({ current_kg: Math.max(0, stock_item.current_kg - total_green) }).eq("id", stock_item.id);
+    }
+  }
+  state.saving = false;
+  await load_data();
+  state.ui.step = 4;
+  render();
 }
 
-// ── RENDER ────────────────────────────────────────────────────────────────────
-function render() {
-  document.getElementById("app").innerHTML = buildApp();
-  attachListeners();
-}
+async function init() { await load_data(); state.loading = false; render(); }
 
-function buildApp() {
-  return `
+function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
+
+function build_app() {
+  const header = `
     <div class="header">
       <div class="header-left">
         <button class="header-back" id="go-dashboard">← Dashboard</button>
         <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
-        <div>
-          <div class="header-title">🔥 Roasts</div>
-          <div class="header-sub">Bear Roastery</div>
-        </div>
+        <div><div class="header-title">🔥 Roasts</div><div class="header-sub">Bear Roastery</div></div>
       </div>
-      ${state.view === "home" ? `
+      ${state.view==="home" ? `
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-ghost btn-sm" id="go-history">History</button>
           <button class="btn btn-dark" id="start-new">+ New Roast</button>
           <button class="btn-logout" id="logout-btn">Log Out</button>
         </div>` : `<button class="btn-logout" id="logout-btn">Log Out</button>`}
-    </div>
-    <div class="content">
-      ${ state.view === "home"    ? buildHome()    :
-         state.view === "new"     ? buildNew()     :
-         state.view === "history" ? buildHistory() : "" }
     </div>`;
+  if (state.loading) return header + `<div class="loading">Loading roasts…</div>`;
+  return header + `<div class="content">${state.view==="home" ? build_home() : state.view==="new" ? build_new() : state.view==="history" ? build_history() : ""}</div>`;
 }
 
-// ── HOME ──────────────────────────────────────────────────────────────────────
-function buildHome() {
-  const sessions = state.roastSessions;
-  const totalGreen   = sessions.reduce((s,r) => s + r.batches.reduce((bs,b) => bs+(Number(b.greenWeight)||0), 0), 0);
-  const totalRoasted = sessions.reduce((s,r) => s + (Number(r.roastedWeight)||0), 0);
-
-  const statsHtml = `
+function build_home() {
+  const sessions = state.roast_sessions;
+  const total_green = sessions.reduce((s,r) => s+r.batches.reduce((bs,b) => bs+(Number(b.green_weight)||0),0), 0);
+  const total_roasted = sessions.reduce((s,r) => s+(Number(r.roasted_weight)||0), 0);
+  const stats_html = `
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px">
-      ${[
-        { icon:"🔥", label:"Sessions",        value: sessions.length },
-        { icon:"🌱", label:"Total Green In",   value: `${totalGreen.toFixed(1)}kg` },
-        { icon:"⚖️", label:"Total Roasted",    value: `${totalRoasted.toFixed(1)}kg` },
-        { icon:"☕", label:"Coffees",          value: new Set(sessions.map(r=>r.coffee)).size },
-      ].map(({icon,label,value}) => `
-        <div class="card" style="text-align:center;padding:14px 10px;margin-bottom:0">
-          <div style="font-size:22px;margin-bottom:4px">${icon}</div>
-          <div style="font-size:20px;font-weight:700">${value}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px">${label}</div>
-        </div>`).join("")}
+      ${[{icon:"🔥",label:"Sessions",value:sessions.length},{icon:"🌱",label:"Total Green In",value:`${total_green.toFixed(1)}kg`},{icon:"⚖️",label:"Total Roasted",value:`${total_roasted.toFixed(1)}kg`},{icon:"☕",label:"Coffees",value:new Set(sessions.map(r=>r.coffee)).size}]
+        .map(({icon,label,value}) => `<div class="card" style="text-align:center;padding:14px 10px;margin-bottom:0"><div style="font-size:22px;margin-bottom:4px">${icon}</div><div style="font-size:20px;font-weight:700">${value}</div><div style="font-size:11px;color:#888;margin-top:2px">${label}</div></div>`).join("")}
     </div>`;
-
-  if (sessions.length === 0) return `
-    <h2 class="mb-16">Roasts</h2>
-    ${statsHtml}
-    <div class="card empty">
-      <div class="icon">🔥</div>
-      No roast sessions yet. Hit <strong>+ New Roast</strong> to get started.
-    </div>`;
-
-  const recent = [...sessions].reverse().slice(0, 5);
-  return `
-    <h2 class="mb-16">Roasts</h2>
-    ${statsHtml}
-    <div class="section-label">Recent Sessions</div>
-    ${recent.map(s => buildSessionCard(s)).join("")}
-    ${sessions.length > 5 ? `<button class="btn btn-ghost" style="width:100%;padding:10px;margin-top:4px" id="go-history">View all ${sessions.length} sessions →</button>` : ""}`;
+  if (sessions.length===0) return `<h2 class="mb-16">Roasts</h2>${stats_html}<div class="card empty"><div class="icon">🔥</div>No roast sessions yet. Hit <strong>+ New Roast</strong> to get started.</div>`;
+  const recent = sessions.slice(0,5);
+  return `<h2 class="mb-16">Roasts</h2>${stats_html}<div class="section-label">Recent Sessions</div>${recent.map(s => build_session_card(s)).join("")}${sessions.length>5?`<button class="btn btn-ghost" style="width:100%;padding:10px;margin-top:4px" id="go-history">View all ${sessions.length} sessions →</button>`:""}`;
 }
 
-// ── SESSION CARD ──────────────────────────────────────────────────────────────
-function buildSessionCard(s) {
-  const totalGreen = s.batches.reduce((sum,b) => sum+(Number(b.greenWeight)||0), 0);
-  const yp         = yieldPct(totalGreen, s.roastedWeight);
-  const ypClass    = yieldClass(yp);
-  const ids        = s.batches.map(b=>b.id).filter(Boolean).join(", ");
-
+function build_session_card(s) {
+  const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
+  const yp = yield_pct(total_green, s.roasted_weight);
+  const ids = s.batches.map(b => b.cropster_id).filter(Boolean).join(", ");
   return `
     <div class="history-card">
       <div class="flex-between mb-8">
         <div class="flex-wrap">
           <span style="font-weight:700;font-size:15px">${esc(s.coffee)}</span>
           <span class="tag" style="background:#fff8ee;color:#c8a96e">${s.date}</span>
-          ${s.containerId ? `<span class="tag" style="background:#f0ebe4;color:#888" >${esc(s.containerId)}</span>` : ""}
+          ${s.container_id?`<span class="tag" style="background:#f0ebe4;color:#888">${esc(s.container_id)}</span>`:""}
           <span class="tag" style="background:#f5f0eb;color:#888">${s.batches.length} batch${s.batches.length!==1?"es":""}</span>
         </div>
-        <div style="display:flex;gap:12px;align-items:center">
-          ${yp!==null ? `<span class="${ypClass} hint">${yp}% yield</span>` : ""}
-          <button class="btn btn-ghost btn-sm" data-transfer="${esc(s.id)}">↗ Send to Trace</button>
-        </div>
+        ${yp!==null?`<span class="${yield_class(yp)}">${yp}% yield</span>`:""}
       </div>
       <div style="display:flex;gap:20px;font-size:13px;color:#888;flex-wrap:wrap">
-        ${totalGreen>0         ? `<span>Green in: <strong style="color:#1a1008">${totalGreen.toFixed(1)}kg</strong></span>` : ""}
-        ${s.roastedWeight      ? `<span>Roasted out: <strong style="color:#1a1008">${Number(s.roastedWeight).toFixed(1)}kg</strong></span>` : ""}
-        ${ids                  ? `<span>IDs: <span class="mono" style="background:#f0ebe4;padding:1px 6px;border-radius:3px">${esc(ids)}</span></span>` : ""}
+        ${total_green>0?`<span>Green in: <strong style="color:#1a1008">${total_green.toFixed(1)}kg</strong></span>`:""}
+        ${s.roasted_weight?`<span>Roasted out: <strong style="color:#1a1008">${Number(s.roasted_weight).toFixed(1)}kg</strong></span>`:""}
+        ${ids?`<span>IDs: <span class="mono" style="background:#f0ebe4;padding:1px 6px;border-radius:3px">${esc(ids)}</span></span>`:""}
       </div>
     </div>`;
 }
 
-// ── NEW ROAST FLOW ────────────────────────────────────────────────────────────
-function buildNew() {
+function build_new() {
   const { step } = state.ui;
-  const stepLabels = ["1. Coffee & Container", "2. Batch IDs & Green Weight", "3. Roasted Weight"];
-
-  const stepsHtml = `
-    <div class="steps mb-16">
-      ${stepLabels.map((label,i) => `
-        <div class="step ${step===i+1?"active":step>i+1?"done":""}">${step>i+1?"✓ ":""}${label}</div>
-      `).join("")}
-    </div>`;
-
-  if (step === 1) return stepsHtml + buildStep1();
-  if (step === 2) return stepsHtml + buildStep2();
-  if (step === 3) return stepsHtml + buildStep3();
-  if (step === 4) return buildDone();
+  const step_labels = ["1. Coffee & Container","2. Batch IDs & Green Weight","3. Roasted Weight"];
+  const steps_html = `<div class="steps mb-16">${step_labels.map((label,i) => `<div class="step ${step===i+1?"active":step>i+1?"done":""}">${step>i+1?"✓ ":""}${label}</div>`).join("")}</div>`;
+  if (step===1) return steps_html + build_step1();
+  if (step===2) return steps_html + build_step2();
+  if (step===3) return steps_html + build_step3();
+  if (step===4) return build_done();
   return "";
 }
 
-// Step 1 — Pick coffee, date, container, batch count
-function buildStep1() {
+function build_step1() {
   const s = state.session;
   return `
     <div class="flex-between mb-16">
@@ -329,31 +235,18 @@ function buildStep1() {
     </div>
     <div class="card">
       <div class="grid-2">
-        <div>
-          <label class="lbl">Coffee to Roast *</label>
+        <div><label class="lbl">Coffee to Roast *</label>
           <select id="s1-coffee">
             <option value="">— Select coffee —</option>
-            ${COFFEES.map(c=>`<option value="${esc(c)}" ${s.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+            ${state.coffees.map(c=>`<option value="${esc(c)}" ${s.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
           </select>
         </div>
-        <div>
-          <label class="lbl">Roast Date *</label>
-          <input type="date" id="s1-date" value="${s.date}" />
+        <div><label class="lbl">Roast Date *</label><input type="date" id="s1-date" value="${s.date}" /></div>
+        <div><label class="lbl">Container to Fill *</label><input id="s1-container" value="${esc(s.container_id)}" placeholder="e.g. XL01042601" /></div>
+        <div><label class="lbl">Container Size</label>
+          <select id="s1-size">${Object.entries(CONTAINER_SIZES).map(([sz,kg])=>`<option value="${sz}" ${s.container_size===sz?"selected":""}>${sz} (${kg}kg)</option>`).join("")}</select>
         </div>
-        <div>
-          <label class="lbl">Container to Fill *</label>
-          <input id="s1-container" value="${esc(s.containerId)}" placeholder="e.g. XL01042601" />
-        </div>
-        <div>
-          <label class="lbl">Container Size</label>
-          <select id="s1-size">
-            ${Object.entries(CONTAINER_SIZES).map(([sz,kg])=>`<option value="${sz}" ${s.containerSize===sz?"selected":""}>${sz} (${kg}kg)</option>`).join("")}
-          </select>
-        </div>
-        <div>
-          <label class="lbl">Number of Batches to Fill It *</label>
-          <input type="number" id="s1-count" value="${s.batchCount}" min="1" max="20" />
-        </div>
+        <div><label class="lbl">Number of Batches *</label><input type="number" id="s1-count" value="${s.batch_count}" min="1" max="20" /></div>
       </div>
       <p id="s1-err" class="err" style="display:none"></p>
       <div style="display:flex;gap:8px;margin-top:16px">
@@ -362,45 +255,30 @@ function buildStep1() {
     </div>`;
 }
 
-// Step 2 — Enter Cropster roast IDs and green weight per batch
-function buildStep2() {
+function build_step2() {
   const s = state.session;
-  const totalGreen = s.batches.reduce((sum,b) => sum+(Number(b.greenWeight)||0), 0);
-
-  const batchRows = s.batches.map((b,i) => `
+  const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
+  const batch_rows = s.batches.map((b,i) => `
     <div class="batch-row">
       <div class="batch-header">
         <div class="batch-num">Batch ${i+1}</div>
-        <span class="hint">Going into <strong>${esc(s.containerId||"container")}</strong></span>
+        <span class="hint">Going into <strong>${esc(s.container_id||"container")}</strong></span>
       </div>
       <div class="grid-2">
-        <div>
-          <label class="lbl">Cropster Roast ID *</label>
-          <input class="b-id" data-idx="${i}" value="${esc(b.id)}" placeholder="e.g. 42" />
-        </div>
-        <div>
-          <label class="lbl">Green Weight In (kg) *</label>
-          <input type="number" class="b-green" data-idx="${i}" value="${b.greenWeight}" placeholder="0.0" step="0.1" />
-        </div>
+        <div><label class="lbl">Cropster Roast ID *</label><input class="b-id" data-idx="${i}" value="${esc(b.cropster_id)}" placeholder="e.g. 42" /></div>
+        <div><label class="lbl">Green Weight In (kg) *</label><input type="number" class="b-green" data-idx="${i}" value="${b.green_weight}" placeholder="0.0" step="0.1" /></div>
       </div>
     </div>`).join("");
-
   return `
     <div class="flex-between mb-16">
-      <div>
-        <h2>${esc(s.coffee)}</h2>
-        <div class="hint mt-4">${s.date} · ${esc(s.containerId)} · ${s.batches.length} batch${s.batches.length!==1?"es":""}</div>
-      </div>
+      <div><h2>${esc(s.coffee)}</h2><div class="hint mt-4">${s.date} · ${esc(s.container_id)} · ${s.batches.length} batch${s.batches.length!==1?"es":""}</div></div>
       <button class="btn btn-ghost" id="cancel-new">Cancel</button>
     </div>
     <div class="card">
       <h3>Batch Details</h3>
-      <p class="hint mb-12">Enter the Cropster roast ID and green weight for each batch going into <strong>${esc(s.containerId)}</strong>.</p>
-      ${batchRows}
-      ${totalGreen > 0 ? `
-        <div style="background:#f5f0eb;border-radius:8px;padding:10px 14px;font-size:13px;margin-top:4px">
-          Total green weight in: <strong>${totalGreen.toFixed(1)}kg</strong>
-        </div>` : ""}
+      <p class="hint mb-12">Enter the Cropster roast ID and green weight for each batch going into <strong>${esc(s.container_id)}</strong>.</p>
+      ${batch_rows}
+      ${total_green>0?`<div style="background:#f5f0eb;border-radius:8px;padding:10px 14px;font-size:13px;margin-top:4px">Total green weight in: <strong>${total_green.toFixed(1)}kg</strong></div>`:""}
       <p id="s2-err" class="err" style="display:none"></p>
       <div style="display:flex;gap:8px;margin-top:16px">
         <button class="btn btn-dark btn-lg" id="s2-next">Next — Enter Roasted Weight →</button>
@@ -409,67 +287,50 @@ function buildStep2() {
     </div>`;
 }
 
-// Step 3 — Weigh the filled container after roasting
-function buildStep3() {
+function build_step3() {
   const s = state.session;
-  const totalGreen = s.batches.reduce((sum,b) => sum+(Number(b.greenWeight)||0), 0);
-  const yp         = yieldPct(totalGreen, s.roastedWeight);
-  const ypClass    = yieldClass(yp);
-  const ids        = s.batches.map(b=>b.id).filter(Boolean).join(", ");
-
+  const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
+  const yp = yield_pct(total_green, s.roasted_weight);
+  const yp_class = yield_class(yp);
   return `
     <div class="flex-between mb-16">
-      <div>
-        <h2>${esc(s.coffee)}</h2>
-        <div class="hint mt-4">${s.date} · ${esc(s.containerId)}</div>
-      </div>
+      <div><h2>${esc(s.coffee)}</h2><div class="hint mt-4">${s.date} · ${esc(s.container_id)}</div></div>
       <button class="btn btn-ghost" id="cancel-new">Cancel</button>
     </div>
     <div class="card">
       <h3>Weigh the Container</h3>
-      <p class="hint mb-16">All batches are done. Weigh <strong>${esc(s.containerId)}</strong> and enter the total roasted weight below.</p>
-
-      <!-- Summary of what went in -->
+      <p class="hint mb-16">All batches are done. Weigh <strong>${esc(s.container_id)}</strong> and enter the total roasted weight below.</p>
       <div style="background:#f5f0eb;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px">
         <div style="font-weight:600;color:#1a1008;margin-bottom:6px">What went in</div>
         ${s.batches.map((b,i) => `
           <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-            <span>Batch ${i+1} ${b.id?`<span class="mono" style="background:#e8d5b0;padding:1px 5px;border-radius:3px;margin-left:4px">${esc(b.id)}</span>`:""}
-            </span>
-            <span>${b.greenWeight?`${Number(b.greenWeight).toFixed(1)}kg green`:"—"}</span>
+            <span>Batch ${i+1} ${b.cropster_id?`<span class="mono" style="background:#e8d5b0;padding:1px 5px;border-radius:3px;margin-left:4px">${esc(b.cropster_id)}</span>`:""}</span>
+            <span>${b.green_weight?`${Number(b.green_weight).toFixed(1)}kg green`:"—"}</span>
           </div>`).join("")}
         <div style="border-top:1px solid #e0d5c5;margin-top:8px;padding-top:8px;font-weight:600;display:flex;justify-content:space-between">
-          <span>Total green in</span><span>${totalGreen.toFixed(1)}kg</span>
+          <span>Total green in</span><span>${total_green.toFixed(1)}kg</span>
         </div>
       </div>
-
-      <!-- Roasted weight input -->
       <div style="margin-bottom:16px">
-        <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Roasted Weight of ${esc(s.containerId)} (kg)</label>
-        <input type="number" id="s3-roasted" class="big" value="${s.roastedWeight}" placeholder="0.0" step="0.1" />
+        <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Roasted Weight of ${esc(s.container_id)} (kg)</label>
+        <input type="number" id="s3-roasted" class="big" value="${s.roasted_weight}" placeholder="0.0" step="0.1" />
       </div>
-
-      <!-- Live yield display -->
       <div id="yield-display" style="text-align:center;font-size:15px;margin-bottom:16px;min-height:22px">
-        ${yp!==null ? `<span class="${ypClass}">Yield: ${yp}% ${yp>=80&&yp<=90?"✓":yp>=75?"⚠️":"⚠️ Check weights"}</span>` : ""}
+        ${yp!==null?`<span class="${yp_class}">Yield: ${yp}% ${yp>=80&&yp<=90?"✓":"⚠️ Check weights"}</span>`:""}
       </div>
-
       <p id="s3-err" class="err" style="display:none"></p>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-dark btn-lg" id="s3-save">✓ Save Roast Session</button>
+        <button class="btn btn-dark btn-lg" id="s3-save" ${state.saving?"disabled":""}>${state.saving?"Saving…":"✓ Save Roast Session"}</button>
         <button class="btn btn-ghost btn-lg" id="s3-back">← Back</button>
       </div>
     </div>`;
 }
 
-// Done screen — save confirmed, offer transfer to Traceability
-function buildDone() {
-  const s          = state.roastSessions[state.roastSessions.length - 1];
-  const totalGreen = s.batches.reduce((sum,b) => sum+(Number(b.greenWeight)||0), 0);
-  const yp         = yieldPct(totalGreen, s.roastedWeight);
-  const ypClass    = yieldClass(yp);
-  const ids        = s.batches.map(b=>b.id).filter(Boolean).join(", ");
-
+function build_done() {
+  const s = state.roast_sessions[0];
+  const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
+  const yp = yield_pct(total_green, s.roasted_weight);
+  const ids = s.batches.map(b => b.cropster_id).filter(Boolean).join(", ");
   return `
     <div style="max-width:480px;margin:48px auto">
       <div class="card" style="text-align:center;padding:32px">
@@ -477,26 +338,14 @@ function buildDone() {
         <h2 style="margin-bottom:8px">Roast Session Saved</h2>
         <p style="color:#555;font-size:15px;margin-bottom:20px">
           <strong>${esc(s.coffee)}</strong> · ${s.date}<br/>
-          ${s.batches.length} batch${s.batches.length!==1?"es":""} into <strong>${esc(s.containerId)}</strong>
+          ${s.batches.length} batch${s.batches.length!==1?"es":""} into <strong>${esc(s.container_id)}</strong>
         </p>
         <div style="display:flex;justify-content:center;gap:24px;font-size:14px;margin-bottom:16px;flex-wrap:wrap">
-          ${totalGreen>0    ? `<span>🌱 ${totalGreen.toFixed(1)}kg green in</span>` : ""}
-          ${s.roastedWeight ? `<span>⚖️ ${Number(s.roastedWeight).toFixed(1)}kg roasted</span>` : ""}
-          ${yp!==null       ? `<span class="${ypClass}">${yp}% yield</span>` : ""}
+          ${total_green>0?`<span>🌱 ${total_green.toFixed(1)}kg green in</span>`:""}
+          ${s.roasted_weight?`<span>⚖️ ${Number(s.roasted_weight).toFixed(1)}kg roasted</span>`:""}
+          ${yp!==null?`<span class="${yield_class(yp)}">${yp}% yield</span>`:""}
         </div>
-        ${ids ? `<div style="background:#f5f0eb;border-radius:8px;padding:10px 14px;margin-bottom:20px;font-size:13px">
-          Roast IDs: <span class="mono">${esc(ids)}</span>
-        </div>` : ""}
-
-        <!-- Transfer CTA -->
-        <div style="background:#edf7f0;border:1px solid #4a9e6b;border-radius:8px;padding:14px 16px;margin-bottom:20px;text-align:left">
-          <div style="font-weight:700;color:#1a1008;margin-bottom:4px">↗ Send to Roastery Traceability</div>
-          <div style="font-size:13px;color:#555;margin-bottom:10px">
-            Pre-fills the container registration form in Traceability with this roast's data — coffee, date, roast IDs, and container ID.
-          </div>
-          <button class="btn btn-green" data-transfer="${esc(s.id)}" id="transfer-btn">Send to Traceability →</button>
-        </div>
-
+        ${ids?`<div style="background:#f5f0eb;border-radius:8px;padding:10px 14px;margin-bottom:20px;font-size:13px">Roast IDs: <span class="mono">${esc(ids)}</span></div>`:""}
         <div style="display:flex;gap:8px;justify-content:center">
           <button class="btn btn-dark" id="done-home">Back to Roasts</button>
           <button class="btn btn-ghost" id="done-another">+ Another Roast</button>
@@ -505,124 +354,72 @@ function buildDone() {
     </div>`;
 }
 
-// ── HISTORY ───────────────────────────────────────────────────────────────────
-function buildHistory() {
-  const sessions = [...state.roastSessions].reverse();
+function build_history() {
   return `
     <div class="flex-between mb-16">
       <h2>All Roast Sessions</h2>
       <button class="btn btn-ghost" id="history-back">← Back</button>
     </div>
-    ${sessions.length===0
+    ${state.roast_sessions.length===0
       ? `<div class="card empty"><div class="icon">🔥</div>No sessions yet.</div>`
-      : sessions.map(s => buildSessionCard(s)).join("")}`;
+      : state.roast_sessions.map(s => build_session_card(s)).join("")}`;
 }
 
-// ── LISTENERS ─────────────────────────────────────────────────────────────────
-function attachListeners() {
+function attach_listeners() {
   const app = document.getElementById("app");
-
-  // Navigation
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
-  app.querySelector("#logout-btn")?.addEventListener("click", async () => {
-    await supabaseClient.auth.signOut();
-    window.location.href = "login.html";
-  });
-  app.querySelector("#start-new")?.addEventListener("click", () => { state.session=newSession(); state.ui.step=1; state.view="new"; render(); });
+  app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
+  app.querySelector("#start-new")?.addEventListener("click", () => { state.session=new_session(); state.ui.step=1; state.view="new"; render(); });
   app.querySelector("#go-history")?.addEventListener("click", () => { state.view="history"; render(); });
   app.querySelector("#history-back")?.addEventListener("click", () => { state.view="home"; render(); });
   app.querySelector("#cancel-new")?.addEventListener("click", () => { state.view="home"; state.ui.step=1; render(); });
 
-  // ── Step 1
   app.querySelector("#s1-next")?.addEventListener("click", () => {
-    const coffee    = document.getElementById("s1-coffee")?.value;
-    const date      = document.getElementById("s1-date")?.value;
+    const coffee = document.getElementById("s1-coffee")?.value;
+    const date = document.getElementById("s1-date")?.value;
     const container = document.getElementById("s1-container")?.value.trim();
-    const size      = document.getElementById("s1-size")?.value;
-    const count     = Number(document.getElementById("s1-count")?.value)||0;
-    const errEl     = document.getElementById("s1-err");
-    if (!coffee)    { errEl.textContent="Please select a coffee."; errEl.style.display="block"; return; }
-    if (!container) { errEl.textContent="Please enter a container ID."; errEl.style.display="block"; return; }
-    if (count < 1)  { errEl.textContent="At least one batch required."; errEl.style.display="block"; return; }
-    // Build batch array, preserving any existing data if count unchanged
-    state.session.coffee        = coffee;
-    state.session.date          = date;
-    state.session.containerId   = container;
-    state.session.containerSize = size;
-    state.session.batchCount    = count;
-    state.session.batches       = Array.from({ length:count }, (_,i) => state.session.batches[i] || { id:"", greenWeight:"" });
-    state.ui.step = 2; render();
+    const size = document.getElementById("s1-size")?.value;
+    const count = Number(document.getElementById("s1-count")?.value)||0;
+    const err_el = document.getElementById("s1-err");
+    if (!coffee) { err_el.textContent="Please select a coffee."; err_el.style.display="block"; return; }
+    if (!container) { err_el.textContent="Please enter a container ID."; err_el.style.display="block"; return; }
+    if (count<1) { err_el.textContent="At least one batch required."; err_el.style.display="block"; return; }
+    state.session.coffee=coffee; state.session.date=date; state.session.container_id=container;
+    state.session.container_size=size; state.session.batch_count=count;
+    state.session.batches=Array.from({length:count},(_,i) => state.session.batches[i]||{cropster_id:"",green_weight:""});
+    state.ui.step=2; render();
   });
 
-  // ── Step 2 — live field sync
-  app.querySelectorAll(".b-id").forEach(inp => inp.addEventListener("input", e => {
-    state.session.batches[Number(inp.dataset.idx)].id = e.target.value.trim();
-  }));
-  app.querySelectorAll(".b-green").forEach(inp => inp.addEventListener("input", e => {
-    state.session.batches[Number(inp.dataset.idx)].greenWeight = e.target.value;
-    // Update running total without full re-render
-    const total = state.session.batches.reduce((s,b)=>s+(Number(b.greenWeight)||0),0);
-    const el = document.querySelector("#s2-total");
-    if (el) el.textContent = `Total green weight in: ${total.toFixed(1)}kg`;
-  }));
+  app.querySelectorAll(".b-id").forEach(inp => inp.addEventListener("input", e => { state.session.batches[Number(inp.dataset.idx)].cropster_id=e.target.value.trim(); }));
+  app.querySelectorAll(".b-green").forEach(inp => inp.addEventListener("input", e => { state.session.batches[Number(inp.dataset.idx)].green_weight=e.target.value; }));
 
   app.querySelector("#s2-next")?.addEventListener("click", () => {
-    // Read current field values before proceeding
-    app.querySelectorAll(".b-id").forEach(inp => { state.session.batches[Number(inp.dataset.idx)].id = inp.value.trim(); });
-    app.querySelectorAll(".b-green").forEach(inp => { state.session.batches[Number(inp.dataset.idx)].greenWeight = inp.value; });
-    const errEl = document.getElementById("s2-err");
-    const hasIds = state.session.batches.some(b => b.id);
-    if (!hasIds) { errEl.textContent="Please enter at least one Cropster roast ID."; errEl.style.display="block"; return; }
-    state.ui.step = 3; render();
+    app.querySelectorAll(".b-id").forEach(inp => { state.session.batches[Number(inp.dataset.idx)].cropster_id=inp.value.trim(); });
+    app.querySelectorAll(".b-green").forEach(inp => { state.session.batches[Number(inp.dataset.idx)].green_weight=inp.value; });
+    const err_el = document.getElementById("s2-err");
+    if (!state.session.batches.some(b=>b.cropster_id)) { err_el.textContent="Please enter at least one Cropster roast ID."; err_el.style.display="block"; return; }
+    state.ui.step=3; render();
   });
   app.querySelector("#s2-back")?.addEventListener("click", () => { state.ui.step=1; render(); });
 
-  // ── Step 3 — live yield calculation
   app.querySelector("#s3-roasted")?.addEventListener("input", e => {
-    state.session.roastedWeight = e.target.value;
-    const totalGreen = state.session.batches.reduce((s,b)=>s+(Number(b.greenWeight)||0),0);
-    const yp         = yieldPct(totalGreen, e.target.value);
-    const ypClass    = yieldClass(yp);
-    const el         = document.getElementById("yield-display");
-    if (el) el.innerHTML = yp!==null
-      ? `<span class="${ypClass}">Yield: ${yp}% ${yp>=80&&yp<=90?"✓":yp>=75?"⚠️":"⚠️ Check weights"}</span>`
-      : "";
+    state.session.roasted_weight=e.target.value;
+    const total_green=state.session.batches.reduce((s,b)=>s+(Number(b.green_weight)||0),0);
+    const yp=yield_pct(total_green,e.target.value);
+    const el=document.getElementById("yield-display");
+    if (el) el.innerHTML=yp!==null?`<span class="${yield_class(yp)}">Yield: ${yp}% ${yp>=80&&yp<=90?"✓":"⚠️ Check weights"}</span>`:"";
   });
 
   app.querySelector("#s3-save")?.addEventListener("click", () => {
-    state.session.roastedWeight = document.getElementById("s3-roasted")?.value || state.session.roastedWeight;
-    const errEl = document.getElementById("s3-err");
-    if (!state.session.roastedWeight) { errEl.textContent="Please enter the roasted weight."; errEl.style.display="block"; return; }
-    // Save session
-    state.roastSessions.push({
-      id:            genId(),
-      coffee:        state.session.coffee,
-      date:          state.session.date,
-      containerId:   state.session.containerId,
-      containerSize: state.session.containerSize,
-      batches:       state.session.batches.map(b=>({...b})),
-      roastedWeight: state.session.roastedWeight,
-      savedAt:       new Date().toISOString(),
-    });
-    state.ui.step = 4; render();
+    state.session.roasted_weight=document.getElementById("s3-roasted")?.value||state.session.roasted_weight;
+    const err_el=document.getElementById("s3-err");
+    if (!state.session.roasted_weight) { err_el.textContent="Please enter the roasted weight."; err_el.style.display="block"; return; }
+    save_session();
   });
   app.querySelector("#s3-back")?.addEventListener("click", () => { state.ui.step=2; render(); });
-
-  // ── Done screen
-  app.querySelector("#done-home")?.addEventListener("click",    () => { state.view="home"; state.ui.step=1; render(); });
-  app.querySelector("#done-another")?.addEventListener("click", () => { state.session=newSession(); state.ui.step=1; render(); });
-
-  // ── Transfer to Traceability — works on history cards and done screen
-  app.querySelectorAll("[data-transfer]").forEach(btn => btn.addEventListener("click", () => {
-    const s = state.roastSessions.find(r=>r.id===btn.dataset.transfer);
-    if (!s) return;
-    transferToTraceability(s);
-    btn.textContent="✓ Sent!"; btn.disabled=true;
-  }));
+  app.querySelector("#done-home")?.addEventListener("click", () => { state.view="home"; state.ui.step=1; render(); });
+  app.querySelector("#done-another")?.addEventListener("click", () => { state.session=new_session(); state.ui.step=1; state.view="new"; render(); });
 }
-
-// ── INIT ──────────────────────────────────────────────────────────────────────
-render();
 </script>
 </body>
 </html>
