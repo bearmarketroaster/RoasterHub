@@ -100,10 +100,10 @@
 //   - Low stock warnings per coffee
 // ─────────────────────────────────────────────────────────────────────────────
 
-const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
-supabase.auth.getSession().then(({ data: { session } }) => {
+supabaseClient.auth.getSession().then(({ data: { session } }) => {
   if (!session) window.location.href = "login.html";
   else init();
 });
@@ -145,7 +145,7 @@ function new_delivery() {
 // ── SUPABASE ──────────────────────────────────────────────────────────────────
 async function load_data() {
   // Load coffees from settings
-  const { data: settings } = await supabase
+  const { data: settings } = await supabaseClient
     .from("settings")
     .select("coffees")
     .eq("id", 1)
@@ -153,14 +153,14 @@ async function load_data() {
   state.coffees = settings?.coffees || [];
 
   // Load stock items
-  const { data: stock_items } = await supabase
+  const { data: stock_items } = await supabaseClient
     .from("stock_items")
     .select("*")
     .order("coffee");
   state.stock_items = stock_items || [];
 
   // Load deliveries with their items
-  const { data: deliveries } = await supabase
+  const { data: deliveries } = await supabaseClient
     .from("stock_deliveries")
     .select("*, stock_delivery_items(*)")
     .order("date", { ascending: false });
@@ -170,7 +170,7 @@ async function load_data() {
   }));
 
   // Load adjustments
-  const { data: adjustments } = await supabase
+  const { data: adjustments } = await supabaseClient
     .from("stock_adjustments")
     .select("*")
     .order("date", { ascending: false });
@@ -188,7 +188,7 @@ async function save_delivery() {
 
   const delivery_id = gen_id("DEL", state.deliveries);
 
-  const { error: del_err } = await supabase
+  const { error: del_err } = await supabaseClient
     .from("stock_deliveries")
     .insert({
       id:          delivery_id,
@@ -211,19 +211,19 @@ async function save_delivery() {
     price_per_kg: Number(item.price_per_kg) || null,
   }));
 
-  await supabase.from("stock_delivery_items").insert(items_to_insert);
+  await supabaseClient.from("stock_delivery_items").insert(items_to_insert);
 
   // Update stock levels and log adjustments for each item
   for (const item of valid_items) {
     // Upsert stock item
     const existing = state.stock_items.find(s => s.coffee === item.coffee);
     if (existing) {
-      await supabase
+      await supabaseClient
         .from("stock_items")
         .update({ current_kg: existing.current_kg + Number(item.weight_kg), origin: item.origin || existing.origin })
         .eq("id", existing.id);
     } else {
-      await supabase.from("stock_items").insert({
+      await supabaseClient.from("stock_items").insert({
         id:                  gen_id("STK", state.stock_items),
         coffee:              item.coffee,
         origin:              item.origin || null,
@@ -233,7 +233,7 @@ async function save_delivery() {
     }
 
     // Log adjustment
-    await supabase.from("stock_adjustments").insert({
+    await supabaseClient.from("stock_adjustments").insert({
       id:        gen_id("ADJ", state.adjustments),
       date:      d.date,
       coffee:    item.coffee,
@@ -263,7 +263,7 @@ async function save_adjustment() {
   if (!coffee)    { state.ui.adj_err = "Please select a coffee."; state.saving = false; render(); return; }
   if (!change_kg) { state.ui.adj_err = "Please enter a non-zero kg value."; state.saving = false; render(); return; }
 
-  const { error } = await supabase.from("stock_adjustments").insert({
+  const { error } = await supabaseClient.from("stock_adjustments").insert({
     id:        gen_id("ADJ", state.adjustments),
     date:      today(),
     coffee,
@@ -278,12 +278,12 @@ async function save_adjustment() {
   // Update stock item
   const existing = state.stock_items.find(s => s.coffee === coffee);
   if (existing) {
-    await supabase
+    await supabaseClient
       .from("stock_items")
       .update({ current_kg: Math.max(0, existing.current_kg + change_kg) })
       .eq("id", existing.id);
   } else {
-    await supabase.from("stock_items").insert({
+    await supabaseClient.from("stock_items").insert({
       id:                  gen_id("STK", state.stock_items),
       coffee,
       current_kg:          Math.max(0, change_kg),
@@ -302,7 +302,7 @@ async function save_adjustment() {
 async function set_threshold(coffee, value) {
   const item = state.stock_items.find(s => s.coffee === coffee);
   if (!item) return;
-  await supabase
+  await supabaseClient
     .from("stock_items")
     .update({ low_stock_threshold: value })
     .eq("id", item.id);
