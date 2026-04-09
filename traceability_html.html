@@ -1,0 +1,1626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roastery Trace</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    input, select, button { font-family: inherit; font-size: 14px; }
+    button { cursor: pointer; }
+
+    #app { min-height: 100vh; }
+    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header span.logo { font-size: 22px; }
+    .header span.title { font-weight: 700; font-size: 18px; letter-spacing: 1px; }
+    .tabs { display: flex; border-bottom: 2px solid #c8a96e; background: #fff; overflow-x: auto; }
+    .tab-btn { padding: 12px 20px; border: none; background: #fff; color: #555; font-weight: 400; font-size: 14px; white-space: nowrap; transition: background 0.15s; cursor: pointer; }
+    .tab-btn.active { background: #1a1008; color: #e8d5b0; font-weight: 700; }
+    .content { padding: 24px; max-width: 900px; margin: 0 auto; }
+
+    .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .card + .card { margin-top: 12px; }
+    input[type=text], input[type=number], input[type=date], input[type=email], select {
+      width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px;
+    }
+    input:focus, select:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; }
+    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
+    .field { margin-bottom: 0; }
+
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
+    .btn-dark    { background: #1a1008; }
+    .btn-green   { background: #4a9e6b; }
+    .btn-dkgreen { background: #4a7c4e; }
+    .btn-amber   { background: #c8a96e; }
+    .btn-grey    { background: #888; }
+    .btn-muted   { background: #aaa; }
+    .btn-ghost   { background: #e8d5b0; color: #5a3e1b; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-lg { padding: 12px 24px; font-size: 15px; }
+    .btn-full { width: 100%; padding: 12px; border-radius: 10px; }
+
+    .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+    .span-2 { grid-column: 1 / -1; }
+    .flex         { display: flex; }
+    .flex-between { display: flex; justify-content: space-between; align-items: center; }
+    .flex-wrap    { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .gap-6  { gap: 6px; }
+    .gap-8  { gap: 8px; }
+    .gap-10 { gap: 10px; }
+    .gap-12 { gap: 12px; }
+    .mt-4  { margin-top: 4px; }
+    .mt-8  { margin-top: 8px; }
+    .mt-10 { margin-top: 10px; }
+    .mt-12 { margin-top: 12px; }
+    .mt-16 { margin-top: 16px; }
+    .mb-8  { margin-bottom: 8px; }
+    .mb-12 { margin-bottom: 12px; }
+    .mb-16 { margin-bottom: 16px; }
+
+    .stock-track { background: #e0d5c5; border-radius: 4px; height: 8px; }
+    .stock-fill  { border-radius: 4px; height: 8px; transition: width 0.3s; }
+
+    h2 { color: #1a1008; margin-bottom: 16px; }
+    h3 { color: #1a1008; margin-bottom: 12px; }
+
+    .empty { text-align: center; color: #aaa; padding: 40px 20px; }
+    .empty .icon { font-size: 36px; margin-bottom: 8px; }
+
+    .report-bar-track { background: #f0ebe4; border-radius: 3px; height: 6px; width: 80px; }
+    .report-bar-fill  { border-radius: 3px; height: 6px; }
+
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 24px; z-index: 100; }
+    .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 440px; box-shadow: 0 4px 24px rgba(0,0,0,0.15); margin: auto; }
+
+    .collapsible-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+    .collapsible-arrow  { font-size: 16px; color: #c8a96e; font-weight: 700; }
+
+    .chart-wrap { display: flex; align-items: flex-end; gap: 4px; height: 100px; overflow-x: auto; padding-bottom: 4px; }
+    .chart-col  { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 44px; flex: 1; }
+    .chart-bar  { background: #1a1008; border-radius: 3px 3px 0 0; width: 100%; transition: height 0.3s; }
+    .chart-val  { font-size: 10px; color: #888; }
+    .chart-lbl  { font-size: 9px; color: #aaa; white-space: nowrap; }
+
+    .mono { font-family: monospace; }
+    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
+    .err  { color: #e05c2a; font-size: 13px; margin-top: 8px; }
+    .hint { color: #888; font-size: 13px; }
+    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
+
+    details summary { font-size: 12px; color: #aaa; cursor: pointer; list-style: none; }
+    details summary::-webkit-details-marker { display: none; }
+
+    @media (max-width: 600px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .grid-4 { grid-template-columns: 1fr 1fr; }
+      .content { padding: 16px; }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// ROASTERY TRACE — vanilla JS single-page app
+// No framework, no build step.
+//
+// Note: the QR shop-confirm flow is intentionally public —
+// shops do not need to log in to confirm a delivery.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+// ── AUTH ──────────────────────────────────────────────────────────────────────
+supabase.auth.getSession().then(({ data: { session } }) => {
+  const is_shop_scan = window.location.search.includes("scan=");
+  if (!session && !is_shop_scan) window.location.href = "login.html";
+  else init();
+});
+
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
+const TABS         = ["Containers", "Orders", "Deliveries", "Recall", "Reports"];
+const RETAIL_SIZES = [{ val:"0.2", label:"200g" }, { val:"0.5", label:"500g" }, { val:"1", label:"1kg" }];
+const CONTAINER_SIZES = { XL:80, L:40, M:20, S:10 };
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+const state = {
+  tab:          0,
+  containers:   [],   // includes fills array
+  orders:       [],   // includes items array
+  dispatches:   [],   // includes lines array
+  coffees:      [],
+  coffee_mappings: [],
+  base_url:     "",
+  loading:      true,
+  saving:       false,
+  scan_id:      null,
+  editing_order: null,
+  review_queue:  [],
+  ui: {
+    show_container_form:  false,
+    container_err:        "",
+    refill_id:            null,
+    expanded_qr:          null,
+    show_upload:          false,
+    upload_err:           "",
+    parsing:              false,
+    expanded_orders:      {},
+    expanded_deliveries:  {},
+    recall_query:         "",
+    recall_results:       null,
+    report_from:          today(),
+    report_to:            today(),
+    report_view:          "shops",
+    review_items_open:    false,
+  },
+};
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function today() { return new Date().toISOString().split("T")[0]; }
+function active_fill(c) { return c.fills[c.fills.length - 1]; }
+function calc_kg(bags, bag_size) { return (Number(bags) || 0) * Number(bag_size); }
+function to_upper(s) { return (s || "").trim().toUpperCase(); }
+function gen_id(prefix, list) { return `${prefix}-${today().replace(/-/g,"")}-${String(list.length + 1).padStart(3,"0")}`; }
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+const PALETTE = ["#1a1008","#c8a96e","#4a9e6b","#e05c2a","#4a7c4e","#e0a82a","#888","#5a3e1b"];
+function color_for(i) { return PALETTE[i % PALETTE.length]; }
+
+function get_coffee_map(coffee_name) {
+  const map      = (state.coffee_mappings || []).find(m => m.app_name?.trim().toLowerCase() === coffee_name.trim().toLowerCase());
+  const fp_sizes = map?.fp_sizes || [];
+  const fp_codes = fp_sizes.map(s => to_upper(s.code)).filter(Boolean);
+  const keywords = coffee_name.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  return { fp_sizes, fp_codes, keywords };
+}
+function order_matches_coffee(order, fp_codes, keywords) {
+  return order.items.some(item =>
+    fp_codes.length > 0 ? fp_codes.includes(to_upper(item.code)) : keywords.some(kw => item.description.toLowerCase().includes(kw))
+  );
+}
+function get_matched_items(order, fp_codes, keywords) {
+  return order.items.filter(item =>
+    fp_codes.length > 0 ? fp_codes.includes(to_upper(item.code)) : keywords.some(kw => item.description.toLowerCase().includes(kw))
+  );
+}
+function resolve_quantities(matched_items, fp_sizes) {
+  let bulk = 0;
+  const retail = RETAIL_SIZES.map(s => ({ bag_size: s.val, bags: "0" }));
+  matched_items.forEach(item => {
+    const qty  = Number(item.quantity) || 0;
+    const desc = item.description.toLowerCase();
+    const fp   = fp_sizes.find(s => to_upper(s.code) === to_upper(item.code));
+    if (fp) {
+      if (fp.size === "bulk") bulk += qty;
+      else { const i = retail.findIndex(r => r.bag_size === fp.size); if (i >= 0) retail[i].bags = String(Number(retail[i].bags) + qty); }
+      return;
+    }
+    if (item.unit?.toUpperCase() === "KGS" || desc.includes("bar")) { bulk += qty; return; }
+    const sv = desc.includes("200g") ? "0.2" : desc.includes("500g") || desc.includes("500gr") ? "0.5" : desc.includes("1kg") ? "1" : null;
+    if (sv) { const i = retail.findIndex(r => r.bag_size === sv); if (i >= 0) retail[i].bags = String(Number(retail[i].bags) + qty); }
+  });
+  return { bulk, retail };
+}
+
+// ── PDF PARSING ───────────────────────────────────────────────────────────────
+async function load_pdf_js() {
+  if (window.pdfjsLib) return window.pdfjsLib;
+  await new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload = res;
+    s.onerror = () => rej(new Error("Could not load PDF reader. Check your internet connection."));
+    document.head.appendChild(s);
+  });
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  return window.pdfjsLib;
+}
+
+async function extract_pdf_text(file) {
+  const lib = await load_pdf_js();
+  const buf = await file.arrayBuffer();
+  const pdf = await lib.getDocument({ data: buf }).promise;
+  let full  = "";
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page  = await pdf.getPage(p);
+    const tc    = await page.getTextContent();
+    const items = tc.items.slice().sort((a, b) => {
+      const dy = Math.round(b.transform[5]) - Math.round(a.transform[5]);
+      return dy !== 0 ? dy : a.transform[4] - b.transform[4];
+    });
+    full += items.map(i => i.str).join("\n") + "\n";
+  }
+  return full;
+}
+
+function parse_bc_purchase_order(raw) {
+  const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+  let company = "", location = "", po_number = "", order_date = "", order_total = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^PO\d{6,}$/i.test(l) && !po_number)         po_number  = l;
+    if (/^Document Date$/i.test(l) && lines[i + 1])   order_date = lines[i + 1].trim();
+    if (/^Purchaser$/i.test(l)     && lines[i + 1])   location   = lines[i + 1].trim();
+    const tot = l.match(/^Total\s+EUR\s+([\d,]+\.?\d*)$/i);
+    if (tot) order_total = parseFloat(tot[1].replace(/,/g, "")) || 0;
+    if (/^Bearmarket$/i.test(l) && !company) company = l;
+    if (/^Home Page/i.test(l) && lines[i - 1] && !company) company = lines[i - 1].trim();
+  }
+  const FP_RE = /^FP\d{4}$/i, NUM_RE = /^\d+(\.\d+)?$/, UNIT_RE = /^(EACH|KGS)$/i, SKIP_RE = /^(Yes|No|ROW|ROI|EU)$/i;
+  const items = []; let i = 0;
+  while (i < lines.length) {
+    if (FP_RE.test(lines[i])) {
+      const code = lines[i].toUpperCase(); i++;
+      const dp = [];
+      while (i < lines.length && !NUM_RE.test(lines[i])) {
+        if (!SKIP_RE.test(lines[i]) && !UNIT_RE.test(lines[i])) dp.push(lines[i]);
+        i++;
+      }
+      const description = dp.join(" ").trim();
+      const quantity    = parseFloat(lines[i] || "0") || 0; i++;
+      const unit        = UNIT_RE.test(lines[i] || "") ? lines[i].toUpperCase() : "EACH";
+      if (UNIT_RE.test(lines[i] || "")) i++;
+      const unit_cost = parseFloat((lines[i] || "0").replace(/,/g, "")) || 0; i++;
+      while (i < lines.length && SKIP_RE.test(lines[i])) i++;
+      const amount = parseFloat((lines[i] || "0").replace(/,/g, "")) || 0;
+      if (NUM_RE.test(lines[i] || "")) i++;
+      if (description && quantity > 0) items.push({ code, description, quantity, unit, unit_cost, total: amount });
+    } else { i++; }
+  }
+  if (!items.length) throw new Error("No line items found — PDF layout may have changed.");
+  return { company, location, po_number, order_date, order_total, items };
+}
+
+// ── QR CODE ───────────────────────────────────────────────────────────────────
+async function render_qr(el, value, size = 140) {
+  if (!window.QRCode) {
+    await new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+  el.innerHTML = "";
+  new window.QRCode(el, { text: value, width: size, height: size, colorDark: "#1a1008", colorLight: "#fff", correctLevel: window.QRCode.CorrectLevel.M });
+}
+
+// ── SUPABASE ──────────────────────────────────────────────────────────────────
+async function load_data() {
+  // Settings
+  const { data: settings } = await supabase
+    .from("settings")
+    .select("coffees, coffee_mappings, base_url")
+    .eq("id", 1)
+    .single();
+  state.coffees         = settings?.coffees         || [];
+  state.coffee_mappings = settings?.coffee_mappings || [];
+  state.base_url        = settings?.base_url        || "";
+
+  // Containers with fills
+  const { data: containers } = await supabase
+    .from("containers")
+    .select("*, container_fills(*)")
+    .order("id");
+  state.containers = (containers || []).map(c => ({
+    ...c,
+    fills: (c.container_fills || []).sort((a, b) => a.fill_number - b.fill_number),
+  }));
+
+  // Orders with items
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .order("created_at", { ascending: false });
+  state.orders = (orders || []).map(o => ({ ...o, items: o.order_items || [] }));
+
+  // Dispatches with lines
+  const { data: dispatches } = await supabase
+    .from("dispatches")
+    .select("*, dispatch_lines(*)")
+    .order("date", { ascending: false });
+  state.dispatches = (dispatches || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
+}
+
+async function save_container(id, size, cap, coffee, date, roast_ids_raw) {
+  state.saving = true; render();
+  const { error: c_err } = await supabase.from("containers").insert({ id, size, capacity: Number(cap) });
+  if (c_err) { state.ui.container_err = c_err.code === "23505" ? "Container ID already exists." : "Failed to save container."; state.saving = false; render(); return; }
+  await supabase.from("container_fills").insert({
+    id:           `${id}-F1`,
+    container_id: id,
+    fill_number:  1,
+    coffee,
+    roast_ids:    roast_ids_raw.split(",").map(r => r.trim()).filter(Boolean),
+    date,
+    remaining:    Number(cap),
+  });
+  state.ui.show_container_form = false; state.ui.container_err = "";
+  state.saving = false;
+  await load_data(); render();
+}
+
+async function save_refill(container_id, coffee, date, roast_ids_raw) {
+  state.saving = true; render();
+  const container  = state.containers.find(c => c.id === container_id);
+  const fill_number = container.fills.length + 1;
+  await supabase.from("container_fills").insert({
+    id:           `${container_id}-F${fill_number}`,
+    container_id,
+    fill_number,
+    coffee,
+    roast_ids:    roast_ids_raw.split(",").map(r => r.trim()).filter(Boolean),
+    date,
+    remaining:    container.capacity,
+  });
+  state.ui.refill_id = null;
+  state.saving = false;
+  await load_data(); render();
+}
+
+async function save_order(order) {
+  state.saving = true; render();
+  const order_id = gen_id("ORD", state.orders);
+  const { error } = await supabase.from("orders").insert({
+    id:          order_id,
+    shop_name:   order.shop_name,
+    po_number:   order.po_number   || null,
+    order_date:  order.order_date  || null,
+    order_total: order.order_total || 0,
+    status:      "pending",
+  });
+  if (error) { state.saving = false; return; }
+  const items = order.items.map((item, i) => ({
+    id:          `${order_id}-I${i + 1}`,
+    order_id,
+    code:        item.code        || null,
+    description: item.description,
+    quantity:    item.quantity,
+    unit:        item.unit        || "EACH",
+    unit_cost:   item.unit_cost   || 0,
+    total:       item.total       || 0,
+  }));
+  await supabase.from("order_items").insert(items);
+  state.saving = false;
+  await load_data(); render();
+}
+
+async function update_order(order_id, shop_name, po_number, items) {
+  state.saving = true; render();
+  await supabase.from("orders").update({ shop_name, po_number }).eq("id", order_id);
+  await supabase.from("order_items").delete().eq("order_id", order_id);
+  const new_items = items.map((item, i) => ({
+    id:          `${order_id}-I${i + 1}-${Date.now()}`,
+    order_id,
+    code:        item.code        || null,
+    description: item.description,
+    quantity:    item.quantity,
+    unit:        item.unit        || "EACH",
+    unit_cost:   item.unit_cost   || 0,
+    total:       item.total       || 0,
+  }));
+  await supabase.from("order_items").insert(new_items);
+  state.editing_order = null;
+  state.saving = false;
+  await load_data(); render();
+}
+
+async function update_order_status(order_id, status) {
+  await supabase.from("orders").update({ status }).eq("id", order_id);
+  await load_data(); render();
+}
+
+async function save_dispatch(container_id, fill_number, shop, lines, total_kg, order_id) {
+  state.saving = true; render();
+  const dispatch_id = gen_id("DSP", state.dispatches);
+  await supabase.from("dispatches").insert({
+    id: dispatch_id, container_id, fill_number, date: today(),
+    shop, total_kg, confirmed_at: null, order_id: order_id || null,
+  });
+  await supabase.from("dispatch_lines").insert(
+    lines.map((l, i) => ({ id: `${dispatch_id}-L${i + 1}`, dispatch_id, type: l.type, kg: l.kg, bags: l.bags || null, bag_size: l.bag_size || null }))
+  );
+  // Deduct remaining from container fill
+  const container = state.containers.find(c => c.id === container_id);
+  const fill      = container?.fills.find(f => f.fill_number === fill_number);
+  if (fill) {
+    await supabase.from("container_fills")
+      .update({ remaining: Math.max(0, fill.remaining - total_kg) })
+      .eq("id", fill.id);
+  }
+  state.saving = false;
+  await load_data(); render();
+}
+
+async function confirm_delivery(dispatch_id) {
+  await supabase.from("dispatches").update({ confirmed_at: new Date().toISOString() }).eq("id", dispatch_id);
+  await load_data(); render();
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+async function init() {
+  // Check for QR scan param e.g. ?scan=XL01042601
+  const params  = new URLSearchParams(window.location.search);
+  const scan_id = params.get("scan");
+  if (scan_id) { state.scan_id = scan_id; }
+
+  await load_data();
+  state.loading = false;
+  render();
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function render() {
+  document.getElementById("app").innerHTML = build_app();
+  attach_listeners();
+  document.querySelectorAll("[data-qr]").forEach(el => render_qr(el, el.dataset.qr, 140));
+}
+
+// ── BUILD APP ─────────────────────────────────────────────────────────────────
+function build_app() {
+  if (state.scan_id) return build_scan_overlay();
+
+  const header = `
+    <div class="header" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="logo">☕</span>
+        <span class="title">Roastery Trace</span>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>`;
+
+  if (state.loading) return header + `<div class="loading">Loading…</div>`;
+
+  const badges = {
+    Orders:     state.orders.filter(o => o.status === "pending").length,
+    Deliveries: state.dispatches.filter(d => !d.confirmed_at).length,
+  };
+
+  return header + `
+    <div class="tabs">
+      ${TABS.map((t, i) => `
+        <button class="tab-btn${state.tab === i ? " active" : ""}" data-tab="${i}">
+          ${esc(t)}
+          ${badges[t] > 0 ? `<span class="tag" style="background:#e05c2a;color:#fff;margin-left:6px">${badges[t]}</span>` : ""}
+        </button>`).join("")}
+    </div>
+    <div class="content">
+      ${[build_containers_tab, build_orders_tab, build_deliveries_tab, build_recall_tab, build_reports_tab][state.tab]()}
+    </div>`;
+}
+
+// ── SCAN OVERLAY ──────────────────────────────────────────────────────────────
+function build_scan_overlay() {
+  const cid       = state.scan_id;
+  const container = state.containers.find(c => c.id === cid);
+
+  if (state.loading) return `<div class="loading">Loading…</div>`;
+  if (!container)    return `<div class="overlay"><div class="modal" style="text-align:center">
+    <div style="font-size:40px;margin-bottom:12px">⚠️</div>
+    <h2 style="margin-bottom:8px">Container Not Found</h2>
+    <p class="hint">No container found with ID <strong>${esc(cid)}</strong>.</p>
+    <button class="btn btn-dark mt-16" id="close-scan">Go Back</button>
+  </div></div>`;
+
+  const fill    = active_fill(container);
+  const pending = state.dispatches.find(d => d.container_id === cid && !d.confirmed_at);
+  if (pending) return build_shop_confirm_page(container, fill, pending);
+  return build_packing_page(container, fill);
+}
+
+// ── CONTAINERS TAB ────────────────────────────────────────────────────────────
+function build_containers_tab() {
+  const { show_container_form, container_err, refill_id, expanded_qr } = state.ui;
+  const base_url = state.base_url || "https://your-domain-here/scan";
+
+  const form_html = show_container_form ? `
+    <div class="card mb-16">
+      <h3>Register Container</h3>
+      <div class="grid-2">
+        <div class="field"><label class="lbl">Container ID *</label><input id="c-id" placeholder="e.g. XL01042601" /></div>
+        <div class="field"><label class="lbl">Size</label>
+          <select id="c-size">
+            ${Object.entries(CONTAINER_SIZES).map(([s, kg]) => `<option value="${s}">${s} (${kg}kg)</option>`).join("")}
+          </select>
+        </div>
+        <div class="field"><label class="lbl">Capacity (kg)</label><input id="c-cap" type="number" value="80" /></div>
+        <div class="field"><label class="lbl">Coffee Name *</label>${build_coffee_select("c-coffee", "")}</div>
+        <div class="field"><label class="lbl">Roast Date</label><input id="c-date" type="date" value="${today()}" /></div>
+        <div class="field span-2"><label class="lbl">Cropster Roast IDs * (comma separated)</label><input id="c-roasts" placeholder="42,43,44,45" /></div>
+      </div>
+      ${container_err ? `<p class="err">${esc(container_err)}</p>` : ""}
+      <div class="flex gap-8 mt-12">
+        <button class="btn btn-dark" id="save-container" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save Container"}</button>
+        <button class="btn btn-grey" id="cancel-container">Cancel</button>
+      </div>
+    </div>` : "";
+
+  const refill_html = refill_id ? build_refill_form(state.containers.find(c => c.id === refill_id)) : "";
+
+  const containers_html = state.containers.length === 0 && !show_container_form
+    ? `<div class="card empty"><div class="icon">📦</div>No containers yet.</div>`
+    : state.containers.map(c => {
+        const fill        = active_fill(c);
+        const in_transit  = state.dispatches.find(d => d.container_id === c.id && d.fill_number === fill.fill_number && !d.confirmed_at);
+        const border_color = in_transit ? "#e0a82a" : fill.remaining < c.capacity * 0.25 ? "#e05c2a" : "#4a9e6b";
+        const qr_open     = expanded_qr === c.id;
+        const pct         = Math.round((fill.remaining / c.capacity) * 100);
+        const bar_color   = fill.remaining < c.capacity * 0.25 ? "#e05c2a" : "#4a9e6b";
+        const qr_url      = `${base_url}?scan=${c.id}`;
+
+        const qr_panel = qr_open ? `
+          <div style="margin:14px 0;padding:16px;background:#f5f0eb;border-radius:10px;display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+            <div style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.1)">
+              <div data-qr="${esc(qr_url)}" style="width:140px;height:140px"></div>
+            </div>
+            <div style="flex:1;min-width:180px">
+              <div style="font-weight:700;color:#1a1008;margin-bottom:6px">Container QR Code</div>
+              <div style="font-size:13px;color:#555;margin-bottom:8px">Print once and stick permanently on the container.</div>
+              <div class="mono" style="font-size:11px;color:#aaa;word-break:break-all;margin-bottom:10px">${esc(qr_url)}</div>
+              <button class="btn btn-dark btn-sm" onclick="window.print()">🖨️ Print QR</button>
+            </div>
+          </div>` : "";
+
+        const fill_history = c.fills.length > 1 ? `
+          <details style="margin-top:10px">
+            <summary>Fill history (${c.fills.length} fills)</summary>
+            <div style="margin-top:8px;display:grid;gap:6px">
+              ${[...c.fills].reverse().slice(1).map(f => `
+                <div style="background:#f5f0eb;border-radius:6px;padding:8px 10px;font-size:12px;color:#666">
+                  <strong>Fill #${f.fill_number}</strong> — ${esc(f.coffee)} — ${f.date} — <span class="mono">${esc((f.roast_ids || []).join(", "))}</span>
+                </div>`).join("")}
+            </div>
+          </details>` : "";
+
+        return `
+          <div class="card" style="border-left:4px solid ${border_color};margin-bottom:12px">
+            <div class="flex-between flex-wrap">
+              <div class="flex-wrap gap-6">
+                <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>
+                <span class="tag" style="background:#e8d5b0;color:#5a3e1b;border-radius:4px">${c.size}</span>
+                <span class="tag" style="background:#f0ebe4;color:#888;border-radius:4px">Fill #${fill.fill_number}</span>
+                ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#e0a82a;border-radius:4px">⏳ In Transit</span>` : ""}
+              </div>
+              <div class="flex-wrap gap-6">
+                <button class="btn btn-amber btn-sm" data-toggle-qr="${esc(c.id)}">${qr_open ? "Hide QR" : "▦ QR"}</button>
+                ${fill.remaining === 0 ? `<button class="btn btn-dkgreen btn-sm" data-refill="${esc(c.id)}">🔄 Refill</button>` : ""}
+                <button class="btn btn-sm ${in_transit ? "btn-green" : "btn-dark"}" data-scan="${esc(c.id)}">${in_transit ? "📱 Shop Scan" : "📱 Pack Scan"}</button>
+              </div>
+            </div>
+            ${qr_panel}
+            <div style="margin-top:10px;font-weight:500">${esc(fill.coffee)}</div>
+            <div style="margin-top:4px;font-size:13px;color:#555">
+              Roast IDs: <span class="mono" style="background:#f0ebe4;padding:1px 6px;border-radius:3px">${esc((fill.roast_ids || []).join(", "))}</span>
+            </div>
+            <div style="font-size:13px;color:#888;margin-top:2px">Filled: ${fill.date}</div>
+            ${in_transit ? `<div style="margin-top:8px;background:#fff8ee;border-radius:6px;padding:8px 12px;font-size:13px">📦 Packed for <strong>${esc(in_transit.shop)}</strong> — ${in_transit.total_kg}kg on ${in_transit.date}</div>` : ""}
+            <div style="margin-top:10px">
+              <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+                <span>Remaining: <strong>${fill.remaining}kg</strong> of ${c.capacity}kg</span>
+                <span style="color:${bar_color}">${pct}%</span>
+              </div>
+              <div class="stock-track"><div class="stock-fill" style="background:${bar_color};width:${pct}%"></div></div>
+            </div>
+            ${fill_history}
+          </div>`;
+      }).join("");
+
+  return `
+    <div class="flex-between mb-16">
+      <h2 style="margin:0">Storage Containers</h2>
+      <button class="btn btn-dark" id="toggle-container-form">+ New Container</button>
+    </div>
+    ${form_html}
+    ${refill_html}
+    ${containers_html}`;
+}
+
+function build_refill_form(container) {
+  if (!container) return "";
+  const cur = active_fill(container);
+  return `
+    <div class="card mb-16" style="border-left:4px solid #4a7c4e">
+      <h3>🔄 Refill — ${esc(container.id)}</h3>
+      <p class="hint" style="margin-bottom:14px">Registering Fill #${cur.fill_number + 1}. Previous fill history is preserved.</p>
+      <div class="grid-2">
+        <div><label class="lbl">Coffee Name *</label>${build_coffee_select("rf-coffee", cur.coffee)}</div>
+        <div><label class="lbl">Roast Date</label><input id="rf-date" type="date" value="${today()}" /></div>
+        <div class="span-2"><label class="lbl">Cropster Roast IDs * (comma separated)</label><input id="rf-roasts" placeholder="61,62,63,64" /></div>
+      </div>
+      <p id="rf-err" class="err" style="display:none"></p>
+      <div class="flex gap-8 mt-12">
+        <button class="btn btn-dkgreen" id="confirm-refill" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Confirm Refill"}</button>
+        <button class="btn btn-grey" id="cancel-refill">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function build_coffee_select(id, value) {
+  if (state.coffees.length > 0) {
+    return `<select id="${id}">
+      <option value="">— Select coffee —</option>
+      ${state.coffees.map(c => `<option value="${esc(c)}" ${c === value ? "selected" : ""}>${esc(c)}</option>`).join("")}
+    </select>`;
+  }
+  return `<input id="${id}" value="${esc(value)}" placeholder="e.g. Ethiopia Yirgacheffe" />`;
+}
+
+// ── ORDERS TAB ────────────────────────────────────────────────────────────────
+function build_orders_tab() {
+  if (state.editing_order)       return build_order_editor(state.editing_order);
+  if (state.review_queue.length) return build_order_review(state.review_queue[0]);
+
+  const { show_upload, upload_err, parsing } = state.ui;
+
+  const upload_panel = show_upload ? `
+    <div class="card mb-16" style="text-align:center;padding:32px">
+      <div style="font-size:36px;margin-bottom:12px">📄</div>
+      <p class="hint" style="margin-bottom:16px">Upload one or more Purchase Order PDFs</p>
+      <input id="po-file" type="file" accept=".pdf" multiple style="display:none" />
+      <div class="flex gap-10" style="justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-dark" id="choose-pdf" ${parsing ? "disabled" : ""}>${parsing ? "⏳ Reading..." : "📂 Choose PDF(s)"}</button>
+        <button class="btn btn-grey" id="cancel-upload">Cancel</button>
+      </div>
+      ${upload_err ? `<p class="err" style="margin-top:12px">${esc(upload_err)}</p>` : ""}
+    </div>` : "";
+
+  const by_status   = s => state.orders.filter(o => o.status === s);
+  const pending     = by_status("pending");
+  const confirmed   = by_status("confirmed");
+  const packed      = by_status("packed");
+
+  return `
+    <div class="flex-between mb-16">
+      <h2 style="margin:0">Orders</h2>
+      <div class="flex gap-8">
+        <button class="btn btn-grey" style="font-size:13px" id="show-manual-order">+ Manual</button>
+        <button class="btn btn-dark" id="toggle-upload">+ Upload PO</button>
+      </div>
+    </div>
+    ${upload_panel}
+    ${state.orders.length === 0 && !show_upload ? `<div class="card empty"><div class="icon">📋</div>No orders yet. Upload a PO to get started.</div>` : ""}
+    ${pending.length   > 0 ? `<h3 style="color:#e05c2a;margin-top:0">⏳ Awaiting Review (${pending.length})</h3>${pending.map(o => build_order_card(o)).join("")}` : ""}
+    ${confirmed.length > 0 ? `<h3 style="color:#c8a96e;margin-top:${pending.length ? 24 : 0}px">✅ Ready to Pack (${confirmed.length})</h3>${confirmed.map(o => build_order_card(o)).join("")}` : ""}
+    ${packed.length    > 0 ? `<h3 style="color:#4a9e6b;margin-top:${confirmed.length || pending.length ? 24 : 0}px">📦 Packed (${packed.length})</h3>${packed.map(o => build_order_card(o)).join("")}` : ""}`;
+}
+
+function build_order_card(order) {
+  const cfg = {
+    pending:   { color:"#e0a82a", bg:"#fff3e0", label:"⏳ Awaiting Review" },
+    confirmed: { color:"#c8a96e", bg:"#fff8ee", label:"✅ Ready to Pack"   },
+    packed:    { color:"#4a9e6b", bg:"#edf7f0", label:"📦 Packed"          },
+  }[order.status];
+  const expanded = state.ui.expanded_orders[order.id];
+
+  const items_table = expanded ? `
+    <div style="margin-top:8px;background:#f5f0eb;border-radius:8px;overflow:hidden">
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:4px 12px;padding:8px 12px;background:#e8d5b0;font-size:12px;font-weight:600;color:#5a3e1b">
+        <span>Code</span><span>Item</span><span style="text-align:right">Qty</span><span style="text-align:right">Total</span>
+      </div>
+      ${order.items.map(item => `
+        <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:4px 12px;padding:8px 12px;border-top:1px solid #e0d5c5;font-size:13px">
+          <span class="mono" style="color:#888;font-size:12px">${esc(item.code)}</span>
+          <span>${esc(item.description)}</span>
+          <span style="text-align:right;color:#555">${item.quantity} ${item.unit}</span>
+          <span style="text-align:right;color:#555">€${Number(item.total).toFixed(2)}</span>
+        </div>`).join("")}
+      ${order.order_total > 0 ? `<div style="padding:8px 12px;border-top:1px solid #e0d5c5;display:flex;justify-content:flex-end;font-size:13px;font-weight:700">Total: €${Number(order.order_total).toFixed(2)}</div>` : ""}
+    </div>` : "";
+
+  return `
+    <div class="card" style="border-left:4px solid ${cfg.color};margin-bottom:12px">
+      <div class="flex-between flex-wrap">
+        <div class="flex-wrap gap-10">
+          <span style="font-weight:700;font-size:15px">${esc(order.shop_name)}</span>
+          <span class="tag" style="background:${cfg.bg};color:${cfg.color}">${cfg.label}</span>
+        </div>
+        <div class="flex-wrap gap-6">
+          ${order.status !== "packed" ? `<button class="btn btn-grey btn-sm" data-edit-order="${esc(order.id)}">✏️ Edit</button>` : ""}
+          ${order.status === "pending"   ? `<button class="btn btn-green btn-sm"   data-confirm-order="${esc(order.id)}">✓ Confirm</button>` : ""}
+          ${order.status === "confirmed" ? `<button class="btn btn-dkgreen btn-sm" data-complete-order="${esc(order.id)}">✓ Mark Complete</button>` : ""}
+        </div>
+      </div>
+      <div class="flex gap-10 mt-8" style="font-size:13px;color:#888;flex-wrap:wrap">
+        ${order.po_number   ? `<span>PO: <strong>${esc(order.po_number)}</strong></span>` : ""}
+        ${order.order_date  ? `<span>Date: <strong>${esc(order.order_date)}</strong></span>` : ""}
+        ${order.order_total > 0 ? `<span>Total: <strong>€${Number(order.order_total).toFixed(2)}</strong></span>` : ""}
+      </div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid #f0ebe4">
+        <button style="background:none;border:none;cursor:pointer;font-size:13px;color:#c8a96e;font-weight:600;padding:0;display:flex;align-items:center;gap:6px" data-toggle-order="${esc(order.id)}">
+          <span>${expanded ? "▾" : "▸"}</span>
+          ${expanded ? "Hide" : "Show"} ${order.items.length} line item${order.items.length !== 1 ? "s" : ""}
+        </button>
+      </div>
+      ${items_table}
+    </div>`;
+}
+
+function build_order_review(parsed) {
+  const shop_name = [parsed.company, parsed.location].filter(Boolean).join(" ").trim();
+  const header    = [shop_name, parsed.po_number].filter(Boolean).join("  ·  ");
+  const q         = state.review_queue;
+  const open      = state.ui.review_items_open;
+
+  const items_html = open ? (parsed.items || []).map((item, i) => `
+    <div style="background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px">
+      <div class="flex-between mb-8">
+        <span style="font-weight:600;font-size:13px;color:#888">${esc(item.code)}</span>
+        <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px" data-remove-review-item="${i}">✕</button>
+      </div>
+      <div class="grid-2">
+        <div><label class="lbl">Description</label><input data-review-desc="${i}" value="${esc(item.description)}" /></div>
+        <div class="grid-2">
+          <div><label class="lbl">Qty</label><input type="number" data-review-qty="${i}" value="${item.quantity}" /></div>
+          <div><label class="lbl">Unit</label>
+            <select data-review-unit="${i}">
+              <option ${item.unit === "EACH" ? "selected" : ""}>EACH</option>
+              <option ${item.unit === "KGS"  ? "selected" : ""}>KGS</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>`).join("") : "";
+
+  return `
+    <h2>Review Imported Order</h2>
+    ${q.length > 1 ? `<div style="background:#f5f0eb;border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:13px;color:#555;display:flex;justify-content:space-between">
+      <span>📄 Document <strong>1</strong> of <strong>${q.length}</strong></span>
+      <span style="color:#888">Save each order to continue</span>
+    </div>` : ""}
+    <div class="card mb-16">
+      <div class="collapsible-header" id="toggle-review-items" style="margin-bottom:${open ? 14 : 0}px">
+        <div>
+          <span style="font-weight:700;color:#1a1008;font-size:15px">${esc(header || "Imported Order")}</span>
+          <span style="margin-left:8px;font-size:13px;color:#888">(${(parsed.items || []).length})</span>
+        </div>
+        <span class="collapsible-arrow">${open ? "▾" : "▸"}</span>
+      </div>
+      ${items_html}
+    </div>
+    <p id="review-err" class="err" style="display:none;margin-bottom:12px"></p>
+    <div class="flex gap-10" style="flex-wrap:wrap">
+      <button class="btn btn-dark btn-lg" id="save-review-order" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save Order"}</button>
+      ${q.length > 1 ? `<button class="btn btn-amber btn-lg" id="skip-review">Skip →</button>` : ""}
+      <button class="btn btn-grey btn-lg" id="cancel-review">Cancel All</button>
+    </div>`;
+}
+
+function build_order_editor(order) {
+  const items_html = order.items.map((item, i) => `
+    <div style="background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px">
+      <div class="flex-between mb-8">
+        <span style="font-weight:600;font-size:13px;color:#888">${esc(item.code)}</span>
+        <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px" data-remove-edit-item="${i}">✕</button>
+      </div>
+      <div class="grid-2">
+        <div><label class="lbl">Description</label><input data-edit-desc="${i}" value="${esc(item.description)}" /></div>
+        <div class="grid-2">
+          <div><label class="lbl">Qty</label><input type="number" data-edit-qty="${i}" value="${item.quantity}" /></div>
+          <div><label class="lbl">Unit</label>
+            <select data-edit-unit="${i}">
+              <option ${item.unit === "EACH" ? "selected" : ""}>EACH</option>
+              <option ${item.unit === "KGS"  ? "selected" : ""}>KGS</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>`).join("");
+
+  return `
+    <h2>Edit Order</h2>
+    <div class="card mb-16">
+      <div class="grid-2">
+        <div><label class="lbl">Shop Name *</label><input id="edit-shop" value="${esc(order.shop_name)}" /></div>
+        <div><label class="lbl">PO Number</label><input id="edit-po" value="${esc(order.po_number || "")}" /></div>
+      </div>
+    </div>
+    <div class="card mb-16">
+      <h3>Line Items</h3>
+      <div id="edit-items-list">${items_html}</div>
+    </div>
+    <div class="flex gap-10">
+      <button class="btn btn-dark btn-lg" id="save-edit-order" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save Changes"}</button>
+      <button class="btn btn-grey btn-lg" id="cancel-edit-order">Cancel</button>
+    </div>`;
+}
+
+function build_manual_order_entry() {
+  return `
+    <h2>Add Order Manually</h2>
+    <div class="card mb-16">
+      <h3>Order Details</h3>
+      <div class="grid-2">
+        <div><label class="lbl">Shop Name *</label><input id="mo-shop" placeholder="e.g. Bearmarket Stillorgan" /></div>
+        <div><label class="lbl">PO Number</label><input id="mo-po" placeholder="e.g. PO008108" /></div>
+        <div><label class="lbl">Order Date</label><input id="mo-date" placeholder="e.g. 21 March 2026" /></div>
+      </div>
+    </div>
+    <div class="card mb-16">
+      <h3>Line Items</h3>
+      <div id="mo-items">
+        <div class="mo-item" style="background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px">
+          <div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#888">Item 1</span></div>
+          <div class="grid-2">
+            <div><label class="lbl">Description *</label><input class="mo-desc" placeholder="e.g. House Roast 1kg" /></div>
+            <div><label class="lbl">Product Code</label><input class="mo-code" placeholder="e.g. FP0030" /></div>
+            <div><label class="lbl">Quantity *</label><input type="number" class="mo-qty" placeholder="0" /></div>
+            <div><label class="lbl">Unit</label><select class="mo-unit"><option>EACH</option><option>KGS</option></select></div>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-amber" style="width:100%;padding:10px" id="add-mo-item">+ Add Item</button>
+    </div>
+    <p id="mo-err" class="err" style="display:none;margin-bottom:12px"></p>
+    <div class="flex gap-10">
+      <button class="btn btn-dark btn-lg" id="save-manual-order" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save Order"}</button>
+      <button class="btn btn-grey btn-lg" id="cancel-manual-order">Cancel</button>
+    </div>`;
+}
+
+// ── DELIVERIES TAB ────────────────────────────────────────────────────────────
+function build_deliveries_tab() {
+  const with_order    = state.dispatches.filter(d => d.order_id);
+  const without_order = state.dispatches.filter(d => !d.order_id);
+  const by_order      = {};
+  with_order.forEach(d => { if (!by_order[d.order_id]) by_order[d.order_id] = []; by_order[d.order_id].push(d); });
+  const get_ref = d => {
+    const c = state.containers.find(x => x.id === d.container_id);
+    return { c, fill: c?.fills.find(f => f.fill_number === d.fill_number) };
+  };
+  const in_transit_orders = state.orders.filter(o => o.status !== "packed" && by_order[o.id]);
+  const packed_orders     = state.orders.filter(o => o.status === "packed"  && by_order[o.id]);
+
+  if (state.dispatches.length === 0) return `<h2>Deliveries</h2><div class="card empty"><div class="icon">🚚</div>No dispatches yet.</div>`;
+
+  return `
+    <h2>Deliveries</h2>
+    ${in_transit_orders.length > 0 ? `<h3 style="color:#e0a82a;margin-top:0">⏳ In Transit (${in_transit_orders.length})</h3>${in_transit_orders.map(o => build_order_delivery_card(o, by_order[o.id] || [], get_ref)).join("")}` : ""}
+    ${packed_orders.length > 0     ? `<h3 style="color:#4a9e6b;margin-top:${in_transit_orders.length ? 24 : 0}px">✓ Delivered (${packed_orders.length})</h3>${packed_orders.map(o => build_order_delivery_card(o, by_order[o.id] || [], get_ref)).join("")}` : ""}
+    ${without_order.length > 0     ? `<h3 style="color:#888;margin-top:${in_transit_orders.length || packed_orders.length ? 24 : 0}px">📦 Ad-hoc (${without_order.length})</h3>${without_order.map(d => { const { c, fill } = get_ref(d); return build_dispatch_card(d, c, fill, !!d.confirmed_at); }).join("")}` : ""}`;
+}
+
+function build_order_delivery_card(order, dispatches, get_ref) {
+  const all_confirmed  = dispatches.every(d => d.confirmed_at);
+  const some_confirmed = dispatches.some(d => d.confirmed_at);
+  const border_color   = all_confirmed ? "#4a9e6b" : some_confirmed ? "#c8a96e" : "#e0a82a";
+  const total_kg       = dispatches.reduce((s, d) => s + d.total_kg, 0);
+  const expanded       = state.ui.expanded_deliveries["ord_" + order.id];
+
+  const breakdown_html = expanded ? dispatches.map(d => {
+    const { c, fill } = get_ref(d);
+    const b_line  = d.lines.find(l => l.type === "bulk");
+    const r_lines = d.lines.filter(l => l.type === "retail");
+    return `
+      <div style="background:#f5f0eb;border-radius:8px;padding:12px">
+        <div class="flex-between flex-wrap mb-8">
+          <span style="font-weight:600;font-size:13px">${esc(fill?.coffee ?? "—")}</span>
+          ${d.confirmed_at
+            ? `<span class="tag" style="background:#edf7f0;color:#4a9e6b;font-size:11px">✓ Shop confirmed</span>`
+            : `<span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">⏳ Awaiting confirmation</span>`}
+        </div>
+        <div style="font-size:12px;color:#888;margin-bottom:6px">
+          ${esc(c?.id ?? "")} (Fill #${d.fill_number}) · ${d.date}
+          ${d.confirmed_at ? ` · Confirmed ${new Date(d.confirmed_at).toLocaleDateString()}` : ""}
+        </div>
+        <div style="font-size:13px;color:#555">
+          ${b_line  ? `<span>⚖️ ${b_line.kg}kg bulk &nbsp;</span>` : ""}
+          ${r_lines.map(l => `<span>🛍️ ${l.bags} × ${RETAIL_SIZES.find(s => s.val === String(l.bag_size))?.label} &nbsp;</span>`).join("")}
+        </div>
+        ${!d.confirmed_at ? `<button class="btn btn-dark btn-sm mt-8" data-scan="${esc(d.container_id)}">📱 Simulate Shop Scan</button>` : ""}
+      </div>`;
+  }).join("") : "";
+
+  return `
+    <div class="card" style="border-left:4px solid ${border_color};margin-bottom:12px">
+      <div class="flex-between flex-wrap mb-8">
+        <div class="flex-wrap gap-10">
+          <span style="font-weight:700;font-size:15px">${esc(order.shop_name)}</span>
+          ${all_confirmed  ? `<span class="tag" style="background:#edf7f0;color:#4a9e6b">✓ Delivered</span>`
+          : some_confirmed ? `<span class="tag" style="background:#fff8ee;color:#c8a96e">⚡ Partially Delivered</span>`
+          :                  `<span class="tag" style="background:#fff3e0;color:#e0a82a">⏳ In Transit</span>`}
+        </div>
+      </div>
+      <div class="flex gap-10 mb-12" style="font-size:13px;color:#888;flex-wrap:wrap">
+        ${order.po_number  ? `<span>PO: <strong style="color:#1a1008">${esc(order.po_number)}</strong></span>` : ""}
+        ${order.order_date ? `<span>Date: <strong>${esc(order.order_date)}</strong></span>` : ""}
+        <span>Dispatched: <strong>${total_kg}kg</strong></span>
+        <span>${dispatches.length} dispatch${dispatches.length > 1 ? "es" : ""}</span>
+      </div>
+      <div style="padding-top:8px;border-top:1px solid #f0ebe4">
+        <button style="background:none;border:none;cursor:pointer;font-size:13px;color:#c8a96e;font-weight:600;padding:0;display:flex;align-items:center;gap:6px" data-toggle-delivery="ord_${esc(order.id)}">
+          <span>${expanded ? "▾" : "▸"}</span> ${expanded ? "Hide" : "Show"} dispatch breakdown
+        </button>
+      </div>
+      ${expanded ? `<div style="margin-top:10px;display:grid;gap:8px">${breakdown_html}</div>` : ""}
+    </div>`;
+}
+
+function build_dispatch_card(d, c, fill, confirmed, show_scan = true) {
+  const b_line  = d.lines.find(l => l.type === "bulk");
+  const r_lines = d.lines.filter(l => l.type === "retail");
+  return `
+    <div class="card" style="border-left:4px solid ${confirmed ? "#4a9e6b" : "#e0a82a"};margin-bottom:12px">
+      <div class="flex-between flex-wrap mb-10">
+        <span style="font-weight:700;font-size:15px">${esc(d.shop)}</span>
+        ${confirmed ? `<span class="tag" style="background:#edf7f0;color:#4a9e6b">✓ Delivered</span>` : `<span class="tag" style="background:#fff3e0;color:#e0a82a">⏳ In Transit</span>`}
+      </div>
+      <div class="grid-2 mb-10" style="font-size:13px">
+        ${info_row("Coffee", fill?.coffee)}
+        ${info_row("Container", `${d.container_id} (Fill #${d.fill_number})`)}
+        ${info_row("Roast Date", fill?.date)}
+        ${info_row("Dispatch Date", d.date)}
+        ${info_row("Total", `${d.total_kg}kg`)}
+        ${confirmed ? info_row("Confirmed", new Date(d.confirmed_at).toLocaleString()) : ""}
+      </div>
+      <div style="background:#f5f0eb;border-radius:8px;padding:10px;margin-bottom:${confirmed ? 0 : 10}px">
+        <div style="font-size:12px;color:#888;margin-bottom:6px;font-weight:600">BREAKDOWN</div>
+        ${b_line  ? `<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>⚖️ Bulk</span><span style="font-weight:600">${b_line.kg}kg</span></div>` : ""}
+        ${r_lines.map(l => `<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+          <span>🛍️ ${RETAIL_SIZES.find(s => s.val === String(l.bag_size))?.label}</span>
+          <span style="font-weight:600">${l.bags} bags (${l.kg}kg)</span>
+        </div>`).join("")}
+      </div>
+      ${!confirmed && show_scan ? `<button class="btn btn-dark btn-sm mt-10" data-scan="${esc(d.container_id)}">📱 Simulate Shop Scan</button>` : ""}
+    </div>`;
+}
+
+function info_row(label, value) {
+  return `<div><span style="color:#888;font-size:12px">${esc(label)}</span><br/><span style="font-weight:500">${esc(value ?? "—")}</span></div>`;
+}
+
+// ── RECALL TAB ────────────────────────────────────────────────────────────────
+function build_recall_tab() {
+  const { recall_query, recall_results } = state.ui;
+  const results_html = recall_results ? (
+    recall_results.matched.length === 0
+      ? `<p class="hint">No results found for "${esc(recall_results.query)}".</p>`
+      : `<h3>⚠️ ${recall_results.matched.length} dispatch${recall_results.matched.length > 1 ? "es" : ""} found</h3>
+         ${recall_results.matched.map(({ d, c, fill }) => build_dispatch_card(d, c, fill, !!d.confirmed_at, false)).join("")}`
+  ) : "";
+
+  return `
+    <h2>Recall Search</h2>
+    <p class="hint" style="margin-bottom:20px">Search by container ID, roast ID, coffee name, or shop name.</p>
+    <div class="flex gap-10 mb-20">
+      <input id="recall-input" value="${esc(recall_query)}" placeholder="e.g. XL01042601  or  44  or  Ethiopia  or  Brew Bar…" style="flex:1;font-size:15px" />
+      <button class="btn btn-dark" id="do-recall">Search</button>
+    </div>
+    ${results_html}`;
+}
+
+// ── REPORTS TAB ───────────────────────────────────────────────────────────────
+function build_reports_tab() {
+  const { report_from, report_to, report_view } = state.ui;
+
+  const first_date = state.dispatches.length
+    ? state.dispatches.reduce((min, d) => d.date < min ? d.date : min, state.dispatches[0].date)
+    : today();
+
+  if (state.dispatches.length === 0) return `<h2>Reports</h2><div class="card empty"><div class="icon">📊</div>No dispatch data yet.</div>`;
+
+  const filtered = state.dispatches.filter(d => d.date >= report_from && d.date <= report_to);
+
+  function get_coffee_name(d) {
+    const c = state.containers.find(x => x.id === d.container_id);
+    return c?.fills.find(f => f.fill_number === d.fill_number)?.coffee ?? "Unknown";
+  }
+
+  const shop_map = {};
+  filtered.forEach(d => {
+    const shop   = d.shop || "Unknown";
+    if (!shop_map[shop]) shop_map[shop] = { total_kg: 0, coffees: {}, dispatches: 0, last_date: "" };
+    shop_map[shop].total_kg += d.total_kg; shop_map[shop].dispatches++;
+    if (d.date > shop_map[shop].last_date) shop_map[shop].last_date = d.date;
+    const coffee = get_coffee_name(d);
+    shop_map[shop].coffees[coffee] = (shop_map[shop].coffees[coffee] || 0) + d.total_kg;
+  });
+  const shop_rows  = Object.entries(shop_map).sort((a, b) => b[1].total_kg - a[1].total_kg);
+  const max_shop_kg = shop_rows[0]?.[1].total_kg || 1;
+
+  const coffee_map = {};
+  filtered.forEach(d => {
+    const coffee = get_coffee_name(d);
+    if (!coffee_map[coffee]) coffee_map[coffee] = { total_kg: 0, shops: {}, dispatches: 0 };
+    coffee_map[coffee].total_kg += d.total_kg; coffee_map[coffee].dispatches++;
+    const shop = d.shop || "Unknown";
+    coffee_map[coffee].shops[shop] = (coffee_map[coffee].shops[shop] || 0) + d.total_kg;
+  });
+  const coffee_rows   = Object.entries(coffee_map).sort((a, b) => b[1].total_kg - a[1].total_kg);
+  const max_coffee_kg = coffee_rows[0]?.[1].total_kg || 1;
+
+  const week_map = {};
+  filtered.forEach(d => {
+    const dt = new Date(d.date), day = dt.getDay();
+    const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
+    const mon  = new Date(new Date(d.date).setDate(diff));
+    const key  = mon.toISOString().split("T")[0];
+    week_map[key] = (week_map[key] || 0) + d.total_kg;
+  });
+  const weeks       = Object.entries(week_map).sort((a, b) => a[0].localeCompare(b[0]));
+  const max_week_kg = Math.max(...weeks.map(w => w[1]), 1);
+
+  const total_kg      = filtered.reduce((s, d) => s + d.total_kg, 0);
+  const unique_shops  = new Set(filtered.map(d => d.shop)).size;
+  const unique_coffees = new Set(filtered.map(d => get_coffee_name(d))).size;
+
+  const stats_html = [
+    { label:"Total Dispatched", value:`${total_kg.toFixed(1)}kg`, icon:"⚖️" },
+    { label:"Dispatches",       value: filtered.length,           icon:"🚚" },
+    { label:"Shops Served",     value: unique_shops,              icon:"🏪" },
+    { label:"Coffees",          value: unique_coffees,            icon:"☕" },
+  ].map(({ label, value, icon }) => `
+    <div class="card" style="text-align:center;padding:14px 10px">
+      <div style="font-size:24px;margin-bottom:4px">${icon}</div>
+      <div style="font-size:22px;font-weight:700;color:#1a1008">${value}</div>
+      <div style="font-size:11px;color:#888;margin-top:2px">${label}</div>
+    </div>`).join("");
+
+  const weekly_chart = weeks.length > 1 ? `
+    <div class="card mb-16">
+      <div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">📅 Weekly Dispatch Volume (kg)</div>
+      <div class="chart-wrap">
+        ${weeks.map(([week, kg]) => {
+          const h = Math.round((kg / max_week_kg) * 90);
+          return `<div class="chart-col">
+            <div class="chart-val">${kg.toFixed(0)}</div>
+            <div class="chart-bar" style="height:${h}px"></div>
+            <div class="chart-lbl">${week.slice(5)}</div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>` : "";
+
+  const breakdown_row = (label, kg, total, color_idx) => `
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="width:10px;height:10px;border-radius:2px;background:${color_for(color_idx)};flex-shrink:0"></div>
+      <div style="flex:1;font-size:13px">${esc(label)}</div>
+      <div style="font-size:13px;font-weight:600;color:#555;min-width:50px;text-align:right">${kg.toFixed(1)}kg</div>
+      <div class="report-bar-track"><div class="report-bar-fill" style="background:${color_for(color_idx)};width:${Math.round((kg / total) * 100)}%"></div></div>
+      <div style="font-size:11px;color:#aaa;min-width:32px;text-align:right">${Math.round((kg / total) * 100)}%</div>
+    </div>`;
+
+  const shops_view = shop_rows.map(([shop, data]) => {
+    const entries = Object.entries(data.coffees).sort((a, b) => b[1] - a[1]);
+    return `<div class="card">
+      <div class="flex-between mb-10">
+        <div>
+          <div style="font-weight:700;font-size:15px">${esc(shop)}</div>
+          <div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches !== 1 ? "es" : ""} · Last: ${data.last_date}</div>
+        </div>
+        <div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div>
+      </div>
+      <div class="stock-track mb-12"><div style="background:#1a1008;border-radius:4px;height:8px;width:${Math.round((data.total_kg / max_shop_kg) * 100)}%;transition:width 0.4s"></div></div>
+      <div style="display:grid;gap:6px">${entries.map(([coffee, kg], ci) => breakdown_row(coffee, kg, data.total_kg, ci)).join("")}</div>
+    </div>`;
+  }).join("");
+
+  const coffees_view = coffee_rows.map(([coffee, data], ci) => {
+    const entries = Object.entries(data.shops).sort((a, b) => b[1] - a[1]);
+    return `<div class="card">
+      <div class="flex-between mb-10">
+        <div>
+          <div style="font-weight:700;font-size:15px">${esc(coffee)}</div>
+          <div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches !== 1 ? "es" : ""} · ${entries.length} shop${entries.length !== 1 ? "s" : ""}</div>
+        </div>
+        <div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div>
+      </div>
+      <div class="stock-track mb-12"><div style="background:${color_for(ci)};border-radius:4px;height:8px;width:${Math.round((data.total_kg / max_coffee_kg) * 100)}%;transition:width 0.4s"></div></div>
+      <div style="display:grid;gap:6px">${entries.map(([shop, kg], si) => breakdown_row(shop, kg, data.total_kg, si)).join("")}</div>
+    </div>`;
+  }).join("");
+
+  return `
+    <h2 style="margin-bottom:16px">Reports</h2>
+    <div class="card mb-16">
+      <div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end">
+        <div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div>
+        <div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div>
+        <div class="flex gap-6">
+          <button class="btn btn-ghost btn-sm" data-report-range="30">30d</button>
+          <button class="btn btn-ghost btn-sm" data-report-range="90">90d</button>
+          <button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button>
+        </div>
+      </div>
+    </div>
+    <div class="grid-4 mb-16">${stats_html}</div>
+    ${weekly_chart}
+    <div class="flex gap-8 mb-16">
+      <button class="btn ${report_view === "shops" ? "btn-dark" : "btn-ghost"}" style="flex:1;color:${report_view === "shops" ? "#e8d5b0" : "#5a3e1b"}" data-report-view="shops">🏪 By Shop</button>
+      <button class="btn ${report_view === "coffees" ? "btn-dark" : "btn-ghost"}" style="flex:1;color:${report_view === "coffees" ? "#e8d5b0" : "#5a3e1b"}" data-report-view="coffees">☕ By Coffee</button>
+    </div>
+    ${filtered.length === 0 ? `<div class="card empty"><div class="icon">📊</div>No data for this period.</div>` : ""}
+    ${report_view === "shops"   ? `<div style="display:grid;gap:10px">${shops_view}</div>`   : ""}
+    ${report_view === "coffees" ? `<div style="display:grid;gap:10px">${coffees_view}</div>` : ""}`;
+}
+
+// ── PACKING PAGE ──────────────────────────────────────────────────────────────
+const packing_state = {
+  step:             "select",
+  selected_order_id: null,
+  shop:             "",
+  bulk_kg:          "",
+  retail_lines:     RETAIL_SIZES.map(s => ({ bag_size: s.val, bags: "0" })),
+  err:              "",
+};
+
+function build_packing_page(container, fill) {
+  const ps = packing_state;
+  const { fp_sizes, fp_codes, keywords } = get_coffee_map(fill.coffee);
+  const matching_orders = state.orders.filter(o => (o.status === "confirmed" || o.status === "pending") && order_matches_coffee(o, fp_codes, keywords));
+
+  if (ps.step === "done") {
+    const bulk_total   = Number(ps.bulk_kg) || 0;
+    const retail_total = ps.retail_lines.reduce((s, l) => s + calc_kg(l.bags, l.bag_size), 0);
+    const total_kg     = bulk_total + retail_total;
+    return `<div class="overlay"><div class="modal" style="text-align:center">
+      <div style="font-size:64px">✅</div>
+      <h2 style="margin:12px 0 8px">All done!</h2>
+      <p style="color:#555;font-size:15px"><strong>${total_kg}kg</strong> packed for <strong>${esc(ps.shop)}</strong></p>
+      ${bulk_total > 0 ? `<p style="color:#888;font-size:13px;margin:4px 0">⚖️ ${bulk_total}kg bulk</p>` : ""}
+      ${ps.retail_lines.filter(l => Number(l.bags) > 0).map(l => `<p style="color:#888;font-size:13px;margin:4px 0">🛍️ ${l.bags} × ${RETAIL_SIZES.find(s => s.val === l.bag_size)?.label}</p>`).join("")}
+      <button class="btn btn-dark mt-16" style="padding:12px 32px" id="packing-done">Done</button>
+    </div></div>`;
+  }
+
+  if (ps.step === "review") {
+    const bulk_total   = Number(ps.bulk_kg) || 0;
+    const retail_total = ps.retail_lines.reduce((s, l) => s + calc_kg(l.bags, l.bag_size), 0);
+    const total_kg     = bulk_total + retail_total;
+    return `<div class="overlay"><div class="modal">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:36px">🔍</div>
+        <h2 style="margin:8px 0 4px">Check your entry</h2>
+        <p style="color:#888;font-size:14px">Make sure everything looks right</p>
+      </div>
+      <div style="background:#f5f0eb;border-radius:12px;padding:16px;margin-bottom:16px">
+        <div class="grid-2 mb-12">
+          ${info_row("Shop", ps.shop)} ${info_row("Container", container.id)}
+          ${info_row("Coffee", fill.coffee)} ${info_row("Total", `${total_kg}kg`)}
+        </div>
+        <div style="background:#fff;border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600">BREAKDOWN</div>
+          ${bulk_total > 0 ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>⚖️ Bulk</span><span style="font-weight:600">${bulk_total}kg</span></div>` : ""}
+          ${ps.retail_lines.filter(l => Number(l.bags) > 0).map(l => `
+            <div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">
+              <span>🛍️ ${RETAIL_SIZES.find(s => s.val === l.bag_size)?.label}</span>
+              <span style="font-weight:600">${l.bags} bags (${calc_kg(l.bags, l.bag_size)}kg)</span>
+            </div>`).join("")}
+        </div>
+      </div>
+      <div class="grid-2">
+        <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="packing-back-edit">✏️ Edit</button>
+        <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="packing-confirm" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "✓ Confirm"}</button>
+      </div>
+    </div></div>`;
+  }
+
+  if (ps.step === "entry") {
+    const bulk_total   = Number(ps.bulk_kg) || 0;
+    const retail_total = ps.retail_lines.reduce((s, l) => s + calc_kg(l.bags, l.bag_size), 0);
+    const total_kg     = bulk_total + retail_total;
+    const over_stock   = total_kg > fill.remaining;
+    return `<div class="overlay"><div class="modal">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:40px">📦</div>
+        <h2 style="margin:8px 0 2px">${esc(fill.coffee)}</h2>
+        <div class="mono" style="color:#c8a96e;font-size:15px;font-weight:700">${esc(container.id)} — Fill #${fill.fill_number}</div>
+        <div style="color:#4a9e6b;font-size:14px;margin-top:4px">${fill.remaining}kg available</div>
+      </div>
+      <div style="margin-bottom:16px">
+        <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Shop</label>
+        <input id="pack-shop" value="${esc(ps.shop)}" placeholder="e.g. Bearmarket Stillorgan" style="font-size:16px;padding:12px 14px" />
+      </div>
+      <div style="background:#f5f0eb;border-radius:12px;padding:16px;margin-bottom:12px">
+        <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">⚖️ Bulk — how many kg?</label>
+        <input id="pack-bulk" inputmode="decimal" value="${esc(ps.bulk_kg)}" placeholder="Leave blank if none" style="font-size:20px;padding:12px;text-align:center;font-weight:700" />
+      </div>
+      <div style="background:#f5f0eb;border-radius:12px;padding:16px;margin-bottom:16px">
+        <label class="lbl" style="font-size:15px;color:#333;margin-bottom:12px">🛍️ Retail Bags</label>
+        ${ps.retail_lines.map((line, i) => {
+          const kg = calc_kg(line.bags, line.bag_size);
+          return `<div style="background:#fff;border-radius:8px;padding:12px;margin-bottom:${i < ps.retail_lines.length - 1 ? 10 : 0}px;display:flex;align-items:center;gap:12px">
+            <div style="background:#1a1008;color:#e8d5b0;border-radius:6px;padding:8px 12px;font-weight:700;font-size:14px;min-width:52px;text-align:center">${RETAIL_SIZES.find(s => s.val === line.bag_size)?.label}</div>
+            <input inputmode="numeric" value="${line.bags}" data-retail-idx="${i}" style="font-size:22px;padding:10px;text-align:center;font-weight:700;flex:1" />
+            <div style="font-size:12px;color:${kg > 0 ? "#4a9e6b" : "#ccc"};font-weight:600;min-width:40px;text-align:right">${kg > 0 ? `${kg}kg` : "—"}</div>
+          </div>`;
+        }).join("")}
+      </div>
+      ${total_kg > 0 ? `<div style="background:${over_stock ? "#fff0ee" : "#edf7f0"};border:1px solid ${over_stock ? "#e05c2a" : "#4a9e6b"};border-radius:8px;padding:12px;margin-bottom:16px">
+        <div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:6px">Total: ${total_kg}kg</div>
+        ${bulk_total > 0 ? `<div style="font-size:13px;color:#666">⚖️ ${bulk_total}kg bulk</div>` : ""}
+        ${ps.retail_lines.filter(l => Number(l.bags) > 0).map(l => `<div style="font-size:13px;color:#666;margin-top:2px">🛍️ ${l.bags} × ${RETAIL_SIZES.find(s => s.val === l.bag_size)?.label} = ${calc_kg(l.bags, l.bag_size)}kg</div>`).join("")}
+        ${over_stock ? `<div style="color:#e05c2a;font-size:13px;margin-top:6px;font-weight:600">⚠️ Exceeds available stock</div>` : ""}
+      </div>` : ""}
+      ${ps.err ? `<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>` : ""}
+      <button class="btn btn-dark" style="width:100%;padding:16px;font-size:17px;border-radius:10px" id="pack-review">Review →</button>
+      <button class="btn btn-muted btn-full mt-10" id="pack-back-select">← Back to shops</button>
+    </div></div>`;
+  }
+
+  // Step: select shop
+  return `<div class="overlay"><div class="modal">
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:40px">📦</div>
+      <h2 style="margin:8px 0 2px">${esc(fill.coffee)}</h2>
+      <div class="mono" style="color:#c8a96e;font-size:15px;font-weight:700">${esc(container.id)} — Fill #${fill.fill_number}</div>
+      <div style="color:#4a9e6b;font-size:14px;margin-top:4px">${fill.remaining}kg available</div>
+    </div>
+    <h3 style="font-size:16px;margin-bottom:12px">Who are you packing for?</h3>
+    ${matching_orders.length > 0 ? `<div style="display:grid;gap:10px;margin-bottom:16px">
+      ${matching_orders.map(o => {
+        const matched   = get_matched_items(o, fp_codes, keywords);
+        const { bulk, retail } = resolve_quantities(matched, fp_sizes);
+        const total_exp = bulk + retail.reduce((s, r) => s + calc_kg(r.bags, r.bag_size), 0);
+        return `<button data-select-order="${esc(o.id)}" style="background:#f5f0eb;border:2px solid #e0d5c5;border-radius:10px;padding:14px 16px;cursor:pointer;text-align:left;width:100%">
+          <div style="font-weight:700;font-size:15px;margin-bottom:4px">${esc(o.shop_name)}</div>
+          <div style="font-size:13px;color:#888">
+            ${matched.length} line item${matched.length > 1 ? "s" : ""}
+            ${o.po_number ? ` · PO ${esc(o.po_number)}` : ""}
+            ${total_exp > 0 ? ` · ${total_exp}kg expected` : ""}
+            <span class="tag" style="margin-left:8px;background:${o.status === "confirmed" ? "#fff8ee" : "#fff3e0"};color:${o.status === "confirmed" ? "#c8a96e" : "#e0a82a"}">
+              ${o.status === "confirmed" ? "✅ Ready" : "⏳ Pending"}
+            </span>
+          </div>
+        </button>`;
+      }).join("")}
+    </div>` : `<div style="background:#fff8ee;border:1px solid #c8a96e;border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:#888">
+      No open orders found for <strong>${esc(fill.coffee)}</strong>. You can still pack manually below.
+    </div>`}
+    <button class="btn btn-grey btn-full" id="pack-manual">Pack without an order</button>
+    <button class="btn btn-muted btn-full mt-10" id="close-scan">Cancel</button>
+  </div></div>`;
+}
+
+// ── SHOP CONFIRM PAGE ─────────────────────────────────────────────────────────
+function build_shop_confirm_page(container, fill, dispatch) {
+  const b_line  = dispatch.lines.find(l => l.type === "bulk");
+  const r_lines = dispatch.lines.filter(l => l.type === "retail");
+  return `<div class="overlay"><div class="modal">
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:40px">☕</div>
+      <h2 style="margin:8px 0 2px">Your Coffee is Here</h2>
+      <p style="color:#888;font-size:14px;margin:0">Delivery for <strong>${esc(dispatch.shop)}</strong></p>
+    </div>
+    <div style="background:#f5f0eb;border-radius:12px;padding:18px;margin-bottom:16px">
+      <div style="font-weight:700;font-size:16px;margin-bottom:12px">${esc(fill?.coffee)}</div>
+      <div class="grid-2 mb-12">
+        ${info_row("Container", container.id)} ${info_row("Roast Date", fill?.date)}
+        ${info_row("Dispatch Date", dispatch.date)} ${info_row("Total", `${dispatch.total_kg}kg`)}
+      </div>
+      <div style="background:#fff;border-radius:8px;padding:12px">
+        <div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600">WHAT'S IN THIS DELIVERY</div>
+        ${b_line  ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>⚖️ Bulk</span><span style="font-weight:600">${b_line.kg}kg</span></div>` : ""}
+        ${r_lines.map(l => `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px">
+          <span>🛍️ ${RETAIL_SIZES.find(s => s.val === String(l.bag_size))?.label} bags</span>
+          <span style="font-weight:600">${l.bags} bags (${l.kg}kg)</span>
+        </div>`).join("")}
+      </div>
+    </div>
+    <button class="btn btn-green" style="width:100%;padding:18px;font-size:18px;border-radius:12px" id="confirm-delivery">✓ Confirm Receipt</button>
+    <button class="btn btn-muted btn-full mt-10" id="close-scan">Back</button>
+  </div></div>`;
+}
+
+// ── LISTENERS ─────────────────────────────────────────────────────────────────
+function attach_listeners() {
+  const app = document.getElementById("app");
+
+  app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => {
+    state.tab = Number(btn.dataset.tab); render();
+  }));
+
+  app.querySelector("#logout-btn")?.addEventListener("click", async () => {
+    await supabase.auth.signOut(); window.location.href = "login.html";
+  });
+
+  // ── Containers
+  app.querySelector("#toggle-container-form")?.addEventListener("click", () => {
+    state.ui.show_container_form = !state.ui.show_container_form; state.ui.container_err = ""; render();
+  });
+
+  app.querySelector("#save-container")?.addEventListener("click", () => {
+    const id       = document.getElementById("c-id")?.value.trim();
+    const size     = document.getElementById("c-size")?.value;
+    const cap      = document.getElementById("c-cap")?.value;
+    const coffee   = document.getElementById("c-coffee")?.value;
+    const date     = document.getElementById("c-date")?.value;
+    const roast_raw = document.getElementById("c-roasts")?.value;
+    if (!id || !coffee || !roast_raw.trim()) { state.ui.container_err = "Fill in all required fields."; render(); return; }
+    save_container(id, size, cap, coffee, date, roast_raw);
+  });
+
+  app.querySelector("#cancel-container")?.addEventListener("click", () => {
+    state.ui.show_container_form = false; state.ui.container_err = ""; render();
+  });
+
+  app.querySelectorAll("[data-toggle-qr]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.expanded_qr = state.ui.expanded_qr === btn.dataset.toggleQr ? null : btn.dataset.toggleQr; render();
+  }));
+
+  app.querySelectorAll("[data-refill]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.refill_id = btn.dataset.refill; render();
+  }));
+
+  app.querySelector("#confirm-refill")?.addEventListener("click", () => {
+    const coffee    = document.getElementById("rf-coffee")?.value;
+    const date      = document.getElementById("rf-date")?.value;
+    const roast_raw = document.getElementById("rf-roasts")?.value;
+    const err_el    = document.getElementById("rf-err");
+    if (!coffee || !roast_raw.trim()) { err_el.textContent = "Fill in all required fields."; err_el.style.display = "block"; return; }
+    save_refill(state.ui.refill_id, coffee, date, roast_raw);
+  });
+
+  app.querySelector("#cancel-refill")?.addEventListener("click", () => { state.ui.refill_id = null; render(); });
+
+  app.querySelectorAll("[data-scan]").forEach(btn => btn.addEventListener("click", () => {
+    packing_state.step = "select"; packing_state.shop = ""; packing_state.bulk_kg = ""; packing_state.err = "";
+    packing_state.retail_lines = RETAIL_SIZES.map(s => ({ bag_size: s.val, bags: "0" })); packing_state.selected_order_id = null;
+    state.scan_id = btn.dataset.scan; render();
+  }));
+
+  // ── Orders
+  app.querySelector("#toggle-upload")?.addEventListener("click", () => {
+    state.ui.show_upload = !state.ui.show_upload; state.ui.upload_err = ""; render();
+  });
+  app.querySelector("#cancel-upload")?.addEventListener("click", () => {
+    state.ui.show_upload = false; state.ui.upload_err = ""; render();
+  });
+
+  const choose_pdf = app.querySelector("#choose-pdf");
+  const po_file    = app.querySelector("#po-file");
+  if (choose_pdf && po_file) {
+    choose_pdf.addEventListener("click", () => po_file.click());
+    po_file.addEventListener("change", async e => {
+      const files = e.target.files;
+      if (!files?.length) return;
+      state.ui.parsing = true; state.ui.upload_err = ""; render();
+      const results = [], errors = [];
+      for (const file of Array.from(files)) {
+        try { results.push(parse_bc_purchase_order(await extract_pdf_text(file))); }
+        catch (err) { errors.push(`${file.name}: ${err.message}`); }
+      }
+      state.ui.parsing = false;
+      if (results.length) { state.review_queue = results.map(r => ({ ...r, items: r.items.map(i => ({ ...i })) })); state.ui.show_upload = false; state.ui.review_items_open = false; }
+      if (errors.length) state.ui.upload_err = `Failed: ${errors.join(" · ")}`;
+      e.target.value = ""; render();
+    });
+  }
+
+  app.querySelector("#show-manual-order")?.addEventListener("click", () => {
+    document.querySelector(".content").innerHTML = build_manual_order_entry();
+    attach_manual_order_listeners();
+  });
+
+  app.querySelector("#toggle-review-items")?.addEventListener("click", () => {
+    state.ui.review_items_open = !state.ui.review_items_open; render();
+  });
+
+  app.querySelectorAll("[data-remove-review-item]").forEach(btn => btn.addEventListener("click", () => {
+    state.review_queue[0].items.splice(Number(btn.dataset.removeReviewItem), 1); render();
+  }));
+  app.querySelectorAll("[data-review-desc]").forEach(inp => inp.addEventListener("input", e => { state.review_queue[0].items[Number(inp.dataset.reviewDesc)].description = e.target.value; }));
+  app.querySelectorAll("[data-review-qty]").forEach(inp => inp.addEventListener("input",  e => { state.review_queue[0].items[Number(inp.dataset.reviewQty)].quantity    = Number(e.target.value) || 0; }));
+  app.querySelectorAll("[data-review-unit]").forEach(sel => sel.addEventListener("change", e => { state.review_queue[0].items[Number(sel.dataset.reviewUnit)].unit       = e.target.value; }));
+
+  app.querySelector("#save-review-order")?.addEventListener("click", async () => {
+    const parsed = state.review_queue[0];
+    if (!parsed.items.length) { document.getElementById("review-err").textContent = "Please include at least one item."; document.getElementById("review-err").style.display = "block"; return; }
+    await save_order({ shop_name: [parsed.company, parsed.location].filter(Boolean).join(" ").trim(), po_number: parsed.po_number || "", order_date: parsed.order_date || "", items: parsed.items, order_total: parsed.order_total || 0 });
+    state.review_queue.shift(); render();
+  });
+  app.querySelector("#skip-review")?.addEventListener("click",   () => { state.review_queue.shift(); render(); });
+  app.querySelector("#cancel-review")?.addEventListener("click", () => { state.review_queue = []; render(); });
+
+  app.querySelectorAll("[data-toggle-order]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.expanded_orders[btn.dataset.toggleOrder] = !state.ui.expanded_orders[btn.dataset.toggleOrder]; render();
+  }));
+
+  app.querySelectorAll("[data-edit-order]").forEach(btn => btn.addEventListener("click", () => {
+    state.editing_order = JSON.parse(JSON.stringify(state.orders.find(o => o.id === btn.dataset.editOrder))); render();
+  }));
+  app.querySelectorAll("[data-confirm-order]").forEach(btn => btn.addEventListener("click", () => update_order_status(btn.dataset.confirmOrder, "confirmed")));
+  app.querySelectorAll("[data-complete-order]").forEach(btn => btn.addEventListener("click", () => {
+    if (!confirm("Mark this PO as complete?")) return; update_order_status(btn.dataset.completeOrder, "packed");
+  }));
+
+  app.querySelector("#save-edit-order")?.addEventListener("click", async () => {
+    const shop_name = document.getElementById("edit-shop")?.value.trim();
+    const po_number = document.getElementById("edit-po")?.value.trim();
+    if (!shop_name) return;
+    const items = state.editing_order.items.map((item, i) => ({
+      ...item,
+      description: document.querySelector(`[data-edit-desc="${i}"]`)?.value ?? item.description,
+      quantity:    Number(document.querySelector(`[data-edit-qty="${i}"]`)?.value)  || 0,
+      unit:        document.querySelector(`[data-edit-unit="${i}"]`)?.value         ?? item.unit,
+    }));
+    await update_order(state.editing_order.id, shop_name, po_number, items);
+  });
+  app.querySelectorAll("[data-remove-edit-item]").forEach(btn => btn.addEventListener("click", () => {
+    state.editing_order.items.splice(Number(btn.dataset.removeEditItem), 1); render();
+  }));
+  app.querySelector("#cancel-edit-order")?.addEventListener("click", () => { state.editing_order = null; render(); });
+
+  // ── Deliveries
+  app.querySelectorAll("[data-toggle-delivery]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.expanded_deliveries[btn.dataset.toggleDelivery] = !state.ui.expanded_deliveries[btn.dataset.toggleDelivery]; render();
+  }));
+
+  // ── Recall
+  const do_recall    = app.querySelector("#do-recall");
+  const recall_input = app.querySelector("#recall-input");
+  if (do_recall && recall_input) {
+    const do_search = () => {
+      const q = recall_input.value.trim().toLowerCase();
+      state.ui.recall_query = recall_input.value;
+      if (!q) return;
+      const matched = state.dispatches.reduce((acc, d) => {
+        const c    = state.containers.find(x => x.id === d.container_id);
+        if (!c) return acc;
+        const fill = c.fills.find(f => f.fill_number === d.fill_number);
+        if (!fill) return acc;
+        if (c.id.toLowerCase().includes(q) || fill.coffee.toLowerCase().includes(q) ||
+            (fill.roast_ids || []).some(r => r.toLowerCase().includes(q)) || d.shop?.toLowerCase().includes(q))
+          acc.push({ d, c, fill });
+        return acc;
+      }, []);
+      state.ui.recall_results = { query: recall_input.value, matched };
+      render();
+    };
+    do_recall.addEventListener("click", do_search);
+    recall_input.addEventListener("keydown", e => { if (e.key === "Enter") do_search(); });
+  }
+
+  // ── Reports
+  app.querySelector("#report-from")?.addEventListener("change", e => { state.ui.report_from = e.target.value; render(); });
+  app.querySelector("#report-to")?.addEventListener("change",   e => { state.ui.report_to   = e.target.value; render(); });
+  app.querySelectorAll("[data-report-range]").forEach(btn => btn.addEventListener("click", () => {
+    const range = btn.dataset.reportRange;
+    const d     = new Date();
+    if (range === "all") { state.ui.report_from = btn.dataset.first || today(); }
+    else { d.setDate(d.getDate() - Number(range)); state.ui.report_from = d.toISOString().split("T")[0]; }
+    state.ui.report_to = today(); render();
+  }));
+  app.querySelectorAll("[data-report-view]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.report_view = btn.dataset.reportView; render();
+  }));
+
+  // ── Packing / scan overlay
+  app.querySelector("#close-scan")?.addEventListener("click", () => {
+    state.scan_id = null;
+    // Clear scan param from URL without reload
+    const url = new URL(window.location);
+    url.searchParams.delete("scan");
+    window.history.replaceState({}, "", url);
+    render();
+  });
+
+  app.querySelector("#pack-manual")?.addEventListener("click", () => {
+    packing_state.step = "entry"; packing_state.selected_order_id = "manual"; packing_state.shop = ""; render();
+  });
+
+  app.querySelectorAll("[data-select-order]").forEach(btn => btn.addEventListener("click", () => {
+    const order     = state.orders.find(o => o.id === btn.dataset.selectOrder);
+    const container = state.containers.find(c => c.id === state.scan_id);
+    const fill      = active_fill(container);
+    const { fp_sizes, fp_codes, keywords } = get_coffee_map(fill.coffee);
+    const matched   = get_matched_items(order, fp_codes, keywords);
+    const { bulk, retail } = resolve_quantities(matched, fp_sizes);
+    packing_state.selected_order_id = order.id;
+    packing_state.shop        = order.shop_name;
+    packing_state.bulk_kg     = bulk > 0 ? String(bulk) : "";
+    packing_state.retail_lines = retail;
+    packing_state.step        = "entry"; packing_state.err = ""; render();
+  }));
+
+  app.querySelector("#pack-back-select")?.addEventListener("click", () => { packing_state.step = "select"; render(); });
+
+  app.querySelector("#pack-shop")?.addEventListener("input", e => { packing_state.shop = e.target.value; });
+  app.querySelector("#pack-bulk")?.addEventListener("input", e => { packing_state.bulk_kg = e.target.value.replace(/[^0-9.]/g, ""); });
+  app.querySelectorAll("[data-retail-idx]").forEach(inp => inp.addEventListener("input", e => {
+    packing_state.retail_lines[Number(inp.dataset.retailIdx)].bags = e.target.value.replace(/[^0-9]/g, "");
+  }));
+
+  app.querySelector("#pack-review")?.addEventListener("click", () => {
+    packing_state.shop    = document.getElementById("pack-shop")?.value.trim() || packing_state.shop;
+    packing_state.bulk_kg = document.getElementById("pack-bulk")?.value.replace(/[^0-9.]/g, "") || packing_state.bulk_kg;
+    document.querySelectorAll("[data-retail-idx]").forEach(inp => {
+      packing_state.retail_lines[Number(inp.dataset.retailIdx)].bags = inp.value.replace(/[^0-9]/g, "");
+    });
+    const bulk_total   = Number(packing_state.bulk_kg) || 0;
+    const retail_total = packing_state.retail_lines.reduce((s, l) => s + calc_kg(l.bags, l.bag_size), 0);
+    const total_kg     = bulk_total + retail_total;
+    const container    = state.containers.find(c => c.id === state.scan_id);
+    const fill         = active_fill(container);
+    if (!packing_state.shop) { packing_state.err = "Please enter the shop name."; render(); return; }
+    if (total_kg <= 0)       { packing_state.err = "Please enter at least one quantity."; render(); return; }
+    if (total_kg > fill.remaining) { packing_state.err = `Only ${fill.remaining}kg available.`; render(); return; }
+    packing_state.err = ""; packing_state.step = "review"; render();
+  });
+
+  app.querySelector("#packing-back-edit")?.addEventListener("click", () => { packing_state.step = "entry"; render(); });
+
+  app.querySelector("#packing-confirm")?.addEventListener("click", async () => {
+    const bulk_total = Number(packing_state.bulk_kg) || 0;
+    const lines      = [];
+    if (bulk_total > 0) lines.push({ type: "bulk", kg: bulk_total, bags: null, bag_size: null });
+    packing_state.retail_lines.forEach(l => {
+      const kg = calc_kg(l.bags, l.bag_size);
+      if (kg > 0) lines.push({ type: "retail", kg, bags: Number(l.bags), bag_size: Number(l.bag_size) });
+    });
+    const total_kg    = lines.reduce((s, l) => s + l.kg, 0);
+    const container   = state.containers.find(c => c.id === state.scan_id);
+    const fill        = active_fill(container);
+    const order_id    = packing_state.selected_order_id !== "manual" ? packing_state.selected_order_id : null;
+    await save_dispatch(state.scan_id, fill.fill_number, packing_state.shop, lines, total_kg, order_id);
+    packing_state.step = "done"; render();
+  });
+
+  app.querySelector("#packing-done")?.addEventListener("click", () => { state.scan_id = null; render(); });
+
+  app.querySelector("#confirm-delivery")?.addEventListener("click", async () => {
+    const d = state.dispatches.find(x => x.container_id === state.scan_id && !x.confirmed_at);
+    if (d) await confirm_delivery(d.id);
+    state.scan_id = null;
+    const url = new URL(window.location);
+    url.searchParams.delete("scan");
+    window.history.replaceState({}, "", url);
+    render();
+  });
+}
+
+// ── MANUAL ORDER LISTENERS ────────────────────────────────────────────────────
+function attach_manual_order_listeners() {
+  document.getElementById("add-mo-item")?.addEventListener("click", () => {
+    const list  = document.getElementById("mo-items");
+    const count = list.querySelectorAll(".mo-item").length + 1;
+    const div   = document.createElement("div");
+    div.className = "mo-item";
+    div.style.cssText = "background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px";
+    div.innerHTML = `
+      <div class="flex-between mb-8">
+        <span style="font-weight:600;font-size:13px;color:#888">Item ${count}</span>
+        <button class="remove-mo-item" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px">✕</button>
+      </div>
+      <div class="grid-2">
+        <div><label class="lbl">Description *</label><input class="mo-desc" placeholder="e.g. House Roast 1kg" /></div>
+        <div><label class="lbl">Product Code</label><input class="mo-code" placeholder="e.g. FP0030" /></div>
+        <div><label class="lbl">Quantity *</label><input type="number" class="mo-qty" placeholder="0" /></div>
+        <div><label class="lbl">Unit</label><select class="mo-unit"><option>EACH</option><option>KGS</option></select></div>
+      </div>`;
+    div.querySelector(".remove-mo-item").addEventListener("click", () => div.remove());
+    list.appendChild(div);
+  });
+
+  document.querySelectorAll(".remove-mo-item").forEach(btn => btn.addEventListener("click", () => btn.closest(".mo-item").remove()));
+
+  document.getElementById("save-manual-order")?.addEventListener("click", async () => {
+    const shop_name  = document.getElementById("mo-shop")?.value.trim();
+    const po_number  = document.getElementById("mo-po")?.value.trim();
+    const order_date = document.getElementById("mo-date")?.value.trim();
+    const err_el     = document.getElementById("mo-err");
+    if (!shop_name) { err_el.textContent = "Please enter a shop name."; err_el.style.display = "block"; return; }
+    const items = [];
+    document.querySelectorAll(".mo-item").forEach(row => {
+      const desc = row.querySelector(".mo-desc")?.value.trim();
+      const qty  = Number(row.querySelector(".mo-qty")?.value)  || 0;
+      const code = row.querySelector(".mo-code")?.value.trim();
+      const unit = row.querySelector(".mo-unit")?.value;
+      if (desc && qty > 0) items.push({ code, description: desc, quantity: qty, unit, unit_cost: 0, total: 0 });
+    });
+    if (!items.length) { err_el.textContent = "Add at least one item with a description and quantity."; err_el.style.display = "block"; return; }
+    await save_order({ shop_name, po_number, order_date, items, order_total: 0 });
+  });
+
+  document.getElementById("cancel-manual-order")?.addEventListener("click", () => render());
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — Bear Roastery</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    input, select, button { font-family: inherit; font-size: 14px; } button { cursor: pointer; }
+    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #e8d5b0; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #c8a96e; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
+    .content { padding: 24px; max-width: 860px; margin: 0 auto; }
+    .section { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; overflow: hidden; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #f0ebe4; cursor: pointer; user-select: none; }
+    .section-header:hover { background: #fdfaf7; }
+    .section-title { font-weight: 700; font-size: 16px; color: #1a1008; display: flex; align-items: center; gap: 10px; }
+    .section-title .icon { font-size: 20px; }
+    .section-desc { font-size: 13px; color: #888; margin-top: 2px; }
+    .section-arrow { font-size: 16px; color: #c8a96e; font-weight: 700; }
+    .section-body { padding: 20px; }
+    .card { background: #f5f0eb; border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+    .card-white { background: #fff; border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; }
+    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
+    input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; }
+    input:focus, select:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
+    .btn-dark { background: #1a1008; } .btn-amber { background: #c8a96e; }
+    .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
+    .btn-red { background: #e05c2a; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; } .btn-lg { padding: 12px 24px; }
+    .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
+    .mapping-row { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
+    .mapping-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
+    .mapping-header:hover { background: #fdfaf7; } .mapping-header.open { background: #fff8ee; }
+    .mapping-body { padding: 14px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
+    .fp-table-header { display: grid; grid-template-columns: 1fr 1fr auto; background: #f5f0eb; padding: 8px 12px; border-bottom: 1px solid #e0d5c5; }
+    .fp-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
+    .fp-row + .fp-row { border-top: 1px solid #f0ebe4; }
+    .supplier-card { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
+    .supplier-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
+    .supplier-header.open { background: #fff8ee; }
+    .supplier-body { padding: 14px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
+    .coffee-tag { display: inline-flex; align-items: center; gap: 6px; background: #f0ebe4; border-radius: 20px; padding: 4px 12px; font-size: 13px; margin: 4px; }
+    .coffee-tag button { background: none; border: none; color: #e05c2a; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; }
+    .save-bar { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e0d5c5; padding: 14px 24px; display: flex; align-items: center; gap: 14px; box-shadow: 0 -2px 8px rgba(0,0,0,0.06); }
+    .mono { font-family: monospace; } .err { color: #e05c2a; font-size: 13px; margin-top: 6px; } .hint { color: #888; font-size: 13px; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c8a96e; margin-bottom: 10px; }
+    .flex-between { display: flex; justify-content: space-between; align-items: center; }
+    .mt-8{margin-top:8px} .mt-12{margin-top:12px} .mt-16{margin-top:16px} .mb-12{margin-bottom:12px}
+    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
+    @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// BEAR ROASTERY — Settings
+// Single source of truth for coffees, FP mappings, QR base URL and suppliers.
+// Reads and writes to the settings table in Supabase (always row id = 1).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+// ── AUTH ──────────────────────────────────────────────────────────────────────
+supabase.auth.getSession().then(({ data: { session } }) => {
+  if (!session) window.location.href = "login.html";
+  else init();
+});
+
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
+const RETAIL_SIZES = [
+  { val: "0.2", label: "200g" },
+  { val: "0.5", label: "500g" },
+  { val: "1",   label: "1kg"  },
+];
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+const state = {
+  // Settings loaded from Supabase
+  settings: {
+    base_url:        "",
+    coffee_mappings: [],  // [{ app_name, fp_sizes: [{ code, size }] }]
+    coffees:         [],  // string[]
+  },
+  loading:      true,
+  saving:       false,
+  saved:        false,
+  open_section: "coffees",
+  ui: {
+    new_coffee:    "",
+    coffee_err:    "",
+    open_mapping:  null,
+    url_status:    null,   // null | "checking" | "ok" | "unreachable"
+    open_supplier: null,
+    supplier_err:  "",
+    supplier_templates: [], // loaded separately if needed in future
+  },
+};
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── SUPABASE ──────────────────────────────────────────────────────────────────
+async function loadSettings() {
+  const { data, error } = await supabase
+    .from("settings")
+    .select("*")
+    .eq("id", 1)
+    .single();
+
+  if (error) { console.error("Failed to load settings:", error); return; }
+
+  state.settings.base_url        = data.base_url        || "";
+  state.settings.coffee_mappings = data.coffee_mappings || [];
+  state.settings.coffees         = data.coffees         || [];
+}
+
+async function saveSettings() {
+  state.saving = true; render();
+
+  const { error } = await supabase
+    .from("settings")
+    .update({
+      base_url:        state.settings.base_url,
+      coffee_mappings: state.settings.coffee_mappings,
+      coffees:         state.settings.coffees,
+    })
+    .eq("id", 1);
+
+  state.saving = false;
+  if (error) { console.error("Failed to save settings:", error); return; }
+  state.saved = true; render();
+  setTimeout(() => { state.saved = false; render(); }, 3000);
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+async function init() {
+  await loadSettings();
+  state.loading = false;
+  render();
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function render() {
+  document.getElementById("app").innerHTML = buildApp();
+  attachListeners();
+}
+
+function buildApp() {
+  if (state.loading) return `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="go-dashboard">← Dashboard</button>
+        <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+        <div>
+          <div class="header-title">⚙️ Settings</div>
+          <div class="header-sub">Bear Roastery</div>
+        </div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>
+    <div class="loading">Loading settings…</div>`;
+
+  return `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="go-dashboard">← Dashboard</button>
+        <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+        <div>
+          <div class="header-title">⚙️ Settings</div>
+          <div class="header-sub">Bear Roastery</div>
+        </div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>
+    <div class="content">
+      <p class="hint" style="margin-bottom:20px">Changes here apply across all modules. Hit <strong>Save All Settings</strong> at the bottom when done.</p>
+      ${buildCoffeesSection()}
+      ${buildTraceabilitySection()}
+    </div>
+    <div class="save-bar">
+      <button class="btn btn-dark btn-lg" id="save-all" ${state.saving ? "disabled" : ""}>
+        ${state.saving ? "Saving…" : "Save All Settings"}
+      </button>
+      ${state.saved ? '<span style="color:#4a9e6b;font-weight:600;font-size:14px">✓ Saved</span>' : ""}
+    </div>`;
+}
+
+// ── COFFEES SECTION ───────────────────────────────────────────────────────────
+function buildCoffeesSection() {
+  const open    = state.open_section === "coffees";
+  const coffees = state.settings.coffees || [];
+
+  const body = open ? `
+    <div class="section-body">
+      <p class="hint mb-12">Master coffee list used across all modules — Roasts, Stock and Traceability all pull from here.</p>
+      <div style="margin-bottom:14px">
+        ${coffees.length === 0
+          ? '<p class="hint">No coffees yet.</p>'
+          : coffees.map((c, i) => `
+              <span class="coffee-tag">
+                ${esc(c)}
+                <button data-remove-coffee="${i}">✕</button>
+              </span>`).join("")}
+      </div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <div style="flex:1">
+          <label class="lbl">Add Coffee</label>
+          <input id="new-coffee" value="${esc(state.ui.new_coffee)}" placeholder="e.g. Colombia El Paraiso" />
+        </div>
+        <button class="btn btn-dark" id="add-coffee">Add</button>
+      </div>
+      ${state.ui.coffee_err ? `<p class="err">${esc(state.ui.coffee_err)}</p>` : ""}
+    </div>` : "";
+
+  return `
+    <div class="section">
+      <div class="section-header" data-toggle-section="coffees">
+        <div>
+          <div class="section-title"><span class="icon">☕</span> Coffees</div>
+          <div class="section-desc">${coffees.length} coffee${coffees.length !== 1 ? "s" : ""}</div>
+        </div>
+        <span class="section-arrow">${open ? "▾" : "▸"}</span>
+      </div>
+      ${body}
+    </div>`;
+}
+
+// ── TRACEABILITY SECTION ──────────────────────────────────────────────────────
+function buildTraceabilitySection() {
+  const open     = state.open_section === "traceability";
+  const mappings = state.settings.coffee_mappings || [];
+  const { url_status, open_mapping } = state.ui;
+
+  const mappings_html = mappings.map((m, i) => {
+    const is_open = open_mapping === i;
+    const fp_rows = (m.fp_sizes || []).map((fs, j) => `
+      <div class="fp-row">
+        <input class="fp-code" data-mi="${i}" data-fi="${j}" value="${esc(fs.code)}" placeholder="e.g. FP0046" style="font-family:monospace;font-size:13px" />
+        <select class="fp-size" data-mi="${i}" data-fi="${j}" style="font-size:13px">
+          ${RETAIL_SIZES.map(s => `<option value="${s.val}" ${fs.size === s.val ? "selected" : ""}>${s.label}</option>`).join("")}
+          <option value="bulk" ${fs.size === "bulk" ? "selected" : ""}>Bulk (BAR)</option>
+        </select>
+        <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1" data-remove-fp="${i}-${j}">✕</button>
+      </div>`).join("");
+
+    return `
+      <div class="mapping-row">
+        <div class="mapping-header ${is_open ? "open" : ""}" data-toggle-mapping="${i}">
+          <span style="font-size:15px;color:#c8a96e">${is_open ? "▾" : "▸"}</span>
+          <span style="flex:1;font-weight:600;color:${m.app_name ? "#1a1008" : "#bbb"};font-size:14px">${esc(m.app_name || "Unnamed coffee")}</span>
+          <span class="hint" style="font-size:12px">${(m.fp_sizes || []).length} FP code${(m.fp_sizes || []).length !== 1 ? "s" : ""}</span>
+          <button data-remove-mapping="${i}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;padding:0 4px;line-height:1">✕</button>
+        </div>
+        ${is_open ? `
+          <div class="mapping-body">
+            <div style="margin-bottom:14px">
+              <label class="lbl">Coffee Name *</label>
+              <input class="mapping-name" data-mi="${i}" value="${esc(m.app_name)}" placeholder="e.g. Ethiopia Yirgacheffe" />
+            </div>
+            <div class="card-white">
+              <div class="fp-table-header">
+                <span class="lbl" style="margin:0">FP Code</span>
+                <span class="lbl" style="margin:0">Bag Size</span>
+                <span></span>
+              </div>
+              ${(m.fp_sizes || []).length === 0 ? '<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No FP codes yet.</div>' : ""}
+              ${fp_rows}
+              <div style="padding:8px 12px">
+                <button class="btn btn-amber btn-sm" data-add-fp="${i}">+ Add FP Code</button>
+              </div>
+            </div>
+          </div>` : ""}
+      </div>`;
+  }).join("");
+
+  const body = open ? `
+    <div class="section-body">
+      <div class="section-label">QR Code Base URL</div>
+      <div class="card" style="margin-bottom:20px">
+        <p class="hint mb-12">The URL embedded in every container QR code. Update this before going live.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:240px">
+            <input id="base-url" value="${esc(state.settings.base_url)}" placeholder="https://your-domain-here/scan" style="font-family:monospace;font-size:13px" />
+          </div>
+          <button class="btn btn-dark" id="check-url" ${url_status === "checking" ? "disabled" : ""}>
+            ${url_status === "checking" ? "⏳ Checking..." : "🔍 Check URL"}
+          </button>
+        </div>
+        ${url_status === "ok" ? '<p style="margin-top:8px;font-size:13px;color:#4a9e6b;font-weight:600">✓ URL is reachable.</p>' : ""}
+        ${url_status === "unreachable" ? '<p style="margin-top:8px;font-size:13px;color:#e05c2a;font-weight:600">⚠️ Could not reach this URL.</p>' : ""}
+      </div>
+      <div class="flex-between mb-12">
+        <div class="section-label" style="margin:0">FP Code Mappings</div>
+        <button class="btn btn-dark btn-sm" id="add-mapping">+ Add Coffee</button>
+      </div>
+      ${mappings.length === 0 ? '<p class="hint" style="font-style:italic">No mappings yet.</p>' : mappings_html}
+    </div>` : "";
+
+  return `
+    <div class="section">
+      <div class="section-header" data-toggle-section="traceability">
+        <div>
+          <div class="section-title"><span class="icon">📍</span> Traceability</div>
+          <div class="section-desc">QR base URL · ${mappings.length} FP mapping${mappings.length !== 1 ? "s" : ""}</div>
+        </div>
+        <span class="section-arrow">${open ? "▾" : "▸"}</span>
+      </div>
+      ${body}
+    </div>`;
+}
+
+// ── LISTENERS ─────────────────────────────────────────────────────────────────
+function attachListeners() {
+  const app = document.getElementById("app");
+
+  app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href = "index.html");
+  app.querySelector("#logout-btn")?.addEventListener("click", async () => {
+    await supabase.auth.signOut();
+    window.location.href = "login.html";
+  });
+
+  // Section toggles
+  app.querySelectorAll("[data-toggle-section]").forEach(el => el.addEventListener("click", () => {
+    state.open_section = state.open_section === el.dataset.toggleSection ? null : el.dataset.toggleSection;
+    render();
+  }));
+
+  // Save all
+  app.querySelector("#save-all")?.addEventListener("click", () => {
+    const bu = document.getElementById("base-url");
+    if (bu) state.settings.base_url = bu.value.trim();
+    saveSettings();
+  });
+
+  // ── Coffees
+  app.querySelectorAll("[data-remove-coffee]").forEach(btn => btn.addEventListener("click", () => {
+    state.settings.coffees.splice(Number(btn.dataset.removeCoffee), 1);
+    render();
+  }));
+
+  const new_coffee_input = app.querySelector("#new-coffee");
+  if (new_coffee_input) new_coffee_input.addEventListener("input", e => { state.ui.new_coffee = e.target.value; });
+
+  app.querySelector("#add-coffee")?.addEventListener("click", () => {
+    const val = document.getElementById("new-coffee")?.value.trim();
+    if (!val) { state.ui.coffee_err = "Please enter a coffee name."; render(); return; }
+    if (state.settings.coffees.includes(val)) { state.ui.coffee_err = "Already in list."; render(); return; }
+    state.settings.coffees.push(val);
+    state.ui.new_coffee = "";
+    state.ui.coffee_err = "";
+    render();
+  });
+
+  new_coffee_input?.addEventListener("keydown", e => { if (e.key === "Enter") app.querySelector("#add-coffee")?.click(); });
+
+  // ── URL check
+  app.querySelector("#check-url")?.addEventListener("click", async () => {
+    const target = document.getElementById("base-url")?.value.trim();
+    if (!target) return;
+    state.ui.url_status = "checking"; render();
+    try {
+      const origin = new URL(target).origin;
+      await fetch(origin, { method: "HEAD", mode: "no-cors", signal: AbortSignal.timeout(5000) });
+      state.ui.url_status = "ok";
+    } catch { state.ui.url_status = "unreachable"; }
+    render();
+  });
+
+  // ── Mappings
+  app.querySelector("#add-mapping")?.addEventListener("click", () => {
+    state.settings.coffee_mappings.push({ app_name: "", fp_sizes: [] });
+    state.ui.open_mapping = state.settings.coffee_mappings.length - 1;
+    render();
+  });
+
+  app.querySelectorAll("[data-toggle-mapping]").forEach(el => el.addEventListener("click", () => {
+    const i = Number(el.dataset.toggleMapping);
+    state.ui.open_mapping = state.ui.open_mapping === i ? null : i;
+    render();
+  }));
+
+  app.querySelectorAll("[data-remove-mapping]").forEach(btn => btn.addEventListener("click", e => {
+    e.stopPropagation();
+    const i = Number(btn.dataset.removeMapping);
+    state.settings.coffee_mappings.splice(i, 1);
+    if (state.ui.open_mapping === i) state.ui.open_mapping = null;
+    render();
+  }));
+
+  app.querySelectorAll(".mapping-name").forEach(inp => inp.addEventListener("input", e => {
+    state.settings.coffee_mappings[Number(inp.dataset.mi)].app_name = e.target.value;
+  }));
+
+  app.querySelectorAll("[data-add-fp]").forEach(btn => btn.addEventListener("click", () => {
+    state.settings.coffee_mappings[Number(btn.dataset.addFp)].fp_sizes.push({ code: "", size: "0.2" });
+    render();
+  }));
+
+  app.querySelectorAll("[data-remove-fp]").forEach(btn => btn.addEventListener("click", () => {
+    const [mi, fi] = btn.dataset.removeFp.split("-").map(Number);
+    state.settings.coffee_mappings[mi].fp_sizes.splice(fi, 1);
+    render();
+  }));
+
+  app.querySelectorAll(".fp-code").forEach(inp => inp.addEventListener("input", e => {
+    state.settings.coffee_mappings[Number(inp.dataset.mi)].fp_sizes[Number(inp.dataset.fi)].code = e.target.value.toUpperCase();
+  }));
+
+  app.querySelectorAll(".fp-size").forEach(sel => sel.addEventListener("change", e => {
+    state.settings.coffee_mappings[Number(sel.dataset.mi)].fp_sizes[Number(sel.dataset.fi)].size = e.target.value;
+  }));
+
+  // Sync base_url input to state on change
+  app.querySelector("#base-url")?.addEventListener("input", e => {
+    state.settings.base_url = e.target.value;
+    state.ui.url_status = null;
+  });
+}
+</script>
+</body>
+</html>

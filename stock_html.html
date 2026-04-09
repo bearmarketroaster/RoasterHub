@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock — Bear Roastery</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    input, select, button { font-family: inherit; font-size: 14px; }
+    button { cursor: pointer; }
+
+    .header {
+      background: #1a1008; color: #e8d5b0;
+      padding: 16px 24px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .header-left  { display: flex; align-items: center; gap: 12px; }
+    .header-back  { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #e8d5b0; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub   { font-size: 12px; color: #c8a96e; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
+
+    .content { padding: 24px; max-width: 900px; margin: 0 auto; }
+
+    .tabs { display: flex; border-bottom: 2px solid #c8a96e; background: #fff; overflow-x: auto; }
+    .tab-btn { padding: 12px 20px; border: none; background: #fff; color: #555; font-weight: 400; font-size: 14px; white-space: nowrap; cursor: pointer; }
+    .tab-btn.active { background: #1a1008; color: #e8d5b0; font-weight: 700; }
+
+    .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 12px; }
+
+    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
+    input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; }
+    input:focus, select:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .span-2 { grid-column: 1 / -1; }
+
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
+    .btn-dark  { background: #1a1008; }
+    .btn-green { background: #4a9e6b; }
+    .btn-amber { background: #c8a96e; }
+    .btn-grey  { background: #888; }
+    .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
+    .btn-sm    { padding: 4px 10px; font-size: 12px; }
+    .btn-lg    { padding: 12px 24px; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
+
+    .stock-track { background: #e0d5c5; border-radius: 4px; height: 10px; }
+    .stock-fill  { border-radius: 4px; height: 10px; transition: width 0.3s; }
+
+    .stock-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 10px; }
+
+    .delivery-item { background: #f5f0eb; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+
+    .adj-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f0ebe4; font-size: 13px; }
+    .adj-row:last-child { border-bottom: none; }
+
+    .mono  { font-family: monospace; }
+    .err   { color: #e05c2a; font-size: 13px; margin-top: 8px; }
+    .hint  { color: #888; font-size: 13px; }
+    .flex-between { display: flex; justify-content: space-between; align-items: center; }
+    .flex-wrap    { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .mt-4  { margin-top: 4px; }
+    .mt-8  { margin-top: 8px; }
+    .mt-12 { margin-top: 12px; }
+    .mt-16 { margin-top: 16px; }
+    .mb-8  { margin-bottom: 8px; }
+    .mb-12 { margin-bottom: 12px; }
+    .mb-16 { margin-bottom: 16px; }
+    h2 { color: #1a1008; }
+    h3 { color: #1a1008; margin-bottom: 12px; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c8a96e; margin-bottom: 12px; }
+    .empty { text-align: center; color: #aaa; padding: 40px 20px; }
+    .empty .icon { font-size: 36px; margin-bottom: 8px; }
+    .low-stock { background: #fff0ee; border: 1px solid #e05c2a; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 13px; color: #e05c2a; }
+    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
+
+    @media (max-width: 600px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .content { padding: 16px; }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// BEAR ROASTERY — Stock Management (Green Coffee)
+//
+// Tracks green coffee stock:
+//   - Log deliveries (weight, bags, price per kg, lot/invoice, origin)
+//   - Stock depletes automatically when roast sessions are saved in roasts.html
+//   - Manual adjustments (spills, write-offs, corrections)
+//   - Low stock warnings per coffee
+// ─────────────────────────────────────────────────────────────────────────────
+
+const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+// ── AUTH ──────────────────────────────────────────────────────────────────────
+supabase.auth.getSession().then(({ data: { session } }) => {
+  if (!session) window.location.href = "login.html";
+  else init();
+});
+
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
+const LOW_STOCK_KG = 20;
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+const state = {
+  tab:         0,  // 0 = Green Stock, 1 = Deliveries, 2 = Adjustments
+  coffees:     [],
+  stock_items: [],
+  deliveries:  [],
+  adjustments: [],
+  loading:     true,
+  saving:      false,
+  ui: {
+    show_delivery_form: false,
+    show_adj_form:      false,
+    delivery_err:       "",
+    adj_err:            "",
+    delivery:           new_delivery(),
+    adj: { coffee: "", change_kg: "", reason: "roast", note: "" },
+  },
+};
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function today()  { return new Date().toISOString().split("T")[0]; }
+function esc(s)   { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function gen_id(prefix, list) { return `${prefix}-${today().replace(/-/g,"")}-${String(list.length + 1).padStart(3,"0")}`; }
+
+function new_delivery() {
+  return {
+    date: today(), supplier: "", invoice_ref: "",
+    items: [{ coffee: "", origin: "", lot_number: "", bags: "", weight_kg: "", price_per_kg: "" }],
+  };
+}
+
+// ── SUPABASE ──────────────────────────────────────────────────────────────────
+async function load_data() {
+  // Load coffees from settings
+  const { data: settings } = await supabase
+    .from("settings")
+    .select("coffees")
+    .eq("id", 1)
+    .single();
+  state.coffees = settings?.coffees || [];
+
+  // Load stock items
+  const { data: stock_items } = await supabase
+    .from("stock_items")
+    .select("*")
+    .order("coffee");
+  state.stock_items = stock_items || [];
+
+  // Load deliveries with their items
+  const { data: deliveries } = await supabase
+    .from("stock_deliveries")
+    .select("*, stock_delivery_items(*)")
+    .order("date", { ascending: false });
+  state.deliveries = (deliveries || []).map(d => ({
+    ...d,
+    items: d.stock_delivery_items || [],
+  }));
+
+  // Load adjustments
+  const { data: adjustments } = await supabase
+    .from("stock_adjustments")
+    .select("*")
+    .order("date", { ascending: false });
+  state.adjustments = adjustments || [];
+}
+
+async function save_delivery() {
+  state.saving = true; render();
+
+  const d           = state.ui.delivery;
+  const valid_items = d.items.filter(i => i.coffee && Number(i.weight_kg) > 0);
+
+  if (!d.date)           { state.ui.delivery_err = "Please enter a delivery date."; state.saving = false; render(); return; }
+  if (!valid_items.length) { state.ui.delivery_err = "Please add at least one item with a coffee and weight."; state.saving = false; render(); return; }
+
+  const delivery_id = gen_id("DEL", state.deliveries);
+
+  const { error: del_err } = await supabase
+    .from("stock_deliveries")
+    .insert({
+      id:          delivery_id,
+      date:        d.date,
+      supplier:    d.supplier || null,
+      invoice_ref: d.invoice_ref || null,
+    });
+
+  if (del_err) { state.ui.delivery_err = "Failed to save delivery. Please try again."; state.saving = false; render(); return; }
+
+  // Insert delivery items
+  const items_to_insert = valid_items.map((item, i) => ({
+    id:           `${delivery_id}-I${i + 1}`,
+    delivery_id,
+    coffee:       item.coffee,
+    origin:       item.origin       || null,
+    lot_number:   item.lot_number   || null,
+    bags:         Number(item.bags) || null,
+    weight_kg:    Number(item.weight_kg),
+    price_per_kg: Number(item.price_per_kg) || null,
+  }));
+
+  await supabase.from("stock_delivery_items").insert(items_to_insert);
+
+  // Update stock levels and log adjustments for each item
+  for (const item of valid_items) {
+    // Upsert stock item
+    const existing = state.stock_items.find(s => s.coffee === item.coffee);
+    if (existing) {
+      await supabase
+        .from("stock_items")
+        .update({ current_kg: existing.current_kg + Number(item.weight_kg), origin: item.origin || existing.origin })
+        .eq("id", existing.id);
+    } else {
+      await supabase.from("stock_items").insert({
+        id:                  gen_id("STK", state.stock_items),
+        coffee:              item.coffee,
+        origin:              item.origin || null,
+        current_kg:          Number(item.weight_kg),
+        low_stock_threshold: LOW_STOCK_KG,
+      });
+    }
+
+    // Log adjustment
+    await supabase.from("stock_adjustments").insert({
+      id:        gen_id("ADJ", state.adjustments),
+      date:      d.date,
+      coffee:    item.coffee,
+      change_kg: Number(item.weight_kg),
+      reason:    "delivery",
+      note:      `Delivery ${delivery_id}${d.invoice_ref ? " · " + d.invoice_ref : ""}`,
+      auto:      true,
+    });
+  }
+
+  state.saving = false;
+  state.ui.show_delivery_form = false;
+  state.ui.delivery_err       = "";
+  state.ui.delivery           = new_delivery();
+  await load_data();
+  render();
+}
+
+async function save_adjustment() {
+  state.saving = true; render();
+
+  const coffee    = document.getElementById("adj-coffee")?.value;
+  const change_kg = Number(document.getElementById("adj-kg")?.value);
+  const reason    = document.getElementById("adj-reason")?.value;
+  const note      = document.getElementById("adj-note")?.value.trim();
+
+  if (!coffee)    { state.ui.adj_err = "Please select a coffee."; state.saving = false; render(); return; }
+  if (!change_kg) { state.ui.adj_err = "Please enter a non-zero kg value."; state.saving = false; render(); return; }
+
+  const { error } = await supabase.from("stock_adjustments").insert({
+    id:        gen_id("ADJ", state.adjustments),
+    date:      today(),
+    coffee,
+    change_kg,
+    reason,
+    note:      note || null,
+    auto:      false,
+  });
+
+  if (error) { state.ui.adj_err = "Failed to save adjustment."; state.saving = false; render(); return; }
+
+  // Update stock item
+  const existing = state.stock_items.find(s => s.coffee === coffee);
+  if (existing) {
+    await supabase
+      .from("stock_items")
+      .update({ current_kg: Math.max(0, existing.current_kg + change_kg) })
+      .eq("id", existing.id);
+  } else {
+    await supabase.from("stock_items").insert({
+      id:                  gen_id("STK", state.stock_items),
+      coffee,
+      current_kg:          Math.max(0, change_kg),
+      low_stock_threshold: LOW_STOCK_KG,
+    });
+  }
+
+  state.saving = false;
+  state.ui.adj          = { coffee: "", change_kg: "", reason: "roast", note: "" };
+  state.ui.show_adj_form = false;
+  state.ui.adj_err       = "";
+  await load_data();
+  render();
+}
+
+async function set_threshold(coffee, value) {
+  const item = state.stock_items.find(s => s.coffee === coffee);
+  if (!item) return;
+  await supabase
+    .from("stock_items")
+    .update({ low_stock_threshold: value })
+    .eq("id", item.id);
+  await load_data();
+  render();
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+async function init() {
+  await load_data();
+  state.loading = false;
+  render();
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function render() {
+  document.getElementById("app").innerHTML = build_app();
+  attach_listeners();
+}
+
+function build_app() {
+  const header = `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="go-dashboard">← Dashboard</button>
+        <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+        <div>
+          <div class="header-title">📦 Stock</div>
+          <div class="header-sub">Bear Roastery</div>
+        </div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>`;
+
+  if (state.loading) return header + `<div class="loading">Loading stock…</div>`;
+
+  const low_stock_items = state.stock_items.filter(s => s.current_kg < (s.low_stock_threshold || LOW_STOCK_KG) && s.current_kg > 0);
+  const out_of_stock    = state.stock_items.filter(s => s.current_kg === 0 && s.coffee);
+  const tabs            = ["🌱 Green Stock", "📦 Deliveries", "⚖️ Adjustments"];
+
+  return header + `
+    <div class="tabs">
+      ${tabs.map((t, i) => `<button class="tab-btn${state.tab === i ? " active" : ""}" data-tab="${i}">${t}</button>`).join("")}
+    </div>
+    <div class="content">
+      ${low_stock_items.length > 0 || out_of_stock.length > 0 ? `
+        <div class="low-stock">
+          ⚠️ Low stock:
+          ${[
+            ...out_of_stock.map(s => `<strong>${esc(s.coffee)}</strong> — out of stock`),
+            ...low_stock_items.map(s => `<strong>${esc(s.coffee)}</strong> — ${s.current_kg.toFixed(1)}kg remaining`),
+          ].join(" · ")}
+        </div>` : ""}
+      ${state.tab === 0 ? build_green_stock()  :
+        state.tab === 1 ? build_deliveries()   :
+        state.tab === 2 ? build_adjustments()  : ""}
+    </div>`;
+}
+
+// ── GREEN STOCK TAB ───────────────────────────────────────────────────────────
+function build_green_stock() {
+  const total_kg = state.stock_items.reduce((s, i) => s + i.current_kg, 0);
+
+  const stats_html = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px">
+      ${[
+        { icon:"🌱", label:"Total Green Stock", value: `${total_kg.toFixed(1)}kg` },
+        { icon:"📦", label:"Coffee Lines",      value: state.stock_items.filter(s => s.current_kg > 0).length },
+        { icon:"📋", label:"Deliveries Logged", value: state.deliveries.length },
+      ].map(({ icon, label, value }) => `
+        <div class="card" style="text-align:center;padding:14px 10px;margin-bottom:0">
+          <div style="font-size:22px;margin-bottom:4px">${icon}</div>
+          <div style="font-size:20px;font-weight:700">${value}</div>
+          <div style="font-size:11px;color:#888;margin-top:2px">${label}</div>
+        </div>`).join("")}
+    </div>`;
+
+  if (state.stock_items.length === 0) return `
+    ${stats_html}
+    <div class="card empty">
+      <div class="icon">🌱</div>
+      No green coffee in stock yet.<br/>Log a delivery in the <strong>Deliveries</strong> tab to get started.
+    </div>`;
+
+  const sorted = [...state.stock_items].sort((a, b) => a.current_kg - b.current_kg);
+
+  return `
+    ${stats_html}
+    <div class="section-label">Current Green Stock</div>
+    ${sorted.map(item => {
+      const last_delivery_item = state.deliveries
+        .flatMap(d => d.items)
+        .find(i => i.coffee === item.coffee);
+
+      const threshold = item.low_stock_threshold || LOW_STOCK_KG;
+      const pct       = Math.min(100, Math.round((item.current_kg / Math.max(item.current_kg, threshold * 3)) * 100));
+      const bar_color = item.current_kg === 0 ? "#e05c2a" : item.current_kg < threshold ? "#e05c2a" : item.current_kg < threshold * 2 ? "#e0a82a" : "#4a9e6b";
+      const status    = item.current_kg === 0
+        ? { bg:"#fff0ee", color:"#e05c2a", label:"Out of Stock" }
+        : item.current_kg < threshold
+        ? { bg:"#fff0ee", color:"#e05c2a", label:"Low Stock" }
+        : item.current_kg < threshold * 2
+        ? { bg:"#fff8ee", color:"#e0a82a", label:"Running Low" }
+        : { bg:"#edf7f0", color:"#4a9e6b", label:"In Stock" };
+
+      return `
+        <div class="stock-card" style="border-left:4px solid ${bar_color}">
+          <div class="flex-between mb-8">
+            <div class="flex-wrap">
+              <span style="font-weight:700;font-size:15px">${esc(item.coffee)}</span>
+              <span class="tag" style="background:${status.bg};color:${status.color}">${status.label}</span>
+            </div>
+            <span style="font-size:22px;font-weight:700">${item.current_kg.toFixed(1)}kg</span>
+          </div>
+          ${last_delivery_item?.origin     ? `<div class="hint mt-4">Origin: <strong>${esc(last_delivery_item.origin)}</strong></div>` : ""}
+          ${last_delivery_item?.lot_number ? `<div class="hint mt-4">Lot: <span class="mono" style="background:#f0ebe4;padding:1px 6px;border-radius:3px">${esc(last_delivery_item.lot_number)}</span></div>` : ""}
+          <div style="margin-top:12px">
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:#888;margin-bottom:4px">
+              <span>${item.current_kg.toFixed(1)}kg remaining</span>
+              <span>Low stock alert at ${threshold}kg</span>
+            </div>
+            <div class="stock-track">
+              <div class="stock-fill" style="background:${bar_color};width:${pct}%"></div>
+            </div>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" data-adj-coffee="${esc(item.coffee)}">± Adjust</button>
+            <button class="btn btn-ghost btn-sm" data-set-threshold="${esc(item.coffee)}" data-threshold="${threshold}">Set Alert Level</button>
+          </div>
+        </div>`;
+    }).join("")}`;
+}
+
+// ── DELIVERIES TAB ────────────────────────────────────────────────────────────
+function build_deliveries() {
+  const { show_delivery_form, delivery, delivery_err } = state.ui;
+
+  const form_html = show_delivery_form ? `
+    <div class="card mb-16">
+      <h3>Log Delivery</h3>
+      <div class="grid-3 mb-12">
+        <div><label class="lbl">Delivery Date *</label><input type="date" id="del-date" value="${delivery.date}" /></div>
+        <div><label class="lbl">Supplier</label><input id="del-supplier" value="${esc(delivery.supplier)}" placeholder="e.g. Falcon Coffees" /></div>
+        <div><label class="lbl">Invoice / Ref No.</label><input id="del-invoice" value="${esc(delivery.invoice_ref)}" placeholder="e.g. INV-2026-042" /></div>
+      </div>
+      <div class="section-label" style="margin-bottom:8px">Line Items</div>
+      <div id="delivery-items">
+        ${delivery.items.map((item, i) => build_delivery_item_row(item, i)).join("")}
+      </div>
+      <button class="btn btn-ghost btn-sm mt-8" id="add-delivery-item">+ Add Item</button>
+      ${delivery_err ? `<p class="err mt-8">${esc(delivery_err)}</p>` : ""}
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-dark btn-lg" id="save-delivery" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save Delivery"}</button>
+        <button class="btn btn-ghost btn-lg" id="cancel-delivery">Cancel</button>
+      </div>
+    </div>` : "";
+
+  const delivery_list = state.deliveries.map(d => {
+    const total_kg    = d.items.reduce((s, i) => s + (Number(i.weight_kg) || 0), 0);
+    const total_value = d.items.reduce((s, i) => s + (Number(i.weight_kg) || 0) * (Number(i.price_per_kg) || 0), 0);
+    return `
+      <div class="card" style="border-left:4px solid #c8a96e">
+        <div class="flex-between mb-8">
+          <div class="flex-wrap">
+            <span style="font-weight:700;font-size:15px">${esc(d.supplier || "Delivery")}</span>
+            <span class="tag" style="background:#fff8ee;color:#c8a96e">${d.date}</span>
+            ${d.invoice_ref ? `<span class="mono hint">${esc(d.invoice_ref)}</span>` : ""}
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:700;font-size:16px">${total_kg.toFixed(1)}kg</div>
+            ${total_value > 0 ? `<div class="hint" style="font-size:12px">€${total_value.toFixed(2)}</div>` : ""}
+          </div>
+        </div>
+        <div style="display:grid;gap:6px">
+          ${d.items.map(item => `
+            <div style="display:flex;justify-content:space-between;align-items:center;background:#f5f0eb;border-radius:6px;padding:8px 12px;font-size:13px">
+              <div>
+                <span style="font-weight:600">${esc(item.coffee)}</span>
+                ${item.origin     ? `<span class="hint"> · ${esc(item.origin)}</span>` : ""}
+                ${item.lot_number ? `<span class="hint"> · Lot <span class="mono">${esc(item.lot_number)}</span></span>` : ""}
+              </div>
+              <div style="text-align:right;white-space:nowrap">
+                <span style="font-weight:600">${Number(item.weight_kg).toFixed(1)}kg</span>
+                ${item.bags       ? `<span class="hint"> · ${item.bags} bags</span>` : ""}
+                ${item.price_per_kg ? `<span class="hint"> · €${Number(item.price_per_kg).toFixed(2)}/kg</span>` : ""}
+              </div>
+            </div>`).join("")}
+        </div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="flex-between mb-16">
+      <h2>Deliveries</h2>
+      <button class="btn btn-dark" id="toggle-delivery-form">+ Log Delivery</button>
+    </div>
+    ${form_html}
+    ${state.deliveries.length === 0 && !show_delivery_form
+      ? `<div class="card empty"><div class="icon">📦</div>No deliveries logged yet.</div>`
+      : delivery_list}`;
+}
+
+function build_delivery_item_row(item, i) {
+  return `
+    <div class="delivery-item" data-item-idx="${i}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-weight:600;font-size:13px;color:#888">Item ${i + 1}</span>
+        ${i > 0 ? `<button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px" data-remove-item="${i}">✕</button>` : ""}
+      </div>
+      <div class="grid-2" style="gap:10px">
+        <div>
+          <label class="lbl">Coffee *</label>
+          <select class="item-coffee" data-idx="${i}">
+            <option value="">— Select —</option>
+            ${state.coffees.map(c => `<option value="${esc(c)}" ${item.coffee === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+          </select>
+        </div>
+        <div><label class="lbl">Origin / Country</label><input class="item-origin" data-idx="${i}" value="${esc(item.origin)}" placeholder="e.g. Ethiopia" /></div>
+        <div><label class="lbl">Lot / Invoice No.</label><input class="item-lot" data-idx="${i}" value="${esc(item.lot_number)}" placeholder="e.g. ETH-2026-01" /></div>
+        <div><label class="lbl">No. of Bags</label><input type="number" class="item-bags" data-idx="${i}" value="${item.bags}" placeholder="0" /></div>
+        <div><label class="lbl">Total Weight (kg) *</label><input type="number" class="item-weight" data-idx="${i}" value="${item.weight_kg}" placeholder="0.0" step="0.1" /></div>
+        <div><label class="lbl">Price per kg (€)</label><input type="number" class="item-price" data-idx="${i}" value="${item.price_per_kg}" placeholder="0.00" step="0.01" /></div>
+      </div>
+    </div>`;
+}
+
+// ── ADJUSTMENTS TAB ───────────────────────────────────────────────────────────
+function build_adjustments() {
+  const { show_adj_form, adj, adj_err } = state.ui;
+
+  const form_html = show_adj_form ? `
+    <div class="card mb-16">
+      <h3>Manual Adjustment</h3>
+      <p class="hint mb-12">Use this to correct stock levels — spills, sampling, write-offs, or counting corrections.</p>
+      <div class="grid-2">
+        <div>
+          <label class="lbl">Coffee *</label>
+          <select id="adj-coffee">
+            <option value="">— Select coffee —</option>
+            ${state.coffees.map(c => `<option value="${esc(c)}" ${adj.coffee === c ? "selected" : ""}>${esc(c)}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label class="lbl">Reason</label>
+          <select id="adj-reason">
+            <option value="roast"      ${adj.reason === "roast"      ? "selected" : ""}>Roast (manual)</option>
+            <option value="spill"      ${adj.reason === "spill"      ? "selected" : ""}>Spill / Loss</option>
+            <option value="sample"     ${adj.reason === "sample"     ? "selected" : ""}>Sample</option>
+            <option value="correction" ${adj.reason === "correction" ? "selected" : ""}>Stock Correction</option>
+            <option value="other"      ${adj.reason === "other"      ? "selected" : ""}>Other</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">Change (kg) — use negative to deduct *</label>
+          <input type="number" id="adj-kg" value="${adj.change_kg}" placeholder="e.g. -2.5 or +10" step="0.1" />
+        </div>
+        <div>
+          <label class="lbl">Note</label>
+          <input id="adj-note" value="${esc(adj.note)}" placeholder="Optional note" />
+        </div>
+      </div>
+      ${adj_err ? `<p class="err mt-8">${esc(adj_err)}</p>` : ""}
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-dark btn-lg" id="save-adj" ${state.saving ? "disabled" : ""}>${state.saving ? "Saving…" : "Save Adjustment"}</button>
+        <button class="btn btn-ghost btn-lg" id="cancel-adj">Cancel</button>
+      </div>
+    </div>` : "";
+
+  const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", other:"📝 Other" };
+
+  const adj_list = state.adjustments.map(a => {
+    const is_pos = a.change_kg > 0;
+    return `
+      <div class="adj-row">
+        <span class="tag" style="background:${is_pos ? "#edf7f0" : "#fff0ee"};color:${is_pos ? "#4a9e6b" : "#e05c2a"};min-width:70px;text-align:center">
+          ${is_pos ? "+" : ""}${Number(a.change_kg).toFixed(1)}kg
+        </span>
+        <span style="flex:1;font-weight:500">${esc(a.coffee)}</span>
+        <span class="hint">${reason_labels[a.reason] || a.reason}</span>
+        ${a.note ? `<span class="hint" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.note)}</span>` : ""}
+        <span class="hint" style="white-space:nowrap">${a.date}</span>
+        ${a.auto ? `<span class="tag" style="background:#f5f0eb;color:#aaa;font-size:10px">auto</span>` : ""}
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="flex-between mb-16">
+      <h2>Adjustments</h2>
+      <button class="btn btn-dark" id="toggle-adj-form">± New Adjustment</button>
+    </div>
+    ${form_html}
+    ${state.adjustments.length === 0 && !show_adj_form
+      ? `<div class="card empty"><div class="icon">⚖️</div>No adjustments yet.</div>`
+      : `<div class="card">${adj_list || `<div class="hint" style="padding:8px 0">No adjustments yet.</div>`}</div>`}`;
+}
+
+// ── LISTENERS ─────────────────────────────────────────────────────────────────
+function attach_listeners() {
+  const app = document.getElementById("app");
+
+  app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href = "index.html");
+  app.querySelector("#logout-btn")?.addEventListener("click", async () => {
+    await supabase.auth.signOut();
+    window.location.href = "login.html";
+  });
+
+  app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => {
+    state.tab = Number(btn.dataset.tab); render();
+  }));
+
+  // Quick adjust from stock card
+  app.querySelectorAll("[data-adj-coffee]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.adj.coffee = btn.dataset.adjCoffee;
+    state.ui.show_adj_form = true;
+    state.tab = 2; render();
+  }));
+
+  // Set alert threshold
+  app.querySelectorAll("[data-set-threshold]").forEach(btn => btn.addEventListener("click", () => {
+    const coffee    = btn.dataset.setThreshold;
+    const current   = Number(btn.dataset.threshold) || LOW_STOCK_KG;
+    const val       = prompt(`Low stock alert threshold for ${coffee} (kg):`, current);
+    if (val !== null && Number(val) > 0) set_threshold(coffee, Number(val));
+  }));
+
+  // Delivery form
+  app.querySelector("#toggle-delivery-form")?.addEventListener("click", () => {
+    state.ui.show_delivery_form = !state.ui.show_delivery_form;
+    state.ui.delivery     = new_delivery();
+    state.ui.delivery_err = "";
+    render();
+  });
+
+  app.querySelector("#cancel-delivery")?.addEventListener("click", () => {
+    state.ui.show_delivery_form = false; state.ui.delivery_err = ""; render();
+  });
+
+  app.querySelector("#add-delivery-item")?.addEventListener("click", () => {
+    state.ui.delivery.items.push({ coffee: "", origin: "", lot_number: "", bags: "", weight_kg: "", price_per_kg: "" });
+    render();
+  });
+
+  app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.delivery.items.splice(Number(btn.dataset.removeItem), 1); render();
+  }));
+
+  // Live sync delivery item fields
+  const sync_item_field = (selector, field) => {
+    app.querySelectorAll(selector).forEach(el => {
+      el.addEventListener("input",  e => { state.ui.delivery.items[Number(el.dataset.idx)][field] = e.target.value; });
+      el.addEventListener("change", e => { state.ui.delivery.items[Number(el.dataset.idx)][field] = e.target.value; });
+    });
+  };
+  sync_item_field(".item-coffee",  "coffee");
+  sync_item_field(".item-origin",  "origin");
+  sync_item_field(".item-lot",     "lot_number");
+  sync_item_field(".item-bags",    "bags");
+  sync_item_field(".item-weight",  "weight_kg");
+  sync_item_field(".item-price",   "price_per_kg");
+
+  app.querySelector("#save-delivery")?.addEventListener("click", () => {
+    // Read latest DOM values before saving
+    app.querySelectorAll(".item-coffee").forEach(el  => { state.ui.delivery.items[Number(el.dataset.idx)].coffee       = el.value; });
+    app.querySelectorAll(".item-origin").forEach(el  => { state.ui.delivery.items[Number(el.dataset.idx)].origin       = el.value; });
+    app.querySelectorAll(".item-lot").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].lot_number   = el.value; });
+    app.querySelectorAll(".item-bags").forEach(el    => { state.ui.delivery.items[Number(el.dataset.idx)].bags         = el.value; });
+    app.querySelectorAll(".item-weight").forEach(el  => { state.ui.delivery.items[Number(el.dataset.idx)].weight_kg    = el.value; });
+    app.querySelectorAll(".item-price").forEach(el   => { state.ui.delivery.items[Number(el.dataset.idx)].price_per_kg = el.value; });
+    state.ui.delivery.date        = document.getElementById("del-date")?.value     || state.ui.delivery.date;
+    state.ui.delivery.supplier    = document.getElementById("del-supplier")?.value || state.ui.delivery.supplier;
+    state.ui.delivery.invoice_ref = document.getElementById("del-invoice")?.value  || state.ui.delivery.invoice_ref;
+    save_delivery();
+  });
+
+  // Adjustment form
+  app.querySelector("#toggle-adj-form")?.addEventListener("click", () => {
+    state.ui.show_adj_form = !state.ui.show_adj_form; state.ui.adj_err = ""; render();
+  });
+
+  app.querySelector("#cancel-adj")?.addEventListener("click", () => {
+    state.ui.show_adj_form = false; state.ui.adj_err = ""; render();
+  });
+
+  app.querySelector("#save-adj")?.addEventListener("click", () => save_adjustment());
+}
+</script>
+</body>
+</html>
