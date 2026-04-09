@@ -70,10 +70,10 @@
 // Reads and writes to the settings table in Supabase (always row id = 1).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
-supabase.auth.getSession().then(({ data: { session } }) => {
+supabaseClient.auth.getSession().then(({ data: { session } }) => {
   if (!session) window.location.href = "login.html";
   else init();
 });
@@ -115,7 +115,7 @@ function esc(s) {
 
 // ── SUPABASE ──────────────────────────────────────────────────────────────────
 async function loadSettings() {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from("settings")
     .select("*")
     .eq("id", 1)
@@ -131,7 +131,7 @@ async function loadSettings() {
 async function saveSettings() {
   state.saving = true; render();
 
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from("settings")
     .update({
       base_url:        state.settings.base_url,
@@ -329,7 +329,7 @@ function attachListeners() {
 
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href = "index.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => {
-    await supabase.auth.signOut();
+    await supabaseClient.auth.signOut();
     window.location.href = "login.html";
   });
 
