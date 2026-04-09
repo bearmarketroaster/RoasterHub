@@ -34,9 +34,12 @@
     input:focus, select:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
-    .btn-dark { background: #1a1008; } .btn-amber { background: #c8a96e; }
+    .btn-dark { background: #1a1008; } .btn-amber { background: #c8a96e; } .btn-green { background: #4a9e6b; }
     .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
+    .btn-red { background: #e05c2a; }
     .btn-sm { padding: 4px 10px; font-size: 12px; } .btn-lg { padding: 12px 24px; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
     .mapping-row { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
     .mapping-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
     .mapping-header:hover { background: #fdfaf7; } .mapping-header.open { background: #fff8ee; }
@@ -46,12 +49,22 @@
     .fp-row + .fp-row { border-top: 1px solid #f0ebe4; }
     .coffee-tag { display: inline-flex; align-items: center; gap: 6px; background: #f0ebe4; border-radius: 20px; padding: 4px 12px; font-size: 13px; margin: 4px; }
     .coffee-tag button { background: none; border: none; color: #e05c2a; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; }
+    .supplier-card { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
+    .supplier-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
+    .supplier-header:hover { background: #fdfaf7; } .supplier-header.open { background: #fff8ee; }
+    .supplier-body { padding: 14px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
+    .coffee-map-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
+    .coffee-map-row + .coffee-map-row { border-top: 1px solid #f0ebe4; }
     .save-bar { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e0d5c5; padding: 14px 24px; display: flex; align-items: center; gap: 14px; box-shadow: 0 -2px 8px rgba(0,0,0,0.06); }
     .mono { font-family: monospace; } .err { color: #e05c2a; font-size: 13px; margin-top: 6px; } .hint { color: #888; font-size: 13px; }
     .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c8a96e; margin-bottom: 10px; }
     .flex-between { display: flex; justify-content: space-between; align-items: center; }
-    .mt-8{margin-top:8px} .mt-12{margin-top:12px} .mt-16{margin-top:16px} .mb-12{margin-bottom:12px}
+    .mt-8{margin-top:8px} .mt-12{margin-top:12px} .mt-16{margin-top:16px} .mb-8{margin-bottom:8px} .mb-12{margin-bottom:12px}
     .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
+    .parse-status { font-size: 13px; margin-top: 8px; padding: 8px 12px; border-radius: 6px; }
+    .parse-status.ok { background: #edf7f0; color: #4a9e6b; }
+    .parse-status.err { background: #fff0ee; color: #e05c2a; }
+    .parse-status.info { background: #fff8ee; color: #c8a96e; }
     @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } }
   </style>
 </head>
@@ -60,8 +73,9 @@
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // BEAR ROASTERY — Settings
-// Single source of truth for coffees, FP mappings and QR base URL.
+// Single source of truth for coffees, FP mappings, QR base URL and suppliers.
 // Reads and writes to the settings table in Supabase (always row id = 1).
+// Supplier templates stored in supplier_templates table, keyed by supplier_name.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -75,31 +89,231 @@ const RETAIL_SIZES = [{ val:"0.2", label:"200g" },{ val:"0.5", label:"500g" },{ 
 
 const state = {
   settings: { base_url:"", coffee_mappings:[], coffees:[] },
+  supplier_templates: [],
   loading: true, saving: false, saved: false,
   open_section: "coffees",
-  ui: { new_coffee:"", coffee_err:"", open_mapping:null, url_status:null },
+  ui: {
+    new_coffee: "", coffee_err: "", open_mapping: null, url_status: null,
+    open_supplier: null, supplier_err: "", parsing_supplier: false,
+    parse_status: null, // { type: "ok"|"err"|"info", msg: "" }
+  },
 };
 
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function gen_id() { return `SUP-${Date.now()}`; }
 
+// ── SUPABASE ──────────────────────────────────────────────────────────────────
 async function load_settings() {
   const { data, error } = await supabaseClient.from("settings").select("*").eq("id",1).single();
   if (error) { console.error("Failed to load settings:", error); return; }
-  state.settings.base_url = data.base_url || "";
+  state.settings.base_url        = data.base_url        || "";
   state.settings.coffee_mappings = data.coffee_mappings || [];
-  state.settings.coffees = data.coffees || [];
+  state.settings.coffees         = data.coffees         || [];
+}
+
+async function load_supplier_templates() {
+  const { data, error } = await supabaseClient.from("supplier_templates").select("*").order("supplier_name");
+  if (error) { console.error("Failed to load supplier templates:", error); return; }
+  state.supplier_templates = data || [];
 }
 
 async function save_settings() {
   state.saving = true; render();
-  const { error } = await supabaseClient.from("settings").update({ base_url: state.settings.base_url, coffee_mappings: state.settings.coffee_mappings, coffees: state.settings.coffees }).eq("id",1);
+  const { error } = await supabaseClient.from("settings").update({
+    base_url:        state.settings.base_url,
+    coffee_mappings: state.settings.coffee_mappings,
+    coffees:         state.settings.coffees,
+  }).eq("id",1);
   state.saving = false;
   if (!error) { state.saved=true; render(); setTimeout(()=>{ state.saved=false; render(); },3000); }
 }
 
-async function init() { await load_settings(); state.loading=false; render(); }
+async function save_supplier_template(template) {
+  // Upsert — keyed on supplier_name
+  const { error } = await supabaseClient.from("supplier_templates").upsert(template, { onConflict: "supplier_name" });
+  if (error) { console.error("Failed to save supplier template:", error); return false; }
+  return true;
+}
 
-function render() { document.getElementById("app").innerHTML=build_app(); attach_listeners(); }
+async function delete_supplier_template(supplier_name) {
+  await supabaseClient.from("supplier_templates").delete().eq("supplier_name", supplier_name);
+  await load_supplier_templates();
+  render();
+}
+
+async function init() {
+  await Promise.all([load_settings(), load_supplier_templates()]);
+  state.loading = false;
+  render();
+}
+
+// ── PDF PARSING ───────────────────────────────────────────────────────────────
+async function load_pdf_js() {
+  if (window.pdfjsLib) return window.pdfjsLib;
+  await new Promise((res,rej) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload = res; s.onerror = () => rej(new Error("Could not load PDF reader."));
+    document.head.appendChild(s);
+  });
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  return window.pdfjsLib;
+}
+
+async function extract_pdf_text(file) {
+  const lib = await load_pdf_js();
+  const buf = await file.arrayBuffer();
+  const pdf = await lib.getDocument({ data: buf }).promise;
+  let full = "";
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const tc   = await page.getTextContent();
+    const items = tc.items.slice().sort((a,b) => {
+      const dy = Math.round(b.transform[5]) - Math.round(a.transform[5]);
+      return dy !== 0 ? dy : a.transform[4] - b.transform[4];
+    });
+    full += items.map(i => i.str).join("\n") + "\n";
+  }
+  return full;
+}
+
+// Generate a template by analysing raw PDF text
+// Looks for known keyword patterns and extracts field locations
+function generate_template_from_text(raw) {
+  const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+  const template = {
+    invoice_keyword:     null,
+    date_keyword:        null,
+    due_date_keyword:    null,
+    description_column:  null,
+    weight_column:       null,
+    price_column:        null,
+    value_column:        null,
+    coffee_mappings:     [],
+  };
+
+  // Keyword candidates for each field
+  const invoice_candidates  = ["INVOICE No.", "Invoice No.", "Invoice Number", "INV No.", "Invoice #", "Ref:", "Reference:"];
+  const date_candidates     = ["Date:", "Invoice Date:", "Order Date:", "Dated:"];
+  const due_date_candidates = ["Due date:", "Due Date:", "Payment Due:", "Due:"];
+  const desc_candidates     = ["Description", "Product", "Coffee", "Item", "Details"];
+  const weight_candidates   = ["Net weight (kg)", "Net Weight", "Weight (kg)", "Weight", "Kgs", "KG"];
+  const price_candidates    = ["Price per kg", "Price/kg", "Unit Price", "Rate", "Price per Kg"];
+  const value_candidates    = ["Value", "Total", "Amount", "Line Total"];
+
+  const find_keyword = (candidates) => {
+    for (const candidate of candidates) {
+      if (lines.some(l => l.includes(candidate))) return candidate;
+    }
+    return null;
+  };
+
+  template.invoice_keyword    = find_keyword(invoice_candidates);
+  template.date_keyword       = find_keyword(date_candidates);
+  template.due_date_keyword   = find_keyword(due_date_candidates);
+  template.description_column = find_keyword(desc_candidates);
+  template.weight_column      = find_keyword(weight_candidates);
+  template.price_column       = find_keyword(price_candidates);
+  template.value_column       = find_keyword(value_candidates);
+
+  // Try to extract sample line items from the text to seed coffee mappings
+  // Look for lines that appear to be product descriptions (after the header row)
+  const desc_idx = template.description_column
+    ? lines.findIndex(l => l.includes(template.description_column))
+    : -1;
+
+  if (desc_idx >= 0) {
+    // Scan lines after the header for potential coffee descriptions
+    const NUM_RE = /^\d+(\.\d+)?$/;
+    for (let i = desc_idx + 1; i < Math.min(desc_idx + 30, lines.length); i++) {
+      const l = lines[i];
+      // A description line typically contains letters, commas, slashes — not just numbers
+      if (l.length > 5 && !/^\d/.test(l) && !NUM_RE.test(l) && l.includes(",")) {
+        // Looks like a coffee description
+        const existing = template.coffee_mappings.find(m => m.supplier_description === l);
+        if (!existing) template.coffee_mappings.push({ supplier_description: l, our_name: "" });
+        if (template.coffee_mappings.length >= 10) break;
+      }
+    }
+  }
+
+  return template;
+}
+
+// Parse a delivery note PDF using a saved supplier template
+function parse_delivery_with_template(raw, template) {
+  const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
+  const result = {
+    invoice_ref:  null,
+    date:         null,
+    due_date:     null,
+    supplier:     null,
+    items:        [],
+  };
+
+  // Extract header fields
+  const extract_after_keyword = (keyword) => {
+    if (!keyword) return null;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(keyword)) {
+        // Value might be on same line or next line
+        const same_line = lines[i].replace(keyword, "").trim();
+        if (same_line) return same_line;
+        if (lines[i+1]) return lines[i+1].trim();
+      }
+    }
+    return null;
+  };
+
+  result.invoice_ref = extract_after_keyword(template.invoice_keyword);
+  result.date        = extract_after_keyword(template.date_keyword);
+  result.due_date    = extract_after_keyword(template.due_date_keyword);
+
+  // Extract line items
+  const desc_idx = template.description_column
+    ? lines.findIndex(l => l.includes(template.description_column))
+    : -1;
+
+  if (desc_idx >= 0) {
+    const NUM_RE = /^\d+(\.\d+)?$/;
+    let current_item = null;
+
+    for (let i = desc_idx + 1; i < lines.length; i++) {
+      const l = lines[i];
+
+      // Stop at footer keywords
+      if (/^(Total|TOTAL|VAT|Terms|Warehouse|Company)/i.test(l)) break;
+
+      // Looks like a description line
+      if (l.length > 5 && !/^\d/.test(l) && !NUM_RE.test(l) && l.includes(",")) {
+        if (current_item) result.items.push(current_item);
+        // Map supplier description to our internal coffee name
+        const mapping = (template.coffee_mappings||[]).find(m =>
+          m.supplier_description && l.toLowerCase().includes(m.supplier_description.toLowerCase().split(",")[0])
+        );
+        current_item = {
+          supplier_description: l,
+          coffee:      mapping?.our_name || "",
+          weight_kg:   null,
+          price_per_kg: null,
+          total_value: null,
+        };
+      } else if (current_item && NUM_RE.test(l)) {
+        // Numeric value — assign to the next unfilled numeric field
+        const val = parseFloat(l);
+        if      (!current_item.weight_kg)    current_item.weight_kg    = val;
+        else if (!current_item.price_per_kg) current_item.price_per_kg = val;
+        else if (!current_item.total_value)  current_item.total_value  = val;
+      }
+    }
+    if (current_item) result.items.push(current_item);
+  }
+
+  return result;
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
 
 function build_app() {
   const header = `
@@ -117,6 +331,7 @@ function build_app() {
       <p class="hint" style="margin-bottom:20px">Changes here apply across all modules. Hit <strong>Save All Settings</strong> at the bottom when done.</p>
       ${build_coffees_section()}
       ${build_traceability_section()}
+      ${build_suppliers_section()}
     </div>
     <div class="save-bar">
       <button class="btn btn-dark btn-lg" id="save-all" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save All Settings"}</button>
@@ -124,6 +339,7 @@ function build_app() {
     </div>`;
 }
 
+// ── COFFEES SECTION ───────────────────────────────────────────────────────────
 function build_coffees_section() {
   const open = state.open_section==="coffees", coffees = state.settings.coffees||[];
   const body = open ? `
@@ -148,6 +364,7 @@ function build_coffees_section() {
     </div>`;
 }
 
+// ── TRACEABILITY SECTION ──────────────────────────────────────────────────────
 function build_traceability_section() {
   const open = state.open_section==="traceability", mappings = state.settings.coffee_mappings||[];
   const { url_status, open_mapping } = state.ui;
@@ -210,39 +427,57 @@ function build_traceability_section() {
     </div>`;
 }
 
-function attach_listeners() {
-  const app = document.getElementById("app");
-  app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
-  app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
-  app.querySelectorAll("[data-toggle-section]").forEach(el => el.addEventListener("click", () => { state.open_section=state.open_section===el.dataset.toggleSection?null:el.dataset.toggleSection; render(); }));
-  app.querySelector("#save-all")?.addEventListener("click", () => { const bu=document.getElementById("base-url"); if(bu) state.settings.base_url=bu.value.trim(); save_settings(); });
-  app.querySelectorAll("[data-remove-coffee]").forEach(btn => btn.addEventListener("click", () => { state.settings.coffees.splice(Number(btn.dataset.removeCoffee),1); render(); }));
-  const nci = app.querySelector("#new-coffee");
-  if (nci) nci.addEventListener("input", e => { state.ui.new_coffee=e.target.value; });
-  app.querySelector("#add-coffee")?.addEventListener("click", () => {
-    const val = document.getElementById("new-coffee")?.value.trim();
-    if (!val) { state.ui.coffee_err="Please enter a coffee name."; render(); return; }
-    if (state.settings.coffees.includes(val)) { state.ui.coffee_err="Already in list."; render(); return; }
-    state.settings.coffees.push(val); state.ui.new_coffee=""; state.ui.coffee_err=""; render();
-  });
-  nci?.addEventListener("keydown", e => { if (e.key==="Enter") app.querySelector("#add-coffee")?.click(); });
-  app.querySelector("#check-url")?.addEventListener("click", () => {
-    const target = document.getElementById("base-url")?.value.trim();
-    if (!target) return;
-    try { new URL(target); state.ui.url_status="ok"; }
-    catch { state.ui.url_status="unreachable"; }
-    render();
-  });
-  app.querySelectorAll("[data-toggle-mapping]").forEach(el => el.addEventListener("click", () => { const i=Number(el.dataset.toggleMapping); state.ui.open_mapping=state.ui.open_mapping===i?null:i; render(); }));
-  app.querySelector("#add-mapping")?.addEventListener("click", () => { state.settings.coffee_mappings.push({app_name:"",fp_sizes:[]}); state.ui.open_mapping=state.settings.coffee_mappings.length-1; render(); });
-  app.querySelectorAll("[data-remove-mapping]").forEach(btn => btn.addEventListener("click", e => { e.stopPropagation(); const i=Number(btn.dataset.removeMapping); state.settings.coffee_mappings.splice(i,1); if(state.ui.open_mapping===i) state.ui.open_mapping=null; render(); }));
-  app.querySelectorAll(".mapping-name").forEach(inp => inp.addEventListener("input", e => { state.settings.coffee_mappings[Number(inp.dataset.mi)].app_name=e.target.value; }));
-  app.querySelectorAll("[data-add-fp]").forEach(btn => btn.addEventListener("click", () => { state.settings.coffee_mappings[Number(btn.dataset.addFp)].fp_sizes.push({code:"",size:"0.2"}); render(); }));
-  app.querySelectorAll("[data-remove-fp]").forEach(btn => btn.addEventListener("click", () => { const[mi,fi]=btn.dataset.removeFp.split("-").map(Number); state.settings.coffee_mappings[mi].fp_sizes.splice(fi,1); render(); }));
-  app.querySelectorAll(".fp-code").forEach(inp => inp.addEventListener("input", e => { state.settings.coffee_mappings[Number(inp.dataset.mi)].fp_sizes[Number(inp.dataset.fi)].code=e.target.value.toUpperCase(); }));
-  app.querySelectorAll(".fp-size").forEach(sel => sel.addEventListener("change", e => { state.settings.coffee_mappings[Number(sel.dataset.mi)].fp_sizes[Number(sel.dataset.fi)].size=e.target.value; }));
-  app.querySelector("#base-url")?.addEventListener("input", e => { state.settings.base_url=e.target.value; state.ui.url_status=null; });
-}
-</script>
-</body>
-</html>
+// ── SUPPLIERS SECTION ─────────────────────────────────────────────────────────
+function build_suppliers_section() {
+  const open = state.open_section==="suppliers";
+  const suppliers = state.supplier_templates;
+  const { open_supplier, parsing_supplier, parse_status } = state.ui;
+
+  const suppliers_html = suppliers.map((s,i) => {
+    const is_open = open_supplier===i;
+    const template = s.template || {};
+    const coffee_maps = template.coffee_mappings || [];
+
+    const coffee_map_rows = coffee_maps.map((m,j) => `
+      <div class="coffee-map-row">
+        <input class="sup-coffee-supplier" data-si="${i}" data-ci="${j}" value="${esc(m.supplier_description)}" placeholder="Supplier's description" style="font-size:13px" />
+        <select class="sup-coffee-ours" data-si="${i}" data-ci="${j}" style="font-size:13px">
+          <option value="">— Our coffee name —</option>
+          ${state.settings.coffees.map(c=>`<option value="${esc(c)}" ${m.our_name===c?"selected":""}>${esc(c)}</option>`).join("")}
+        </select>
+        <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1" data-remove-coffee-map="${i}-${j}">✕</button>
+      </div>`).join("");
+
+    return `
+      <div class="supplier-card">
+        <div class="supplier-header ${is_open?"open":""}" data-toggle-supplier="${i}">
+          <span style="font-size:15px;color:#c8a96e">${is_open?"▾":"▸"}</span>
+          <span style="flex:1;font-weight:600;font-size:14px;color:#1a1008">${esc(s.supplier_name)}</span>
+          ${s.template?`<span class="tag" style="background:#edf7f0;color:#4a9e6b;font-size:11px">✓ Template saved</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">No template yet</span>`}
+          <button data-delete-supplier="${esc(s.supplier_name)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" onclick="event.stopPropagation()">✕</button>
+        </div>
+        ${is_open?`
+          <div class="supplier-body">
+            <div class="grid-2 mb-12">
+              <div><label class="lbl">Supplier Name *</label><input class="sup-name" data-si="${i}" value="${esc(s.supplier_name)}" /></div>
+              <div><label class="lbl">Contact / Email</label><input class="sup-contact" data-si="${i}" value="${esc(s.contact||"")}" placeholder="orders@supplier.com" /></div>
+            </div>
+
+            <div class="section-label">Field Mappings</div>
+            <div class="card" style="margin-bottom:12px">
+              <p class="hint mb-12">These keywords tell the parser where to find each field in this supplier's documents. Auto-generated from your sample PDF — edit if needed.</p>
+              <div class="grid-2">
+                <div><label class="lbl">Invoice / Ref keyword</label><input class="sup-field" data-si="${i}" data-field="invoice_keyword" value="${esc(template.invoice_keyword||"")}" placeholder="e.g. INVOICE No." /></div>
+                <div><label class="lbl">Order Date keyword</label><input class="sup-field" data-si="${i}" data-field="date_keyword" value="${esc(template.date_keyword||"")}" placeholder="e.g. Date:" /></div>
+                <div><label class="lbl">Due Date keyword</label><input class="sup-field" data-si="${i}" data-field="due_date_keyword" value="${esc(template.due_date_keyword||"")}" placeholder="e.g. Due date:" /></div>
+                <div><label class="lbl">Description column</label><input class="sup-field" data-si="${i}" data-field="description_column" value="${esc(template.description_column||"")}" placeholder="e.g. Description" /></div>
+                <div><label class="lbl">Weight column</label><input class="sup-field" data-si="${i}" data-field="weight_column" value="${esc(template.weight_column||"")}" placeholder="e.g. Net weight (kg)" /></div>
+                <div><label class="lbl">Price per kg column</label><input class="sup-field" data-si="${i}" data-field="price_column" value="${esc(template.price_column||"")}" placeholder="e.g. Price per kg" /></div>
+                <div><label class="lbl">Total value column</label><input class="sup-field" data-si="${i}" data-field="value_column" value="${esc(template.value_column||"")}" placeholder="e.g. Value" /></div>
+              </div>
+            </div>
+
+            <div class="section-label">Upload Sample PDF to Generate Template</div>
+            <div class="card" style="margin-bottom:12px">
+              <p class="hint mb-12">Upload a sample invoice or delivery note from this supplier. The parser will analyse it and fill in the field mappings above automatically.</p>
+              <input type="file" id="sup-pdf-${
