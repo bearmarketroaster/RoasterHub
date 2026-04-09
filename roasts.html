@@ -134,8 +134,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
-const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-supabase.auth.getSession().then(({ data: { session } }) => {
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+supabaseClient.auth.getSession().then(({ data: { session } }) => {
   if (!session) window.location.href = "login.html";
 });
 
@@ -525,7 +525,7 @@ function attachListeners() {
   // Navigation
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => {
-    await supabase.auth.signOut();
+    await supabaseClient.auth.signOut();
     window.location.href = "login.html";
   });
   app.querySelector("#start-new")?.addEventListener("click", () => { state.session=newSession(); state.ui.step=1; state.view="new"; render(); });
