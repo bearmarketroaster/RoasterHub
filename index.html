@@ -1,0 +1,103 @@
+<meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bear Roastery</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    .header { background: #1a1008; color: #e8d5b0; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-logo { font-size: 28px; }
+    .header-brand { display: flex; flex-direction: column; }
+    .header-title { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+    .header-sub   { font-size: 12px; color: #c8a96e; margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    .header-user  { font-size: 13px; color: #c8a96e; }
+    .btn-auth { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-auth:hover { background: #c8a96e; color: #1a1008; }
+    .main { padding: 40px 32px; max-width: 960px; margin: 0 auto; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c8a96e; margin-bottom: 16px; }
+    .module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-bottom: 48px; }
+    .module-card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); text-decoration: none; color: inherit; display: flex; flex-direction: column; gap: 12px; border: 2px solid transparent; transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s; cursor: pointer; }
+    .module-card:hover { border-color: #c8a96e; box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-2px); }
+    .module-card.coming-soon { opacity: 0.5; cursor: default; pointer-events: none; }
+    .module-icon { font-size: 32px; width: 56px; height: 56px; background: #f5f0eb; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+    .module-name { font-size: 16px; font-weight: 700; color: #1a1008; }
+    .module-desc { font-size: 13px; color: #888; line-height: 1.5; }
+    .module-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 12px; border-top: 1px solid #f0ebe4; }
+    .module-status { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
+    .status-active { background: #edf7f0; color: #4a9e6b; }
+    .status-soon   { background: #f5f0eb; color: #c8a96e; }
+    .module-arrow  { font-size: 18px; color: #c8a96e; }
+    .footer { text-align: center; padding: 32px; font-size: 12px; color: #c8a96e; border-top: 1px solid #e8d5b0; margin-top: 16px; }
+    @media (max-width: 600px) { .header { padding: 16px 20px; } .main { padding: 24px 16px; } .module-grid { grid-template-columns: 1fr; } }
+  </style>
+
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-logo">🐻</div>
+      <div class="header-brand">
+        <div class="header-title">Bear Roastery</div>
+        <div class="header-sub">Operations Dashboard</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="header-date" id="header-date"></div>
+      <span class="header-user" id="header-user"></span>
+      <button class="btn-auth" id="auth-btn"></button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="section-label">Modules</div>
+    <div class="module-grid">
+      <a class="module-card" href="roastery-traceability.html">
+        <div class="module-icon">☕</div>
+        <div><div class="module-name">Roastery Traceability</div><div class="module-desc">Track coffee containers, pack orders, manage dispatches, and run recall searches.</div></div>
+        <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
+      </a>
+      <a class="module-card" href="roasts.html">
+        <div class="module-icon">🔥</div>
+        <div><div class="module-name">Roasts</div><div class="module-desc">Log roast batches, track green bean usage, record yields, and link Cropster roast IDs.</div></div>
+        <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
+      </a>
+      <a class="module-card" href="stock.html">
+        <div class="module-icon">📦</div>
+        <div><div class="module-name">Stock &amp; Inventory</div><div class="module-desc">Monitor green bean stock, log deliveries, and track usage across roast sessions.</div></div>
+        <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
+      </a>
+      <div class="module-card coming-soon">
+        <div class="module-icon">🏪</div>
+        <div><div class="module-name">Wholesale</div><div class="module-desc">Manage wholesale accounts, pricing tiers, and order history across all shop partners.</div></div>
+        <div class="module-footer"><span class="module-status status-soon">Coming Soon</span></div>
+      </div>
+      <a class="module-card" href="settings.html">
+        <div class="module-icon">⚙️</div>
+        <div><div class="module-name">Settings</div><div class="module-desc">Manage coffees, FP code mappings, QR base URL, and supplier templates across all modules.</div></div>
+        <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
+      </a>
+    </div>
+  </div>
+  <div class="footer">Bear Roastery · Operations Platform</div>
+  <script>
+    const d = new Date();
+    document.getElementById("header-date").textContent = d.toLocaleDateString("en-IE", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+    const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    const authBtn = document.getElementById("auth-btn");
+    const userEl  = document.getElementById("header-user");
+    async function updateAuthUI() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        userEl.textContent = session.user.email;
+        authBtn.textContent = "Log Out";
+        authBtn.onclick = async () => { await supabase.auth.signOut(); updateAuthUI(); };
+      } else {
+        userEl.textContent = "";
+        authBtn.textContent = "Log In";
+        authBtn.onclick = () => window.location.href = "login.html";
+      }
+    }
+    supabase.auth.onAuthStateChange(() => updateAuthUI());
+    updateAuthUI();
+  </script>
