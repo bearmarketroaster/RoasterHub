@@ -102,10 +102,10 @@
 //   5. Save to Supabase
 // ─────────────────────────────────────────────────────────────────────────────
 
-const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
-supabase.auth.getSession().then(({ data: { session } }) => {
+supabaseClient.auth.getSession().then(({ data: { session } }) => {
   if (!session) window.location.href = "login.html";
   else init();
 });
@@ -158,7 +158,7 @@ function yield_class(pct) {
 // ── SUPABASE ──────────────────────────────────────────────────────────────────
 async function load_data() {
   // Load coffees from settings
-  const { data: settings } = await supabase
+  const { data: settings } = await supabaseClient
     .from("settings")
     .select("coffees")
     .eq("id", 1)
@@ -166,7 +166,7 @@ async function load_data() {
   state.coffees = settings?.coffees || [];
 
   // Load all roast sessions
-  const { data: sessions, error } = await supabase
+  const { data: sessions, error } = await supabaseClient
     .from("roast_sessions")
     .select("*, roast_batches(*)")
     .order("date", { ascending: false });
@@ -187,7 +187,7 @@ async function save_session() {
   const id = gen_session_id();
 
   // Insert roast session
-  const { error: session_err } = await supabase
+  const { error: session_err } = await supabaseClient
     .from("roast_sessions")
     .insert({
       id,
@@ -213,7 +213,7 @@ async function save_session() {
     green_weight:     Number(b.green_weight) || null,
   }));
 
-  const { error: batch_err } = await supabase
+  const { error: batch_err } = await supabaseClient
     .from("roast_batches")
     .insert(batches);
 
@@ -224,7 +224,7 @@ async function save_session() {
   // Also create a stock adjustment to deduct green weight used
   const total_green = s.batches.reduce((sum, b) => sum + (Number(b.green_weight) || 0), 0);
   if (total_green > 0) {
-    await supabase.from("stock_adjustments").insert({
+    await supabaseClient.from("stock_adjustments").insert({
       id:               `ADJ-${id}`,
       date:             s.date,
       coffee:           s.coffee,
@@ -236,14 +236,14 @@ async function save_session() {
     });
 
     // Update stock_items current_kg
-    const { data: stock_item } = await supabase
+    const { data: stock_item } = await supabaseClient
       .from("stock_items")
       .select("id, current_kg")
       .eq("coffee", s.coffee)
       .single();
 
     if (stock_item) {
-      await supabase
+      await supabaseClient
         .from("stock_items")
         .update({ current_kg: Math.max(0, stock_item.current_kg - total_green) })
         .eq("id", stock_item.id);
@@ -569,7 +569,7 @@ function attach_listeners() {
 
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href = "index.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => {
-    await supabase.auth.signOut();
+    await supabaseClient.auth.signOut();
     window.location.href = "login.html";
   });
 
