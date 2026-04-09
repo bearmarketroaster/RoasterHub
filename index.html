@@ -83,21 +83,21 @@
   <script>
     const d = new Date();
     document.getElementById("header-date").textContent = d.toLocaleDateString("en-IE", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
-    const supabase = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
     const authBtn = document.getElementById("auth-btn");
     const userEl  = document.getElementById("header-user");
     async function updateAuthUI() {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabaseClient.auth.getSession();
       if (session) {
         userEl.textContent = session.user.email;
         authBtn.textContent = "Log Out";
-        authBtn.onclick = async () => { await supabase.auth.signOut(); updateAuthUI(); };
+        authBtn.onclick = async () => { await supabaseClient.auth.signOut(); updateAuthUI(); };
       } else {
         userEl.textContent = "";
         authBtn.textContent = "Log In";
         authBtn.onclick = () => window.location.href = "login.html";
       }
     }
-    supabase.auth.onAuthStateChange(() => updateAuthUI());
+    supabaseClient.auth.onAuthStateChange(() => updateAuthUI());
     updateAuthUI();
   </script>
