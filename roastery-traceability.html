@@ -202,6 +202,14 @@ async function save_order(order) {
   const { error } = await supabaseClient.from("orders").insert({id:order_id,shop_name:order.shop_name,po_number:order.po_number||null,order_date:order.order_date||null,order_total:order.order_total||0,status:"pending"});
   if (error) { state.saving=false; return; }
   await supabaseClient.from("order_items").insert(order.items.map((item,i)=>({id:`${order_id}-I${i+1}`,order_id,code:item.code||null,description:item.description,quantity:item.quantity,unit:item.unit||"EACH",unit_cost:item.unit_cost||0,total:item.total||0})));
+  const fp_codes_in_order=[...new Set(order.items.map(i=>i.code?.trim().toUpperCase()).filter(c=>c&&/^FP\d{4}$/i.test(c)))];
+  if(fp_codes_in_order.length>0){
+    const{data:settings}=await supabaseClient.from("settings").select("coffee_mappings").eq("id",1).single();
+    const existing_mappings=settings?.coffee_mappings||[];
+    const existing_codes=existing_mappings.flatMap(m=>(m.fp_sizes||[]).map(fp=>fp.code?.trim().toUpperCase())).filter(Boolean);
+    const new_codes=fp_codes_in_order.filter(c=>!existing_codes.includes(c));
+    if(new_codes.length>0) await supabaseClient.from("settings").update({coffee_mappings:[...existing_mappings,...new_codes.map(code=>({app_name:"",fp_sizes:[{code,size:""}]}))]}).eq("id",1);
+  }
   state.saving=false; await load_data(); render();
 }
 
