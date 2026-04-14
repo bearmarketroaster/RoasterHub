@@ -208,7 +208,7 @@ async function save_order(order) {
     const existing_mappings=settings?.coffee_mappings||[];
     const existing_codes=existing_mappings.flatMap(m=>(m.fp_sizes||[]).map(fp=>fp.code?.trim().toUpperCase())).filter(Boolean);
     const new_codes=fp_codes_in_order.filter(c=>!existing_codes.includes(c));
-    if(new_codes.length>0) await supabaseClient.from("settings").update({coffee_mappings:[...existing_mappings,...new_codes.map(code=>({app_name:"",fp_sizes:[{code,size:""}]}))]}).eq("id",1);
+    if(new_codes.length>0) await supabaseClient.from("settings").update({coffee_mappings:[...existing_mappings,...new_codes.map(code=>({app_name:"",fp_description:order.items.find(i=>i.code?.trim().toUpperCase()===code)?.description||"",fp_sizes:[{code,size:""}]}))]}).eq("id",1);
   }
   state.saving=false; await load_data(); render();
 }
