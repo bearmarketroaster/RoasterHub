@@ -473,6 +473,7 @@ function build_delivery_item_row(item, i) {
         <span style="font-weight:600;font-size:13px;color:#888">Item ${i+1}</span>
         ${i>0?`<button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px" data-remove-item="${i}">✕</button>`:""}
       </div>
+      ${item.supplier_description?`<div class="hint mb-8">From invoice: <strong>${esc(item.supplier_description)}</strong></div>`:""}
       <div class="grid-2" style="gap:10px">
         <div><label class="lbl">Coffee *</label>
           <select class="item-coffee" data-idx="${i}">
@@ -481,7 +482,7 @@ function build_delivery_item_row(item, i) {
           </select>
         </div>
         <div><label class="lbl">Origin / Country</label><input class="item-origin" data-idx="${i}" value="${esc(item.origin)}" placeholder="e.g. Ethiopia" /></div>
-        <div><label class="lbl">Lot / Invoice No.</label><input class="item-lot" data-idx="${i}" value="${esc(item.lot_number)}" placeholder="e.g. ETH-2026-01" /></div>
+        <div><label class="lbl">ICO / Lot No.</label><input class="item-lot" data-idx="${i}" value="${esc(item.lot_number)}" placeholder="e.g. 002/4600/0524" /></div>
         <div><label class="lbl">No. of Bags</label><input type="number" class="item-bags" data-idx="${i}" value="${item.bags}" placeholder="0" /></div>
         <div><label class="lbl">Total Weight (kg) *</label><input type="number" class="item-weight" data-idx="${i}" value="${item.weight_kg}" placeholder="0.0" step="0.1" /></div>
         <div><label class="lbl">Price per kg (€)</label><input type="number" class="item-price" data-idx="${i}" value="${item.price_per_kg}" placeholder="0.00" step="0.01" /></div>
