@@ -83,6 +83,9 @@ const state = {
   loading: true,
   saving: false,
   ui: {
+    show_upload_invoice: false,
+    upload_invoice_err:  "",
+    parsing_invoice:     false,
     show_delivery_form: false,
     show_adj_form: false,
     delivery_err: "",
@@ -515,6 +518,41 @@ function attach_listeners() {
   app.querySelector("#toggle-adj-form")?.addEventListener("click", () => { state.ui.show_adj_form=!state.ui.show_adj_form; state.ui.adj_err=""; render(); });
   app.querySelector("#cancel-adj")?.addEventListener("click", () => { state.ui.show_adj_form=false; state.ui.adj_err=""; render(); });
   app.querySelector("#save-adj")?.addEventListener("click", () => save_adjustment());
+  app.querySelector("#toggle-upload-invoice")?.addEventListener("click", () => {
+  state.ui.show_upload_invoice = !state.ui.show_upload_invoice;
+  state.ui.show_delivery_form  = false;
+  state.ui.upload_invoice_err  = "";
+  render();
+});
+
+app.querySelector("#cancel-upload-invoice")?.addEventListener("click", () => {
+  state.ui.show_upload_invoice = false;
+  state.ui.upload_invoice_err  = "";
+  render();
+});
+
+app.querySelector("#choose-invoice-pdf")?.addEventListener("click", () => {
+  document.getElementById("invoice-pdf")?.click();
+});
+
+app.querySelector("#invoice-pdf")?.addEventListener("change", async e => {
+  const file = e.target.files?.[0]; if (!file) return;
+  const supplier = document.getElementById("invoice-supplier")?.value;
+  if (!supplier) { state.ui.upload_invoice_err="Please select a supplier first."; render(); return; }
+  state.ui.parsing_invoice=true; state.ui.upload_invoice_err=""; render();
+  try {
+    const parsed = await parse_delivery_note(file, supplier);
+    state.ui.delivery = parsed;
+    state.ui.show_upload_invoice = false;
+    state.ui.show_delivery_form  = true;
+    state.ui.parsing_invoice     = false;
+  } catch(err) {
+    state.ui.upload_invoice_err = err.message;
+    state.ui.parsing_invoice    = false;
+  }
+  render();
+  e.target.value = "";
+});
 }
 </script>
 </body>
