@@ -453,19 +453,21 @@ function build_suppliers_section() {
               <div><label class="lbl">Contact / Email</label><input class="sup-contact" data-si="${i}" value="${esc(s.contact||"")}" placeholder="orders@supplier.com" /></div>
             </div>
 
-            <div class="section-label">Field Mappings</div>
-            <div class="card" style="margin-bottom:12px">
-              <p class="hint mb-12">These keywords tell the parser where to find each field in this supplier's documents. Auto-generated from your sample PDF — edit if needed.</p>
-              <div class="grid-2">
-                <div><label class="lbl">Invoice / Ref keyword</label><input class="sup-field" data-si="${i}" data-field="invoice_keyword" value="${esc(template.invoice_keyword||"")}" placeholder="e.g. INVOICE No." /></div>
-                <div><label class="lbl">Order Date keyword</label><input class="sup-field" data-si="${i}" data-field="date_keyword" value="${esc(template.date_keyword||"")}" placeholder="e.g. Date:" /></div>
-                <div><label class="lbl">Due Date keyword</label><input class="sup-field" data-si="${i}" data-field="due_date_keyword" value="${esc(template.due_date_keyword||"")}" placeholder="e.g. Due date:" /></div>
-                <div><label class="lbl">Description column</label><input class="sup-field" data-si="${i}" data-field="description_column" value="${esc(template.description_column||"")}" placeholder="e.g. Description" /></div>
-                <div><label class="lbl">Weight column</label><input class="sup-field" data-si="${i}" data-field="weight_column" value="${esc(template.weight_column||"")}" placeholder="e.g. Net weight (kg)" /></div>
-                <div><label class="lbl">Price per kg column</label><input class="sup-field" data-si="${i}" data-field="price_column" value="${esc(template.price_column||"")}" placeholder="e.g. Price per kg" /></div>
-                <div><label class="lbl">Total value column</label><input class="sup-field" data-si="${i}" data-field="value_column" value="${esc(template.value_column||"")}" placeholder="e.g. Value" /></div>
-              </div>
-            </div>
+<div class="section-label">Field Mappings</div>
+<div class="card" style="margin-bottom:12px">
+  <p class="hint mb-12">These keywords tell the parser where to find each field in this supplier's documents. Auto-generated from your sample PDF — edit if needed.</p>
+  <div class="grid-2">
+    <div><label class="lbl">Invoice Number keyword</label><input class="sup-field" data-si="${i}" data-field="invoice_number_keyword" value="${esc(template.invoice_number_keyword||"")}" placeholder="e.g. INVOICE No." /></div>
+    <div><label class="lbl">Invoice Date keyword</label><input class="sup-field" data-si="${i}" data-field="invoice_date_keyword" value="${esc(template.invoice_date_keyword||"")}" placeholder="e.g. Date:" /></div>
+    <div><label class="lbl">Due Date keyword</label><input class="sup-field" data-si="${i}" data-field="due_date_keyword" value="${esc(template.due_date_keyword||"")}" placeholder="e.g. Due date:" /></div>
+    <div><label class="lbl">No. of Bags column</label><input class="sup-field" data-si="${i}" data-field="no_bags_column" value="${esc(template.no_bags_column||"")}" placeholder="e.g. No bags" /></div>
+    <div><label class="lbl">Description column</label><input class="sup-field" data-si="${i}" data-field="description_column" value="${esc(template.description_column||"")}" placeholder="e.g. Description" /></div>
+    <div><label class="lbl">ICO column</label><input class="sup-field" data-si="${i}" data-field="ico_column" value="${esc(template.ico_column||"")}" placeholder="e.g. Marks" /></div>
+    <div><label class="lbl">Weight column</label><input class="sup-field" data-si="${i}" data-field="weight_column" value="${esc(template.weight_column||"")}" placeholder="e.g. Net weight (kg)" /></div>
+    <div><label class="lbl">Price per kg column</label><input class="sup-field" data-si="${i}" data-field="price_column" value="${esc(template.price_column||"")}" placeholder="e.g. Price per kg" /></div>
+    <div><label class="lbl">Value (€) column</label><input class="sup-field" data-si="${i}" data-field="value_column" value="${esc(template.value_column||"")}" placeholder="e.g. Value" /></div>
+  </div>
+</div>
 
             <div class="section-label">Upload Sample PDF to Generate Template</div>
             <div class="card" style="margin-bottom:12px">
