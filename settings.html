@@ -182,56 +182,42 @@ async function extract_pdf_text(file) {
 function generate_template_from_text(raw) {
   const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
   const template = {
-    invoice_keyword:     null,
-    date_keyword:        null,
-    due_date_keyword:    null,
-    description_column:  null,
-    weight_column:       null,
-    price_column:        null,
-    value_column:        null,
-    coffee_mappings:     [],
+    invoice_number_keyword: null,
+    invoice_date_keyword:   null,
+    due_date_keyword:       null,
+    no_bags_column:         null,
+    description_column:     null,
+    ico_column:             null,
+    price_column:           null,
+    weight_column:          null,
+    value_column:           null,
+    coffee_mappings:        [],
   };
 
-  // Keyword candidates for each field
-  const invoice_candidates  = ["INVOICE No.", "Invoice No.", "Invoice Number", "INV No.", "Invoice #", "Ref:", "Reference:"];
-  const date_candidates     = ["Date:", "Invoice Date:", "Order Date:", "Dated:"];
-  const due_date_candidates = ["Due date:", "Due Date:", "Payment Due:", "Due:"];
-  const desc_candidates     = ["Description", "Product", "Coffee", "Item", "Details"];
-  const weight_candidates   = ["Net weight (kg)", "Net Weight", "Weight (kg)", "Weight", "Kgs", "KG"];
-  const price_candidates    = ["Price per kg", "Price/kg", "Unit Price", "Rate", "Price per Kg"];
-  const value_candidates    = ["Value", "Total", "Amount", "Line Total"];
+  const find = (candidates) => candidates.find(c => lines.some(l => l.includes(c))) || null;
 
-  const find_keyword = (candidates) => {
-    for (const candidate of candidates) {
-      if (lines.some(l => l.includes(candidate))) return candidate;
-    }
-    return null;
-  };
+  template.invoice_number_keyword = find(["INVOICE No.","Invoice No.","Invoice Number","INV No.","Invoice #"]);
+  template.invoice_date_keyword   = find(["Date:","Invoice Date:","Order Date:","Dated:"]);
+  template.due_date_keyword       = find(["Due date:","Due Date:","Payment Due:","Due:"]);
+  template.no_bags_column         = find(["No bags","No. of Bags","Bags","Quantity"]);
+  template.description_column     = find(["Description","Product","Coffee","Item","Details"]);
+  template.ico_column             = find(["Marks","ICO","ICO Number","Lot Ref","Reference","Batch"]);
+  template.weight_column          = find(["Net weight (kg)","Net Weight","Weight (kg)","Weight","Kgs","KG"]);
+  template.price_column           = find(["Price per kg","Price/kg","Unit Price","Rate","Price per Kg"]);
+  template.value_column           = find(["Value","Amount","Line Total"]);
 
-  template.invoice_keyword    = find_keyword(invoice_candidates);
-  template.date_keyword       = find_keyword(date_candidates);
-  template.due_date_keyword   = find_keyword(due_date_candidates);
-  template.description_column = find_keyword(desc_candidates);
-  template.weight_column      = find_keyword(weight_candidates);
-  template.price_column       = find_keyword(price_candidates);
-  template.value_column       = find_keyword(value_candidates);
-
-  // Try to extract sample line items from the text to seed coffee mappings
-  // Look for lines that appear to be product descriptions (after the header row)
+  // Try to extract coffee descriptions to seed coffee mappings
   const desc_idx = template.description_column
     ? lines.findIndex(l => l.includes(template.description_column))
     : -1;
 
   if (desc_idx >= 0) {
-    // Scan lines after the header for potential coffee descriptions
     const NUM_RE = /^\d+(\.\d+)?$/;
     for (let i = desc_idx + 1; i < Math.min(desc_idx + 30, lines.length); i++) {
       const l = lines[i];
-      // A description line typically contains letters, commas, slashes — not just numbers
       if (l.length > 5 && !/^\d/.test(l) && !NUM_RE.test(l) && l.includes(",")) {
-        // Looks like a coffee description
-        const existing = template.coffee_mappings.find(m => m.supplier_description === l);
-        if (!existing) template.coffee_mappings.push({ supplier_description: l, our_name: "" });
+        if (!template.coffee_mappings.find(m => m.supplier_description === l))
+          template.coffee_mappings.push({ supplier_description: l, our_name: "" });
         if (template.coffee_mappings.length >= 10) break;
       }
     }
