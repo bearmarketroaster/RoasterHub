@@ -389,7 +389,11 @@ function build_traceability_section() {
         </div>
         ${is_open?`
           <div class="mapping-body">
-            <div style="margin-bottom:14px"><label class="lbl">Coffee Name *</label><input class="mapping-name" data-mi="${i}" value="${esc(m.app_name)}" placeholder="e.g. Ethiopia Yirgacheffe" /></div>
+            <div style="margin-bottom:14px">
+              <label class="lbl">Coffee Name *</label>
+              <input class="mapping-name" data-mi="${i}" value="${esc(m.app_name)}" placeholder="e.g. Ethiopia Yirgacheffe" />
+              ${m.fp_description?`<div class="hint mt-4">From PO: <strong>${esc(m.fp_description)}</strong></div>`:""}
+            </div>
             <div class="card-white">
               <div class="fp-table-header"><span class="lbl" style="margin:0">FP Code</span><span class="lbl" style="margin:0">Bag Size</span><span></span></div>
               ${(m.fp_sizes||[]).length===0?'<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No FP codes yet.</div>':""}
