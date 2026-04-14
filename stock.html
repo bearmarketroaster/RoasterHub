@@ -111,7 +111,12 @@ async function load_data() {
   const { data: deliveries } = await supabaseClient.from("stock_deliveries").select("*, stock_delivery_items(*)").order("date", { ascending: false });
   state.deliveries = (deliveries||[]).map(d => ({ ...d, items: d.stock_delivery_items||[] }));
   const { data: adjustments } = await supabaseClient.from("stock_adjustments").select("*").order("date", { ascending: false });
-  state.adjustments = adjustments || [];
+  state.adjustments = adjustments || 
+    const { data: supplier_templates } = await supabaseClient
+  .from("supplier_templates")
+  .select("supplier_name, template")
+  .order("supplier_name");
+state.supplier_templates = supplier_templates || [];
 }
 
 async function save_delivery() {
