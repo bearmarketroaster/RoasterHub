@@ -213,10 +213,34 @@ async function load_pdf_js() {
   return window.pdfjsLib;
 }  
   
+function format_date(raw) {
+  if (!raw) return today();
+  // Try to parse various date formats and output dd/MM/yy
+  const clean = raw.trim();
+  // Already dd/MM/yy
+  if (/^\d{2}\/\d{2}\/\d{2}$/.test(clean)) return clean;
+  // dd Month yyyy e.g. 07 April 2026
+  const months = { january:"01",february:"02",march:"03",april:"04",may:"05",june:"06",july:"07",august:"08",september:"09",october:"10",november:"11",december:"12" };
+  const long_match = clean.match(/^(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})$/);
+  if (long_match) {
+    const d = long_match[1].padStart(2,"0");
+    const m = months[long_match[2].toLowerCase()] || "01";
+    const y = long_match[3].slice(2);
+    return `${d}/${m}/${y}`;
+  }
+  // dd/MM/yyyy
+  const slash_match = clean.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash_match) return `${slash_match[1].padStart(2,"0")}/${slash_match[2].padStart(2,"0")}/${slash_match[3].slice(2)}`;
+  // yyyy-MM-dd
+  const iso_match = clean.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso_match) return `${iso_match[3]}/${iso_match[2]}/${iso_match[1].slice(2)}`;
+  return clean;
+}
+
 async function parse_delivery_note(file, supplier_name) {
   const { data: template_row } = await supabaseClient
     .from("supplier_templates")
-    .select("template, sample_text")
+    .select("template")
     .eq("supplier_name", supplier_name)
     .single();
 
@@ -251,9 +275,9 @@ async function parse_delivery_note(file, supplier_name) {
     return "";
   };
 
-  const invoice_ref = extract_after(t.invoice_keyword);
-  const date        = extract_after(t.date_keyword);
-  const items_out   = [];
+  const invoice_ref    = extract_after(t.invoice_number_keyword);
+  const invoice_date   = format_date(extract_after(t.invoice_date_keyword));
+  const items_out      = [];
 
   const desc_idx = t.description_column
     ? lines.findIndex(l => l.includes(t.description_column))
@@ -262,9 +286,12 @@ async function parse_delivery_note(file, supplier_name) {
   if (desc_idx >= 0) {
     const NUM_RE = /^\d+(\.\d+)?$/;
     let current = null;
+
     for (let i = desc_idx + 1; i < lines.length; i++) {
       const l = lines[i];
       if (/^(Total|TOTAL|VAT|Terms|Warehouse|Company|DELIVERY)/i.test(l)) break;
+
+      // Description line — contains letters and commas
       if (l.length > 5 && !/^\d/.test(l) && !NUM_RE.test(l) && l.includes(",")) {
         if (current) items_out.push(current);
         const mapping = (t.coffee_mappings||[]).find(m =>
@@ -273,26 +300,36 @@ async function parse_delivery_note(file, supplier_name) {
         current = {
           coffee:       mapping?.our_name || "",
           origin:       "",
-          lot_number:   "",
+          lot_number:   extract_after(t.ico_column) || "",
           bags:         "",
           weight_kg:    "",
           price_per_kg: "",
+          total_value:  "",
           supplier_description: l,
         };
-      } else if (current && NUM_RE.test(l)) {
-        const val = parseFloat(l);
-        if      (!current.weight_kg)    current.weight_kg    = String(val);
-        else if (!current.price_per_kg) current.price_per_kg = String(val);
+      } else if (current) {
+        // Numeric value — assign to next unfilled field in order: bags, weight, price, value
+        if (NUM_RE.test(l)) {
+          const val = parseFloat(l);
+          if      (!current.bags)         current.bags         = String(val);
+          else if (!current.weight_kg)    current.weight_kg    = String(val);
+          else if (!current.price_per_kg) current.price_per_kg = String(val);
+          else if (!current.total_value)  current.total_value  = String(val);
+        }
+        // ICO / Marks — typically alphanumeric with slashes
+        else if (t.ico_column && !current.lot_number && /[0-9].*\//.test(l)) {
+          current.lot_number = l;
+        }
       }
     }
     if (current) items_out.push(current);
   }
 
   return {
-    date:        date || today(),
+    date:        invoice_date,
     supplier:    supplier_name,
     invoice_ref,
-    items:       items_out.length > 0 ? items_out : [{ coffee:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" }],
+    items: items_out.length > 0 ? items_out : [{ coffee:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" }],
   };
 }
   
