@@ -101,7 +101,7 @@ function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"
 function gen_id(prefix, list) { return `${prefix}-${today().replace(/-/g,"")}-${String(list.length+1).padStart(3,"0")}`; }
 
 function new_delivery() {
-  return { date: today(), supplier: "", invoice_ref: "", items: [{ coffee:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" }] };
+  return { date: today(), supplier: "", invoice_ref: "", due_date: "", items: [{ coffee:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" }] };
 }
 
 async function load_data() {
@@ -256,6 +256,8 @@ async function parse_delivery_note(file, supplier_name) {
     full += items.map(i => i.str).join("\n") + "\n";
   }
 
+  console.log("RAW PDF TEXT:", full);
+
   const t = template_row.template;
   const lines = full.split("\n").map(l => l.trim()).filter(Boolean);
 
@@ -271,51 +273,59 @@ async function parse_delivery_note(file, supplier_name) {
     return "";
   };
 
-  const invoice_ref    = extract_after(t.invoice_number_keyword);
-  const invoice_date   = format_date(extract_after(t.invoice_date_keyword));
-  const items_out      = [];
+  const invoice_ref  = extract_after(t.invoice_number_keyword);
+  const invoice_date = format_date(extract_after(t.invoice_date_keyword));
+  const due_date     = format_date(extract_after(t.due_date_keyword));
+  const items_out    = [];
 
   const desc_idx = t.description_column
     ? lines.findIndex(l => l.includes(t.description_column))
     : -1;
 
   if (desc_idx >= 0) {
-    const NUM_RE = /^\d+(\.\d+)?$/;
+    const NUM_RE     = /^\d{1,3}(,\d{3})*(\.\d+)?$/;
+    const ICO_RE     = /^[A-Z0-9]{3,}\/[A-Z0-9\/\-]+$/i;
+    const SKIP_RE    = /^(Price per kg|Net weight|Description|Marks|No bags|Contract|Ref no|Value|DELIVERY)/i;
     let current = null;
 
     for (let i = desc_idx + 1; i < lines.length; i++) {
       const l = lines[i];
-      if (/^(Total|TOTAL|VAT|Terms|Warehouse|Company|DELIVERY)/i.test(l)) break;
 
-      // Description line — contains letters and commas
-      if (l.length > 5 && !/^\d/.test(l) && !NUM_RE.test(l) && l.includes(",")) {
+      // Stop at footer
+      if (/^(Total bags|Total net|VAT|TOTAL|Terms|Warehouse|Company|BANK)/i.test(l)) break;
+
+      // Skip column header repeats
+      if (SKIP_RE.test(l)) continue;
+
+      // Description line — contains letters and commas, not purely numeric
+      if (l.length > 5 && !NUM_RE.test(l) && !ICO_RE.test(l) && l.includes(",") && !/^\d/.test(l)) {
         if (current) items_out.push(current);
         const mapping = (t.coffee_mappings||[]).find(m =>
           m.supplier_description && l.toLowerCase().includes(m.supplier_description.toLowerCase().split(",")[0])
         );
         current = {
-          coffee:       mapping?.our_name || "",
-          origin:       "",
-          lot_number:   extract_after(t.ico_column) || "",
-          bags:         "",
-          weight_kg:    "",
-          price_per_kg: "",
-          total_value:  "",
+          coffee:               mapping?.our_name || "",
+          origin:               "",
+          lot_number:           "",
+          bags:                 "",
+          weight_kg:            "",
+          price_per_kg:         "",
+          total_value:          "",
           supplier_description: l,
         };
       } else if (current) {
-        // Numeric value — assign to next unfilled field in order: bags, weight, price, value
-        if (NUM_RE.test(l)) {
-          const val = parseFloat(l);
+        // ICO / Marks — alphanumeric with slashes e.g. 002/4600/0524
+        if (ICO_RE.test(l) && !current.lot_number) {
+          current.lot_number = l;
+        }
+        // Numeric values — assign in order: bags, weight, price, value
+        else if (NUM_RE.test(l)) {
+          const val = parseFloat(l.replace(/,/g,""));
           if      (!current.bags)         current.bags         = String(val);
           else if (!current.weight_kg)    current.weight_kg    = String(val);
           else if (!current.price_per_kg) current.price_per_kg = String(val);
           else if (!current.total_value)  current.total_value  = String(val);
         }
-        // ICO / Marks — typically alphanumeric with slashes
-else if (!current.lot_number && /^[\w\/\-]+$/.test(l) && l.includes("/")) {
-  current.lot_number = l;
-}
       }
     }
     if (current) items_out.push(current);
@@ -323,6 +333,7 @@ else if (!current.lot_number && /^[\w\/\-]+$/.test(l) && l.includes("/")) {
 
   return {
     date:        invoice_date,
+    due_date,
     supplier:    supplier_name,
     invoice_ref,
     items: items_out.length > 0 ? items_out : [{ coffee:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" }],
@@ -401,8 +412,8 @@ function build_deliveries() {
       <h3>Log Delivery</h3>
       <div class="grid-3 mb-12">
         <div><label class="lbl">Delivery Date *</label><input type="date" id="del-date" value="${delivery.date}" /></div>
-        <div><label class="lbl">Supplier</label><input id="del-supplier" value="${esc(delivery.supplier)}" placeholder="e.g. Falcon Coffees" /></div>
-        <div><label class="lbl">Invoice / Ref No.</label><input id="del-invoice" value="${esc(delivery.invoice_ref)}" placeholder="e.g. INV-2026-042" /></div>
+<div><label class="lbl">Invoice / Ref No.</label><input id="del-invoice" value="${esc(delivery.invoice_ref)}" placeholder="e.g. INV-2026-042" /></div>
+<div><label class="lbl">Due Date</label><input type="date" id="del-due-date" value="${esc(delivery.due_date||"")}" /></div>
       </div>
       <div class="section-label" style="margin-bottom:8px">Line Items</div>
       <div id="delivery-items">${delivery.items.map((item,i) => build_delivery_item_row(item,i)).join("")}</div>
