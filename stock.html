@@ -215,26 +215,22 @@ async function load_pdf_js() {
   
 function format_date(raw) {
   if (!raw) return today();
-  // Try to parse various date formats and output dd/MM/yy
   const clean = raw.trim();
-  // Already dd/MM/yy
-  if (/^\d{2}\/\d{2}\/\d{2}$/.test(clean)) return clean;
-  // dd Month yyyy e.g. 07 April 2026
   const months = { january:"01",february:"02",march:"03",april:"04",may:"05",june:"06",july:"07",august:"08",september:"09",october:"10",november:"11",december:"12" };
+  // dd Month yyyy e.g. 07 April 2026
   const long_match = clean.match(/^(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})$/);
   if (long_match) {
     const d = long_match[1].padStart(2,"0");
     const m = months[long_match[2].toLowerCase()] || "01";
-    const y = long_match[3].slice(2);
-    return `${d}/${m}/${y}`;
+    const y = long_match[3];
+    return `${y}-${m}-${d}`;
   }
   // dd/MM/yyyy
   const slash_match = clean.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (slash_match) return `${slash_match[1].padStart(2,"0")}/${slash_match[2].padStart(2,"0")}/${slash_match[3].slice(2)}`;
-  // yyyy-MM-dd
-  const iso_match = clean.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso_match) return `${iso_match[3]}/${iso_match[2]}/${iso_match[1].slice(2)}`;
-  return clean;
+  if (slash_match) return `${slash_match[3]}-${slash_match[2].padStart(2,"0")}-${slash_match[1].padStart(2,"0")}`;
+  // Already yyyy-MM-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+  return today();
 }
 
 async function parse_delivery_note(file, supplier_name) {
@@ -317,9 +313,9 @@ async function parse_delivery_note(file, supplier_name) {
           else if (!current.total_value)  current.total_value  = String(val);
         }
         // ICO / Marks — typically alphanumeric with slashes
-        else if (t.ico_column && !current.lot_number && /[0-9].*\//.test(l)) {
-          current.lot_number = l;
-        }
+else if (!current.lot_number && /^[\w\/\-]+$/.test(l) && l.includes("/")) {
+  current.lot_number = l;
+}
       }
     }
     if (current) items_out.push(current);
