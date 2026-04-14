@@ -191,6 +191,89 @@ function build_app() {
     </div>`;
 }
 
+async function parse_delivery_note(file, supplier_name) {
+  const { data: template_row } = await supabaseClient
+    .from("supplier_templates")
+    .select("template, sample_text")
+    .eq("supplier_name", supplier_name)
+    .single();
+
+  if (!template_row?.template) throw new Error("No template found for this supplier. Please set one up in Settings.");
+
+  const lib = await load_pdf_js();
+  const buf = await file.arrayBuffer();
+  const pdf = await lib.getDocument({ data: buf }).promise;
+  let full = "";
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const tc   = await page.getTextContent();
+    const items = tc.items.slice().sort((a,b) => {
+      const dy = Math.round(b.transform[5]) - Math.round(a.transform[5]);
+      return dy !== 0 ? dy : a.transform[4] - b.transform[4];
+    });
+    full += items.map(i => i.str).join("\n") + "\n";
+  }
+
+  const t = template_row.template;
+  const lines = full.split("\n").map(l => l.trim()).filter(Boolean);
+
+  const extract_after = (keyword) => {
+    if (!keyword) return "";
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(keyword)) {
+        const same = lines[i].replace(keyword, "").trim();
+        if (same) return same;
+        if (lines[i+1]) return lines[i+1].trim();
+      }
+    }
+    return "";
+  };
+
+  const invoice_ref = extract_after(t.invoice_keyword);
+  const date        = extract_after(t.date_keyword);
+  const items_out   = [];
+
+  const desc_idx = t.description_column
+    ? lines.findIndex(l => l.includes(t.description_column))
+    : -1;
+
+  if (desc_idx >= 0) {
+    const NUM_RE = /^\d+(\.\d+)?$/;
+    let current = null;
+    for (let i = desc_idx + 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (/^(Total|TOTAL|VAT|Terms|Warehouse|Company|DELIVERY)/i.test(l)) break;
+      if (l.length > 5 && !/^\d/.test(l) && !NUM_RE.test(l) && l.includes(",")) {
+        if (current) items_out.push(current);
+        const mapping = (t.coffee_mappings||[]).find(m =>
+          m.supplier_description && l.toLowerCase().includes(m.supplier_description.toLowerCase().split(",")[0])
+        );
+        current = {
+          coffee:       mapping?.our_name || "",
+          origin:       "",
+          lot_number:   "",
+          bags:         "",
+          weight_kg:    "",
+          price_per_kg: "",
+          supplier_description: l,
+        };
+      } else if (current && NUM_RE.test(l)) {
+        const val = parseFloat(l);
+        if      (!current.weight_kg)    current.weight_kg    = String(val);
+        else if (!current.price_per_kg) current.price_per_kg = String(val);
+      }
+    }
+    if (current) items_out.push(current);
+  }
+
+  return {
+    date:        date || today(),
+    supplier:    supplier_name,
+    invoice_ref,
+    items:       items_out.length > 0 ? items_out : [{ coffee:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" }],
+  };
+}
+  
 function build_green_stock() {
   const total_kg = state.stock_items.reduce((s,i) => s+i.current_kg, 0);
   const stats_html = `
@@ -232,7 +315,32 @@ function build_green_stock() {
 }
 
 function build_deliveries() {
-  const { show_delivery_form, delivery, delivery_err } = state.ui;
+  const { show_delivery_form, delivery, delivery_err, show_upload_invoice, upload_invoice_err, parsing_invoice } = state.ui;
+
+  const upload_panel = show_upload_invoice ? `
+    <div class="card mb-16">
+      <h3>Upload Delivery Invoice</h3>
+      <p class="hint mb-12">Select your supplier and upload their invoice PDF. The parser will pre-fill the delivery form automatically.</p>
+      <div class="grid-2 mb-12">
+        <div>
+          <label class="lbl">Supplier *</label>
+          <select id="invoice-supplier">
+            <option value="">— Select supplier —</option>
+            ${state.supplier_templates.map(s=>`<option value="${esc(s.supplier_name)}">${esc(s.supplier_name)}</option>`).join("")}
+          </select>
+        </div>
+        <div style="display:flex;align-items:flex-end">
+          <div style="flex:1">
+            <label class="lbl">Invoice PDF</label>
+            <input type="file" id="invoice-pdf" accept=".pdf" style="display:none" />
+            <button class="btn btn-dark" id="choose-invoice-pdf" ${parsing_invoice?"disabled":""}>${parsing_invoice?"⏳ Parsing…":"📄 Choose PDF"}</button>
+          </div>
+        </div>
+      </div>
+      ${upload_invoice_err?`<p class="err">${esc(upload_invoice_err)}</p>`:""}
+      <button class="btn btn-ghost btn-sm" id="cancel-upload-invoice">Cancel</button>
+    </div>` : "";
+
   const form_html = show_delivery_form ? `
     <div class="card mb-16">
       <h3>Log Delivery</h3>
@@ -250,8 +358,9 @@ function build_deliveries() {
         <button class="btn btn-ghost btn-lg" id="cancel-delivery">Cancel</button>
       </div>
     </div>` : "";
+
   const delivery_list = state.deliveries.map(d => {
-    const total_kg = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0), 0);
+    const total_kg    = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0), 0);
     const total_value = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0)*(Number(i.price_per_kg)||0), 0);
     return `
       <div class="card" style="border-left:4px solid #c8a96e">
@@ -267,7 +376,7 @@ function build_deliveries() {
           </div>
         </div>
         <div style="display:grid;gap:6px">
-          ${d.items.map(item => `
+          ${d.items.map(item=>`
             <div style="display:flex;justify-content:space-between;align-items:center;background:#f5f0eb;border-radius:6px;padding:8px 12px;font-size:13px">
               <div>
                 <span style="font-weight:600">${esc(item.coffee)}</span>
@@ -283,15 +392,21 @@ function build_deliveries() {
         </div>
       </div>`;
   }).join("");
+
   return `
     <div class="flex-between mb-16">
       <h2>Deliveries</h2>
-      <button class="btn btn-dark" id="toggle-delivery-form">+ Log Delivery</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" id="toggle-upload-invoice">📄 Upload Invoice</button>
+        <button class="btn btn-dark" id="toggle-delivery-form">+ Manual Entry</button>
+      </div>
     </div>
+    ${upload_panel}
     ${form_html}
-    ${state.deliveries.length===0&&!show_delivery_form?`<div class="card empty"><div class="icon">📦</div>No deliveries logged yet.</div>`:delivery_list}`;
+    ${state.deliveries.length===0&&!show_delivery_form&&!show_upload_invoice
+      ? `<div class="card empty"><div class="icon">📦</div>No deliveries logged yet.</div>`
+      : delivery_list}`;
 }
-
 function build_delivery_item_row(item, i) {
   return `
     <div class="delivery-item" data-item-idx="${i}">
