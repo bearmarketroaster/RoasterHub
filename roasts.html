@@ -91,7 +91,6 @@ supabaseClient.auth.getSession().then(({ data: { session } }) => {
   else init();
 });
 
-const CONTAINER_SIZES = { XL: 80, L: 40, M: 20, S: 10 };
 
 const state = {
   view:           "home",
@@ -105,7 +104,7 @@ const state = {
 
 function new_session() {
   return {
-    coffee: "", date: today(), container_id: "", container_size: "XL",
+    coffee: "", date: today(), container_id: "",
     batch_count: 1, batches: [], roasted_weight: "",
   };
 }
@@ -130,7 +129,7 @@ async function save_session() {
   const id = gen_session_id();
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
     id, coffee: s.coffee, date: s.date, container_id: s.container_id,
-    container_size: s.container_size, roasted_weight: Number(s.roasted_weight),
+    roasted_weight: Number(s.roasted_weight),
   });
   if (session_err) { state.saving = false; state.ui.err = "Failed to save session. Please try again."; render(); return; }
   const batches = s.batches.map((b,i) => ({
@@ -243,9 +242,6 @@ function build_step1() {
         </div>
         <div><label class="lbl">Roast Date *</label><input type="date" id="s1-date" value="${s.date}" /></div>
         <div><label class="lbl">Container to Fill *</label><input id="s1-container" value="${esc(s.container_id)}" placeholder="e.g. XL01042601" /></div>
-        <div><label class="lbl">Container Size</label>
-          <select id="s1-size">${Object.entries(CONTAINER_SIZES).map(([sz,kg])=>`<option value="${sz}" ${s.container_size===sz?"selected":""}>${sz} (${kg}kg)</option>`).join("")}</select>
-        </div>
         <div><label class="lbl">Number of Batches *</label><input type="number" id="s1-count" value="${s.batch_count}" min="1" max="20" /></div>
       </div>
       <p id="s1-err" class="err" style="display:none"></p>
@@ -378,14 +374,13 @@ function attach_listeners() {
     const coffee = document.getElementById("s1-coffee")?.value;
     const date = document.getElementById("s1-date")?.value;
     const container = document.getElementById("s1-container")?.value.trim();
-    const size = document.getElementById("s1-size")?.value;
     const count = Number(document.getElementById("s1-count")?.value)||0;
     const err_el = document.getElementById("s1-err");
     if (!coffee) { err_el.textContent="Please select a coffee."; err_el.style.display="block"; return; }
     if (!container) { err_el.textContent="Please enter a container ID."; err_el.style.display="block"; return; }
     if (count<1) { err_el.textContent="At least one batch required."; err_el.style.display="block"; return; }
     state.session.coffee=coffee; state.session.date=date; state.session.container_id=container;
-    state.session.container_size=size; state.session.batch_count=count;
+    state.session.batch_count=count;
     state.session.batches=Array.from({length:count},(_,i) => state.session.batches[i]||{cropster_id:"",green_weight:""});
     state.ui.step=2; render();
   });
