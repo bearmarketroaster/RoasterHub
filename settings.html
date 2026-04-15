@@ -40,21 +40,28 @@
     .btn-sm { padding: 4px 10px; font-size: 12px; } .btn-lg { padding: 12px 24px; }
     .btn:disabled { opacity: 0.6; cursor: not-allowed; }
     .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
-    .mapping-row { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
-    .mapping-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
-    .mapping-header:hover { background: #fdfaf7; } .mapping-header.open { background: #fff8ee; }
-    .mapping-body { padding: 14px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
-    .fp-table-header { display: grid; grid-template-columns: 1fr 1fr auto; background: #f5f0eb; padding: 8px 12px; border-bottom: 1px solid #e0d5c5; }
-    .fp-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
+
+    /* Coffee cards */
+    .coffee-card { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+    .coffee-card-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
+    .coffee-card-header:hover { background: #fdfaf7; }
+    .coffee-card-header.open { background: #fff8ee; }
+    .coffee-card-body { padding: 16px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
+
+    /* FP code table */
+    .fp-table-header { display: grid; grid-template-columns: 1.2fr 1.5fr 1fr auto; background: #f5f0eb; padding: 8px 12px; border-bottom: 1px solid #e0d5c5; gap: 8px; }
+    .fp-row { display: grid; grid-template-columns: 1.2fr 1.5fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
     .fp-row + .fp-row { border-top: 1px solid #f0ebe4; }
-    .coffee-tag { display: inline-flex; align-items: center; gap: 6px; background: #f0ebe4; border-radius: 20px; padding: 4px 12px; font-size: 13px; margin: 4px; }
-    .coffee-tag button { background: none; border: none; color: #e05c2a; cursor: pointer; font-size: 14px; padding: 0; line-height: 1; }
+
+    /* Supplier cards */
     .supplier-card { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
     .supplier-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
-    .supplier-header:hover { background: #fdfaf7; } .supplier-header.open { background: #fff8ee; }
+    .supplier-header:hover { background: #fdfaf7; }
+    .supplier-header.open { background: #fff8ee; }
     .supplier-body { padding: 14px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
     .coffee-map-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
     .coffee-map-row + .coffee-map-row { border-top: 1px solid #f0ebe4; }
+
     .save-bar { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e0d5c5; padding: 14px 24px; display: flex; align-items: center; gap: 14px; box-shadow: 0 -2px 8px rgba(0,0,0,0.06); }
     .mono { font-family: monospace; } .err { color: #e05c2a; font-size: 13px; margin-top: 6px; } .hint { color: #888; font-size: 13px; }
     .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c8a96e; margin-bottom: 10px; }
@@ -65,7 +72,8 @@
     .parse-status.ok { background: #edf7f0; color: #4a9e6b; }
     .parse-status.err { background: #fff0ee; color: #e05c2a; }
     .parse-status.info { background: #fff8ee; color: #c8a96e; }
-    @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } }
+    .inline-err { color: #e05c2a; font-size: 12px; margin-top: 4px; }
+    @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } .fp-table-header, .fp-row { grid-template-columns: 1fr 1fr auto; } .fp-table-header .fp-hdr-bag-name { display:none; } }
   </style>
 </head>
 <body>
@@ -73,9 +81,10 @@
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // BEAR ROASTERY — Settings
-// Single source of truth for coffees, FP mappings, QR base URL and suppliers.
-// Reads and writes to the settings table in Supabase (always row id = 1).
-// Supplier templates stored in supplier_templates table, keyed by supplier_name.
+// Coffees → coffees table (id, name)
+// FP Codes → fp_codes table (id, coffee_id, fp_code, bag_name, bag_size)
+// QR base URL → settings table row id=1
+// Supplier templates → supplier_templates table
 // ─────────────────────────────────────────────────────────────────────────────
 
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -85,30 +94,47 @@ supabaseClient.auth.getSession().then(({ data: { session } }) => {
   else init();
 });
 
-const RETAIL_SIZES = [{ val:"0.2", label:"200g" },{ val:"0.5", label:"500g" },{ val:"1", label:"1kg" }];
+const BAG_SIZES = ["100g","200g","500g","1kg"];
 
 const state = {
-  settings: { base_url:"", coffee_mappings:[], coffees:[] },
+  base_url: "",
+  coffees: [],          // [{ id, name, fp_codes: [{id, fp_code, bag_name, bag_size}] }]
   supplier_templates: [],
-  loading: true, saving: false, saved: false,
+  loading: true,
+  saving: false,
+  saved: false,
   open_section: "coffees",
   ui: {
-    new_coffee: "", coffee_err: "", open_mapping: null, url_status: null,
-    open_supplier: null, supplier_err: "", parsing_supplier: false,
-    parse_status: null, // { type: "ok"|"err"|"info", msg: "" }
+    open_coffee: null,
+    new_coffee_name: "",
+    coffee_err: "",
+    // per-coffee inline new FP row: { [coffee_id]: { fp_code:"", bag_name:"", bag_size:"100g", err:"" } }
+    new_fp: {},
+    url_status: null,
+    open_supplier: null,
+    supplier_err: "",
+    parsing_supplier: false,
+    parse_status: null,
   },
 };
 
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-function gen_id() { return `SUP-${Date.now()}`; }
 
-// ── SUPABASE ──────────────────────────────────────────────────────────────────
-async function load_settings() {
-  const { data, error } = await supabaseClient.from("settings").select("*").eq("id",1).single();
-  if (error) { console.error("Failed to load settings:", error); return; }
-  state.settings.base_url        = data.base_url        || "";
-  state.settings.coffee_mappings = data.coffee_mappings || [];
-  state.settings.coffees         = data.coffees         || [];
+// ── LOAD ──────────────────────────────────────────────────────────────────────
+async function load_base_url() {
+  const { data, error } = await supabaseClient.from("settings").select("base_url").eq("id",1).single();
+  if (!error && data) state.base_url = data.base_url || "";
+}
+
+async function load_coffees() {
+  const { data: coffees, error: ce } = await supabaseClient.from("coffees").select("*").order("name");
+  if (ce) { console.error("Failed to load coffees:", ce); return; }
+  const { data: fp_codes, error: fe } = await supabaseClient.from("fp_codes").select("*").order("fp_code");
+  if (fe) { console.error("Failed to load fp_codes:", fe); return; }
+  state.coffees = (coffees||[]).map(c => ({
+    ...c,
+    fp_codes: (fp_codes||[]).filter(f => f.coffee_id === c.id),
+  }));
 }
 
 async function load_supplier_templates() {
@@ -117,19 +143,75 @@ async function load_supplier_templates() {
   state.supplier_templates = data || [];
 }
 
-async function save_settings() {
-  state.saving = true; render();
-  const { error } = await supabaseClient.from("settings").update({
-    base_url:        state.settings.base_url,
-    coffee_mappings: state.settings.coffee_mappings,
-    coffees:         state.settings.coffees,
-  }).eq("id",1);
-  state.saving = false;
-  if (!error) { state.saved=true; render(); setTimeout(()=>{ state.saved=false; render(); },3000); }
+async function init() {
+  await Promise.all([load_base_url(), load_coffees(), load_supplier_templates()]);
+  state.loading = false;
+  render();
 }
 
+// ── SAVE BASE URL ─────────────────────────────────────────────────────────────
+async function save_base_url() {
+  state.saving = true; render();
+  const { error } = await supabaseClient.from("settings").update({ base_url: state.base_url }).eq("id",1);
+  state.saving = false;
+  if (!error) { state.saved = true; render(); setTimeout(()=>{ state.saved=false; render(); },3000); }
+  else { alert("Failed to save URL: " + error.message); render(); }
+}
+
+// ── COFFEES ───────────────────────────────────────────────────────────────────
+async function add_coffee(name) {
+  const { data, error } = await supabaseClient.from("coffees").insert({ name }).select().single();
+  if (error) { state.ui.coffee_err = error.message; render(); return; }
+  state.coffees.push({ ...data, fp_codes: [] });
+  state.coffees.sort((a,b)=>a.name.localeCompare(b.name));
+  state.ui.new_coffee_name = "";
+  state.ui.coffee_err = "";
+  state.ui.open_coffee = data.id;
+  render();
+}
+
+async function delete_coffee(id) {
+  if (!confirm("Delete this coffee and all its FP codes?")) return;
+  const { error } = await supabaseClient.from("coffees").delete().eq("id",id);
+  if (error) { alert("Failed to delete: " + error.message); return; }
+  state.coffees = state.coffees.filter(c => c.id !== id);
+  if (state.ui.open_coffee === id) state.ui.open_coffee = null;
+  render();
+}
+
+async function rename_coffee(id, new_name) {
+  const { error } = await supabaseClient.from("coffees").update({ name: new_name }).eq("id",id);
+  if (error) { alert("Failed to rename: " + error.message); return; }
+  const c = state.coffees.find(c=>c.id===id);
+  if (c) { c.name = new_name; state.coffees.sort((a,b)=>a.name.localeCompare(b.name)); }
+  render();
+}
+
+// ── FP CODES ──────────────────────────────────────────────────────────────────
+async function add_fp_code(coffee_id, fp_code, bag_name, bag_size) {
+  const { data, error } = await supabaseClient.from("fp_codes")
+    .insert({ coffee_id, fp_code: fp_code.toUpperCase(), bag_name, bag_size })
+    .select().single();
+  if (error) {
+    state.ui.new_fp[coffee_id] = { ...state.ui.new_fp[coffee_id], err: error.message };
+    render(); return;
+  }
+  const coffee = state.coffees.find(c=>c.id===coffee_id);
+  if (coffee) { coffee.fp_codes.push(data); coffee.fp_codes.sort((a,b)=>a.fp_code.localeCompare(b.fp_code)); }
+  state.ui.new_fp[coffee_id] = { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+  render();
+}
+
+async function delete_fp_code(coffee_id, fp_id) {
+  const { error } = await supabaseClient.from("fp_codes").delete().eq("id",fp_id);
+  if (error) { alert("Failed to delete FP code: " + error.message); return; }
+  const coffee = state.coffees.find(c=>c.id===coffee_id);
+  if (coffee) coffee.fp_codes = coffee.fp_codes.filter(f=>f.id!==fp_id);
+  render();
+}
+
+// ── SUPPLIERS ─────────────────────────────────────────────────────────────────
 async function save_supplier_template(template) {
-  // Upsert — keyed on supplier_name
   const { error } = await supabaseClient.from("supplier_templates").upsert(template, { onConflict: "supplier_name" });
   if (error) { console.error("Failed to save supplier template:", error); return false; }
   return true;
@@ -138,12 +220,6 @@ async function save_supplier_template(template) {
 async function delete_supplier_template(supplier_name) {
   await supabaseClient.from("supplier_templates").delete().eq("supplier_name", supplier_name);
   await load_supplier_templates();
-  render();
-}
-
-async function init() {
-  await Promise.all([load_settings(), load_supplier_templates()]);
-  state.loading = false;
   render();
 }
 
@@ -177,25 +253,15 @@ async function extract_pdf_text(file) {
   return full;
 }
 
-// Generate a template by analysing raw PDF text
-// Looks for known keyword patterns and extracts field locations
 function generate_template_from_text(raw) {
   const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
   const template = {
-    invoice_number_keyword: null,
-    invoice_date_keyword:   null,
-    due_date_keyword:       null,
-    no_bags_column:         null,
-    description_column:     null,
-    ico_column:             null,
-    price_column:           null,
-    weight_column:          null,
-    value_column:           null,
-    coffee_mappings:        [],
+    invoice_number_keyword: null, invoice_date_keyword: null, due_date_keyword: null,
+    no_bags_column: null, description_column: null, ico_column: null,
+    price_column: null, weight_column: null, value_column: null,
+    coffee_mappings: [],
   };
-
   const find = (candidates) => candidates.find(c => lines.some(l => l.includes(c))) || null;
-
   template.invoice_number_keyword = find(["INVOICE No.","Invoice No.","Invoice Number","INV No.","Invoice #"]);
   template.invoice_date_keyword   = find(["Date:","Invoice Date:","Order Date:","Dated:"]);
   template.due_date_keyword       = find(["Due date:","Due Date:","Payment Due:","Due:"]);
@@ -205,97 +271,19 @@ function generate_template_from_text(raw) {
   template.weight_column          = find(["Net weight (kg)","Net Weight","Weight (kg)","Weight","Kgs","KG"]);
   template.price_column           = find(["Price per kg","Price/kg","Unit Price","Rate","Price per Kg"]);
   template.value_column           = find(["Value","Amount","Line Total"]);
-
-  // Try to extract coffee descriptions to seed coffee mappings
-  const desc_idx = template.description_column
-    ? lines.findIndex(l => l.includes(template.description_column))
-    : -1;
-
+  const desc_idx = template.description_column ? lines.findIndex(l => l.includes(template.description_column)) : -1;
   if (desc_idx >= 0) {
     const NUM_RE = /^\d+(\.\d+)?$/;
     for (let i = desc_idx + 1; i < Math.min(desc_idx + 30, lines.length); i++) {
       const l = lines[i];
       if (l.length > 5 && !/^\d/.test(l) && !NUM_RE.test(l) && l.includes(",")) {
         if (!template.coffee_mappings.find(m => m.supplier_description === l))
-          template.coffee_mappings.push({ supplier_description: l, our_name: "" });
+          template.coffee_mappings.push({ supplier_description: l, our_coffee_id: null });
         if (template.coffee_mappings.length >= 10) break;
       }
     }
   }
-
   return template;
-}
-
-// Parse a delivery note PDF using a saved supplier template
-function parse_delivery_with_template(raw, template) {
-  const lines = raw.split("\n").map(l => l.trim()).filter(Boolean);
-  const result = {
-    invoice_ref:  null,
-    date:         null,
-    due_date:     null,
-    supplier:     null,
-    items:        [],
-  };
-
-  // Extract header fields
-  const extract_after_keyword = (keyword) => {
-    if (!keyword) return null;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes(keyword)) {
-        // Value might be on same line or next line
-        const same_line = lines[i].replace(keyword, "").trim();
-        if (same_line) return same_line;
-        if (lines[i+1]) return lines[i+1].trim();
-      }
-    }
-    return null;
-  };
-
-  result.invoice_ref = extract_after_keyword(template.invoice_keyword);
-  result.date        = extract_after_keyword(template.date_keyword);
-  result.due_date    = extract_after_keyword(template.due_date_keyword);
-
-  // Extract line items
-  const desc_idx = template.description_column
-    ? lines.findIndex(l => l.includes(template.description_column))
-    : -1;
-
-  if (desc_idx >= 0) {
-    const NUM_RE = /^\d+(\.\d+)?$/;
-    let current_item = null;
-
-    for (let i = desc_idx + 1; i < lines.length; i++) {
-      const l = lines[i];
-
-      // Stop at footer keywords
-      if (/^(Total|TOTAL|VAT|Terms|Warehouse|Company)/i.test(l)) break;
-
-      // Looks like a description line
-      if (l.length > 5 && !/^\d/.test(l) && !NUM_RE.test(l) && l.includes(",")) {
-        if (current_item) result.items.push(current_item);
-        // Map supplier description to our internal coffee name
-        const mapping = (template.coffee_mappings||[]).find(m =>
-          m.supplier_description && l.toLowerCase().includes(m.supplier_description.toLowerCase().split(",")[0])
-        );
-        current_item = {
-          supplier_description: l,
-          coffee:      mapping?.our_name || "",
-          weight_kg:   null,
-          price_per_kg: null,
-          total_value: null,
-        };
-      } else if (current_item && NUM_RE.test(l)) {
-        // Numeric value — assign to the next unfilled numeric field
-        const val = parseFloat(l);
-        if      (!current_item.weight_kg)    current_item.weight_kg    = val;
-        else if (!current_item.price_per_kg) current_item.price_per_kg = val;
-        else if (!current_item.total_value)  current_item.total_value  = val;
-      }
-    }
-    if (current_item) result.items.push(current_item);
-  }
-
-  return result;
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
@@ -314,103 +302,144 @@ function build_app() {
   if (state.loading) return header + `<div class="loading">Loading settings…</div>`;
   return header + `
     <div class="content">
-      <p class="hint" style="margin-bottom:20px">Changes here apply across all modules. Hit <strong>Save All Settings</strong> at the bottom when done.</p>
+      <p class="hint" style="margin-bottom:20px">Manage your master coffee list, FP codes, QR base URL, and supplier templates here.</p>
       ${build_coffees_section()}
       ${build_traceability_section()}
       ${build_suppliers_section()}
-    </div>
-    <div class="save-bar">
-      <button class="btn btn-dark btn-lg" id="save-all" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save All Settings"}</button>
-      ${state.saved?'<span style="color:#4a9e6b;font-weight:600;font-size:14px">✓ Saved</span>':""}
     </div>`;
 }
 
 // ── COFFEES SECTION ───────────────────────────────────────────────────────────
 function build_coffees_section() {
-  const open = state.open_section==="coffees", coffees = state.settings.coffees||[];
+  const open = state.open_section === "coffees";
+  const coffees = state.coffees;
+  const total_fp = coffees.reduce((n,c)=>n+c.fp_codes.length, 0);
+
+  const coffees_html = coffees.map(c => {
+    const is_open = state.ui.open_coffee === c.id;
+    const nfp = state.ui.new_fp[c.id] || { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+
+    const fp_rows = c.fp_codes.map(f => `
+      <div class="fp-row">
+        <span class="mono" style="font-size:13px;font-weight:600;color:#1a1008">${esc(f.fp_code)}</span>
+        <span style="font-size:13px;color:#444">${esc(f.bag_name)}</span>
+        <span class="tag" style="background:#f0ebe4;color:#5a3e1b;font-size:11px">${esc(f.bag_size)}</span>
+        <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px" data-delete-fp="${c.id}__${f.id}" title="Remove FP code">✕</button>
+      </div>`).join("");
+
+    return `
+      <div class="coffee-card">
+        <div class="coffee-card-header ${is_open?"open":""}" data-toggle-coffee="${c.id}">
+          <span style="font-size:15px;color:#c8a96e">${is_open?"▾":"▸"}</span>
+          <span style="flex:1;font-weight:600;font-size:14px;color:#1a1008">${esc(c.name)}</span>
+          <span class="hint" style="font-size:12px;margin-right:8px">${c.fp_codes.length} FP code${c.fp_codes.length!==1?"s":""}</span>
+          <button data-delete-coffee="${c.id}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" onclick="event.stopPropagation()">✕</button>
+        </div>
+        ${is_open ? `
+          <div class="coffee-card-body">
+
+            <div class="mb-12">
+              <label class="lbl">Coffee Name</label>
+              <div style="display:flex;gap:8px">
+                <input class="coffee-rename-input" data-cid="${c.id}" value="${esc(c.name)}" style="max-width:320px" />
+                <button class="btn btn-ghost btn-sm coffee-rename-btn" data-cid="${c.id}">Rename</button>
+              </div>
+            </div>
+
+            <div class="section-label">FP Codes</div>
+            <div class="card-white" style="margin-bottom:12px">
+              <div class="fp-table-header">
+                <span class="lbl" style="margin:0">FP Code</span>
+                <span class="lbl fp-hdr-bag-name" style="margin:0">Bag Name</span>
+                <span class="lbl" style="margin:0">Size</span>
+                <span></span>
+              </div>
+              ${c.fp_codes.length===0?'<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No FP codes yet. Add one below.</div>':""}
+              ${fp_rows}
+              <div style="padding:10px 12px;border-top:1px solid #f0ebe4;background:#fdfaf7">
+                <div style="display:grid;grid-template-columns:1.2fr 1.5fr 1fr auto;gap:8px;align-items:flex-end">
+                  <div>
+                    <label class="lbl">FP Code *</label>
+                    <input class="new-fp-code" data-cid="${c.id}" value="${esc(nfp.fp_code)}" placeholder="e.g. FP0046" style="font-family:monospace;font-size:13px" />
+                  </div>
+                  <div>
+                    <label class="lbl">Bag Name *</label>
+                    <input class="new-fp-bag-name" data-cid="${c.id}" value="${esc(nfp.bag_name)}" placeholder="e.g. Holy Roast Espresso 1kg" style="font-size:13px" />
+                  </div>
+                  <div>
+                    <label class="lbl">Size *</label>
+                    <select class="new-fp-bag-size" data-cid="${c.id}" style="font-size:13px">
+                      ${BAG_SIZES.map(s=>`<option value="${s}" ${nfp.bag_size===s?"selected":""}>${s}</option>`).join("")}
+                    </select>
+                  </div>
+                  <button class="btn btn-amber btn-sm add-fp-btn" data-cid="${c.id}" style="margin-top:18px">+ Add</button>
+                </div>
+                ${nfp.err?`<p class="inline-err">${esc(nfp.err)}</p>`:""}
+              </div>
+            </div>
+
+          </div>` : ""}
+      </div>`;
+  }).join("");
+
   const body = open ? `
     <div class="section-body">
-      <p class="hint mb-12">Master coffee list used across all modules.</p>
-      <div style="margin-bottom:14px">
-        ${coffees.length===0?'<p class="hint">No coffees yet.</p>':coffees.map((c,i)=>`<span class="coffee-tag">${esc(c)}<button data-remove-coffee="${i}">✕</button></span>`).join("")}
+      <p class="hint mb-12">Master coffee names used across all modules. Each coffee can have multiple FP codes for different bag sizes and SKUs.</p>
+
+      ${coffees.length===0?'<p class="hint" style="font-style:italic;margin-bottom:12px">No coffees yet. Add one below.</p>':""}
+      ${coffees_html}
+
+      <div class="card mt-12">
+        <label class="lbl">Add New Coffee</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="new-coffee-name" value="${esc(state.ui.new_coffee_name)}" placeholder="e.g. Holy Roast" style="max-width:320px" />
+          <button class="btn btn-dark btn-sm" id="add-coffee-btn">Add Coffee</button>
+        </div>
+        ${state.ui.coffee_err?`<p class="inline-err">${esc(state.ui.coffee_err)}</p>`:""}
       </div>
-      <div style="display:flex;gap:8px;align-items:flex-end">
-        <div style="flex:1"><label class="lbl">Add Coffee</label><input id="new-coffee" value="${esc(state.ui.new_coffee)}" placeholder="e.g. Colombia El Paraiso" /></div>
-        <button class="btn btn-dark" id="add-coffee">Add</button>
-      </div>
-      ${state.ui.coffee_err?`<p class="err">${esc(state.ui.coffee_err)}</p>`:""}
     </div>` : "";
+
   return `
     <div class="section">
       <div class="section-header" data-toggle-section="coffees">
-        <div><div class="section-title"><span class="icon">☕</span> Coffees</div><div class="section-desc">${coffees.length} coffee${coffees.length!==1?"s":""}</div></div>
+        <div>
+          <div class="section-title"><span class="icon">☕</span> Coffees &amp; FP Codes</div>
+          <div class="section-desc">${coffees.length} coffee${coffees.length!==1?"s":""} · ${total_fp} FP code${total_fp!==1?"s":""}</div>
+        </div>
         <span class="section-arrow">${open?"▾":"▸"}</span>
       </div>
       ${body}
     </div>`;
 }
 
-// ── TRACEABILITY SECTION ──────────────────────────────────────────────────────
+// ── TRACEABILITY SECTION (QR URL only) ───────────────────────────────────────
 function build_traceability_section() {
-  const open = state.open_section==="traceability", mappings = state.settings.coffee_mappings||[];
-  const { url_status, open_mapping } = state.ui;
-  const mappings_html = mappings.map((m,i) => {
-    const is_open = open_mapping===i;
-    const fp_rows = (m.fp_sizes||[]).map((fs,j) => `
-      <div class="fp-row">
-        <input class="fp-code" data-mi="${i}" data-fi="${j}" value="${esc(fs.code)}" placeholder="e.g. FP0046" style="font-family:monospace;font-size:13px" />
-        <select class="fp-size" data-mi="${i}" data-fi="${j}" style="font-size:13px">
-          ${RETAIL_SIZES.map(s=>`<option value="${s.val}" ${fs.size===s.val?"selected":""}>${s.label}</option>`).join("")}
-          <option value="bulk" ${fs.size==="bulk"?"selected":""}>Bulk (BAR)</option>
-        </select>
-        <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1" data-remove-fp="${i}-${j}">✕</button>
-      </div>`).join("");
-    return `
-      <div class="mapping-row">
-        <div class="mapping-header ${is_open?"open":""}" data-toggle-mapping="${i}">
-          <span style="font-size:15px;color:#c8a96e">${is_open?"▾":"▸"}</span>
-          <span style="flex:1;font-weight:600;color:${m.app_name?"#1a1008":"#bbb"};font-size:14px">${esc(m.app_name||"Unnamed coffee")}</span>
-          <span class="hint" style="font-size:12px">${(m.fp_sizes||[]).length} FP code${(m.fp_sizes||[]).length!==1?"s":""}</span>
-          <button data-remove-mapping="${i}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;padding:0 4px;line-height:1">✕</button>
-        </div>
-        ${is_open?`
-          <div class="mapping-body">
-            <div style="margin-bottom:14px">
-              <label class="lbl">Coffee Name *</label>
-              <input class="mapping-name" data-mi="${i}" value="${esc(m.app_name)}" placeholder="e.g. Ethiopia Yirgacheffe" />
-              ${m.fp_description?`<div class="hint mt-4">From PO: <strong>${esc(m.fp_description)}</strong></div>`:""}
-            </div>
-            <div class="card-white">
-              <div class="fp-table-header"><span class="lbl" style="margin:0">FP Code</span><span class="lbl" style="margin:0">Bag Size</span><span></span></div>
-              ${(m.fp_sizes||[]).length===0?'<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No FP codes yet.</div>':""}
-              ${fp_rows}
-              <div style="padding:8px 12px"><button class="btn btn-amber btn-sm" data-add-fp="${i}">+ Add FP Code</button></div>
-            </div>
-          </div>`:""}
-      </div>`;
-  }).join("");
+  const open = state.open_section === "traceability";
+  const { url_status } = state.ui;
+
   const body = open ? `
     <div class="section-body">
       <div class="section-label">QR Code Base URL</div>
-      <div class="card" style="margin-bottom:20px">
+      <div class="card">
         <p class="hint mb-12">The URL embedded in every container QR code. Update this before going live.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-          <div style="flex:1;min-width:240px"><input id="base-url" value="${esc(state.settings.base_url)}" placeholder="https://your-domain-here/scan" style="font-family:monospace;font-size:13px" /></div>
-          <button class="btn btn-dark" id="check-url">🔍 Check URL</button>
+          <div style="flex:1;min-width:240px"><input id="base-url" value="${esc(state.base_url)}" placeholder="https://your-domain-here/scan" style="font-family:monospace;font-size:13px" /></div>
+          <button class="btn btn-dark btn-sm" id="check-url">🔍 Check</button>
+          <button class="btn btn-green btn-sm" id="save-url" ${state.saving?"disabled":""}>💾 Save URL</button>
         </div>
         ${url_status==="ok"?'<p style="margin-top:8px;font-size:13px;color:#4a9e6b;font-weight:600">✓ Valid URL format.</p>':""}
         ${url_status==="unreachable"?'<p style="margin-top:8px;font-size:13px;color:#e05c2a;font-weight:600">⚠️ Invalid URL format.</p>':""}
+        ${state.saved?'<p style="margin-top:8px;font-size:13px;color:#4a9e6b;font-weight:600">✓ Saved.</p>':""}
       </div>
-      <div class="flex-between mb-12">
-        <div class="section-label" style="margin:0">FP Code Mappings</div>
-        <button class="btn btn-dark btn-sm" id="add-mapping">+ Add Coffee</button>
-      </div>
-      ${mappings.length===0?'<p class="hint" style="font-style:italic">No mappings yet.</p>':mappings_html}
     </div>` : "";
+
   return `
     <div class="section">
       <div class="section-header" data-toggle-section="traceability">
-        <div><div class="section-title"><span class="icon">📍</span> Traceability</div><div class="section-desc">QR base URL · ${mappings.length} FP mapping${mappings.length!==1?"s":""}</div></div>
+        <div>
+          <div class="section-title"><span class="icon">📍</span> Traceability</div>
+          <div class="section-desc">QR base URL for container scanning</div>
+        </div>
         <span class="section-arrow">${open?"▾":"▸"}</span>
       </div>
       ${body}
@@ -419,12 +448,12 @@ function build_traceability_section() {
 
 // ── SUPPLIERS SECTION ─────────────────────────────────────────────────────────
 function build_suppliers_section() {
-  const open = state.open_section==="suppliers";
+  const open = state.open_section === "suppliers";
   const suppliers = state.supplier_templates;
   const { open_supplier, parsing_supplier, parse_status } = state.ui;
 
   const suppliers_html = suppliers.map((s,i) => {
-    const is_open = open_supplier===i;
+    const is_open = open_supplier === i;
     const template = s.template || {};
     const coffee_maps = template.coffee_mappings || [];
 
@@ -432,8 +461,8 @@ function build_suppliers_section() {
       <div class="coffee-map-row">
         <input class="sup-coffee-supplier" data-si="${i}" data-ci="${j}" value="${esc(m.supplier_description)}" placeholder="Supplier's description" style="font-size:13px" />
         <select class="sup-coffee-ours" data-si="${i}" data-ci="${j}" style="font-size:13px">
-          <option value="">— Our coffee name —</option>
-          ${state.settings.coffees.map(c=>`<option value="${esc(c)}" ${m.our_name===c?"selected":""}>${esc(c)}</option>`).join("")}
+          <option value="">— Our coffee —</option>
+          ${state.coffees.map(c=>`<option value="${c.id}" ${String(m.our_coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
         </select>
         <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1" data-remove-coffee-map="${i}-${j}">✕</button>
       </div>`).join("");
@@ -446,36 +475,36 @@ function build_suppliers_section() {
           ${s.template?`<span class="tag" style="background:#edf7f0;color:#4a9e6b;font-size:11px">✓ Template saved</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">No template yet</span>`}
           <button data-delete-supplier="${esc(s.supplier_name)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" onclick="event.stopPropagation()">✕</button>
         </div>
-        ${is_open?`
+        ${is_open ? `
           <div class="supplier-body">
             <div class="grid-2 mb-12">
               <div><label class="lbl">Supplier Name *</label><input class="sup-name" data-si="${i}" value="${esc(s.supplier_name)}" /></div>
               <div><label class="lbl">Contact / Email</label><input class="sup-contact" data-si="${i}" value="${esc(s.contact||"")}" placeholder="orders@supplier.com" /></div>
             </div>
 
-<div class="section-label">Field Mappings</div>
-<div class="card" style="margin-bottom:12px">
-  <p class="hint mb-12">These keywords tell the parser where to find each field in this supplier's documents. Auto-generated from your sample PDF — edit if needed.</p>
-  <div class="grid-2">
-    <div><label class="lbl">Invoice Number keyword</label><input class="sup-field" data-si="${i}" data-field="invoice_number_keyword" value="${esc(template.invoice_number_keyword||"")}" placeholder="e.g. INVOICE No." /></div>
-    <div><label class="lbl">Invoice Date keyword</label><input class="sup-field" data-si="${i}" data-field="invoice_date_keyword" value="${esc(template.invoice_date_keyword||"")}" placeholder="e.g. Date:" /></div>
-    <div><label class="lbl">Due Date keyword</label><input class="sup-field" data-si="${i}" data-field="due_date_keyword" value="${esc(template.due_date_keyword||"")}" placeholder="e.g. Due date:" /></div>
-    <div><label class="lbl">No. of Bags column</label><input class="sup-field" data-si="${i}" data-field="no_bags_column" value="${esc(template.no_bags_column||"")}" placeholder="e.g. No bags" /></div>
-    <div><label class="lbl">Description column</label><input class="sup-field" data-si="${i}" data-field="description_column" value="${esc(template.description_column||"")}" placeholder="e.g. Description" /></div>
-    <div><label class="lbl">ICO column</label><input class="sup-field" data-si="${i}" data-field="ico_column" value="${esc(template.ico_column||"")}" placeholder="e.g. Marks" /></div>
-    <div><label class="lbl">Weight column</label><input class="sup-field" data-si="${i}" data-field="weight_column" value="${esc(template.weight_column||"")}" placeholder="e.g. Net weight (kg)" /></div>
-    <div><label class="lbl">Price per kg column</label><input class="sup-field" data-si="${i}" data-field="price_column" value="${esc(template.price_column||"")}" placeholder="e.g. Price per kg" /></div>
-    <div><label class="lbl">Value (€) column</label><input class="sup-field" data-si="${i}" data-field="value_column" value="${esc(template.value_column||"")}" placeholder="e.g. Value" /></div>
-  </div>
-</div>
+            <div class="section-label">Field Mappings</div>
+            <div class="card" style="margin-bottom:12px">
+              <p class="hint mb-12">Keywords that tell the parser where to find each field in this supplier's invoices. Auto-generated from your sample PDF — edit if needed.</p>
+              <div class="grid-2">
+                <div><label class="lbl">Invoice Number keyword</label><input class="sup-field" data-si="${i}" data-field="invoice_number_keyword" value="${esc(template.invoice_number_keyword||"")}" placeholder="e.g. INVOICE No." /></div>
+                <div><label class="lbl">Invoice Date keyword</label><input class="sup-field" data-si="${i}" data-field="invoice_date_keyword" value="${esc(template.invoice_date_keyword||"")}" placeholder="e.g. Date:" /></div>
+                <div><label class="lbl">Due Date keyword</label><input class="sup-field" data-si="${i}" data-field="due_date_keyword" value="${esc(template.due_date_keyword||"")}" placeholder="e.g. Due date:" /></div>
+                <div><label class="lbl">No. of Bags column</label><input class="sup-field" data-si="${i}" data-field="no_bags_column" value="${esc(template.no_bags_column||"")}" placeholder="e.g. No bags" /></div>
+                <div><label class="lbl">Description column</label><input class="sup-field" data-si="${i}" data-field="description_column" value="${esc(template.description_column||"")}" placeholder="e.g. Description" /></div>
+                <div><label class="lbl">ICO column</label><input class="sup-field" data-si="${i}" data-field="ico_column" value="${esc(template.ico_column||"")}" placeholder="e.g. Marks" /></div>
+                <div><label class="lbl">Weight column</label><input class="sup-field" data-si="${i}" data-field="weight_column" value="${esc(template.weight_column||"")}" placeholder="e.g. Net weight (kg)" /></div>
+                <div><label class="lbl">Price per kg column</label><input class="sup-field" data-si="${i}" data-field="price_column" value="${esc(template.price_column||"")}" placeholder="e.g. Price per kg" /></div>
+                <div><label class="lbl">Value (€) column</label><input class="sup-field" data-si="${i}" data-field="value_column" value="${esc(template.value_column||"")}" placeholder="e.g. Value" /></div>
+              </div>
+            </div>
 
             <div class="section-label">Upload Sample PDF to Generate Template</div>
             <div class="card" style="margin-bottom:12px">
-              <p class="hint mb-12">Upload a sample invoice or delivery note from this supplier. The parser will analyse it and fill in the field mappings above automatically.</p>
+              <p class="hint mb-12">Upload a sample invoice from this supplier. The parser will analyse it and fill in the field mappings above automatically.</p>
               <input type="file" id="sup-pdf-${i}" accept=".pdf" style="display:none" />
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <button class="btn btn-dark btn-sm sup-upload-btn" data-si="${i}" ${parsing_supplier?"disabled":""}>${parsing_supplier?"⏳ Parsing…":"📄 Upload Sample PDF"}</button>
-                ${s.sample_text?`<span style="font-size:12px;color:#4a9e6b">✓ Sample loaded — field mappings generated</span>`:`<span class="hint">No sample uploaded yet</span>`}
+                ${s.sample_text?`<span style="font-size:12px;color:#4a9e6b">✓ Sample loaded</span>`:`<span class="hint">No sample uploaded yet</span>`}
               </div>
               ${parse_status&&open_supplier===i?`<div class="parse-status ${parse_status.type}">${parse_status.msg}</div>`:""}
             </div>
@@ -484,18 +513,18 @@ function build_suppliers_section() {
             <div class="card-white" style="margin-bottom:12px">
               <div style="display:grid;grid-template-columns:1fr 1fr auto;background:#f5f0eb;padding:8px 12px;border-bottom:1px solid #e0d5c5">
                 <span class="lbl" style="margin:0">Supplier's Description</span>
-                <span class="lbl" style="margin:0">Our Coffee Name</span>
+                <span class="lbl" style="margin:0">Our Coffee</span>
                 <span></span>
               </div>
-              ${coffee_maps.length===0?'<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No coffee mappings yet. Upload a sample PDF or add manually.</div>':""}
+              ${coffee_maps.length===0?'<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No translations yet. Upload a sample PDF or add manually.</div>':""}
               ${coffee_map_rows}
               <div style="padding:8px 12px"><button class="btn btn-amber btn-sm" data-add-coffee-map="${i}">+ Add Translation</button></div>
             </div>
 
             <div style="display:flex;gap:8px">
-              <button class="btn btn-dark btn-sm sup-save-btn" data-si="${i}" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Supplier"}</button>
+              <button class="btn btn-dark btn-sm sup-save-btn" data-si="${i}" ${state.saving?"disabled":""}>Save Supplier</button>
             </div>
-          </div>`:""}
+          </div>` : ""}
       </div>`;
   }).join("");
 
@@ -506,7 +535,7 @@ function build_suppliers_section() {
         <div class="section-label" style="margin:0">Suppliers</div>
         <button class="btn btn-dark btn-sm" id="add-supplier">+ Add Supplier</button>
       </div>
-      ${suppliers.length===0?'<p class="hint" style="font-style:italic;margin-bottom:12px">No suppliers yet. Add one above.</p>':""}
+      ${suppliers.length===0?'<p class="hint" style="font-style:italic;margin-bottom:12px">No suppliers yet.</p>':""}
       ${suppliers_html}
       <div id="new-supplier-form" style="display:none" class="card">
         <div style="display:flex;gap:8px;align-items:flex-end">
@@ -521,7 +550,10 @@ function build_suppliers_section() {
   return `
     <div class="section">
       <div class="section-header" data-toggle-section="suppliers">
-        <div><div class="section-title"><span class="icon">🚚</span> Suppliers</div><div class="section-desc">${suppliers.length} supplier${suppliers.length!==1?"s":""} · PDF invoice parser</div></div>
+        <div>
+          <div class="section-title"><span class="icon">🚚</span> Suppliers</div>
+          <div class="section-desc">${suppliers.length} supplier${suppliers.length!==1?"s":""} · PDF invoice parser</div>
+        </div>
         <span class="section-arrow">${open?"▾":"▸"}</span>
       </div>
       ${body}
@@ -534,70 +566,107 @@ function attach_listeners() {
 
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
-  app.querySelectorAll("[data-toggle-section]").forEach(el => el.addEventListener("click", () => { state.open_section=state.open_section===el.dataset.toggleSection?null:el.dataset.toggleSection; render(); }));
+  app.querySelectorAll("[data-toggle-section]").forEach(el => el.addEventListener("click", () => {
+    state.open_section = state.open_section===el.dataset.toggleSection ? null : el.dataset.toggleSection;
+    render();
+  }));
 
-  // Save all settings
-  app.querySelector("#save-all")?.addEventListener("click", () => { const bu=document.getElementById("base-url"); if(bu) state.settings.base_url=bu.value.trim(); save_settings(); });
-
-  // ── Coffees
-  app.querySelectorAll("[data-remove-coffee]").forEach(btn => btn.addEventListener("click", () => { state.settings.coffees.splice(Number(btn.dataset.removeCoffee),1); render(); }));
-  const nci = app.querySelector("#new-coffee");
-  if (nci) nci.addEventListener("input", e => { state.ui.new_coffee=e.target.value; });
-  app.querySelector("#add-coffee")?.addEventListener("click", () => {
-    const val=document.getElementById("new-coffee")?.value.trim();
-    if (!val) { state.ui.coffee_err="Please enter a coffee name."; render(); return; }
-    if (state.settings.coffees.includes(val)) { state.ui.coffee_err="Already in list."; render(); return; }
-    state.settings.coffees.push(val); state.ui.new_coffee=""; state.ui.coffee_err=""; render();
-  });
-  nci?.addEventListener("keydown", e => { if(e.key==="Enter") app.querySelector("#add-coffee")?.click(); });
-
-  // ── URL check
+  // ── URL
+  app.querySelector("#base-url")?.addEventListener("input", e => { state.base_url=e.target.value; state.ui.url_status=null; state.saved=false; });
   app.querySelector("#check-url")?.addEventListener("click", () => {
     const target=document.getElementById("base-url")?.value.trim(); if(!target) return;
     try { new URL(target); state.ui.url_status="ok"; } catch { state.ui.url_status="unreachable"; } render();
   });
+  app.querySelector("#save-url")?.addEventListener("click", () => {
+    const bu=document.getElementById("base-url"); if(bu) state.base_url=bu.value.trim();
+    save_base_url();
+  });
 
-  // ── FP Mappings
-  app.querySelectorAll("[data-toggle-mapping]").forEach(el => el.addEventListener("click", () => { const i=Number(el.dataset.toggleMapping); state.ui.open_mapping=state.ui.open_mapping===i?null:i; render(); }));
-  app.querySelector("#add-mapping")?.addEventListener("click", () => { state.settings.coffee_mappings.push({app_name:"",fp_sizes:[]}); state.ui.open_mapping=state.settings.coffee_mappings.length-1; render(); });
-  app.querySelectorAll("[data-remove-mapping]").forEach(btn => btn.addEventListener("click", e => { e.stopPropagation(); const i=Number(btn.dataset.removeMapping); state.settings.coffee_mappings.splice(i,1); if(state.ui.open_mapping===i) state.ui.open_mapping=null; render(); }));
-  app.querySelectorAll(".mapping-name").forEach(inp => inp.addEventListener("input", e => { state.settings.coffee_mappings[Number(inp.dataset.mi)].app_name=e.target.value; }));
-  app.querySelectorAll("[data-add-fp]").forEach(btn => btn.addEventListener("click", () => { state.settings.coffee_mappings[Number(btn.dataset.addFp)].fp_sizes.push({code:"",size:"0.2"}); render(); }));
-  app.querySelectorAll("[data-remove-fp]").forEach(btn => btn.addEventListener("click", () => { const[mi,fi]=btn.dataset.removeFp.split("-").map(Number); state.settings.coffee_mappings[mi].fp_sizes.splice(fi,1); render(); }));
-  app.querySelectorAll(".fp-code").forEach(inp => inp.addEventListener("input", e => { state.settings.coffee_mappings[Number(inp.dataset.mi)].fp_sizes[Number(inp.dataset.fi)].code=e.target.value.toUpperCase(); }));
-  app.querySelectorAll(".fp-size").forEach(sel => sel.addEventListener("change", e => { state.settings.coffee_mappings[Number(sel.dataset.mi)].fp_sizes[Number(sel.dataset.fi)].size=e.target.value; }));
-  app.querySelector("#base-url")?.addEventListener("input", e => { state.settings.base_url=e.target.value; state.ui.url_status=null; });
+  // ── Coffees
+  app.querySelectorAll("[data-toggle-coffee]").forEach(el => el.addEventListener("click", () => {
+    const id = Number(el.dataset.toggleCoffee);
+    state.ui.open_coffee = state.ui.open_coffee===id ? null : id;
+    render();
+  }));
+  app.querySelector("#new-coffee-name")?.addEventListener("input", e => { state.ui.new_coffee_name=e.target.value; });
+  app.querySelector("#new-coffee-name")?.addEventListener("keydown", e => { if(e.key==="Enter") app.querySelector("#add-coffee-btn")?.click(); });
+  app.querySelector("#add-coffee-btn")?.addEventListener("click", () => {
+    const val = document.getElementById("new-coffee-name")?.value.trim();
+    if (!val) { state.ui.coffee_err="Please enter a coffee name."; render(); return; }
+    if (state.coffees.find(c=>c.name.toLowerCase()===val.toLowerCase())) { state.ui.coffee_err="Coffee already exists."; render(); return; }
+    add_coffee(val);
+  });
+  app.querySelectorAll("[data-delete-coffee]").forEach(btn => btn.addEventListener("click", e => {
+    e.stopPropagation();
+    delete_coffee(Number(btn.dataset.deleteCoffee));
+  }));
+  app.querySelectorAll(".coffee-rename-btn").forEach(btn => btn.addEventListener("click", () => {
+    const cid = Number(btn.dataset.cid);
+    const inp = app.querySelector(`.coffee-rename-input[data-cid="${cid}"]`);
+    const new_name = inp?.value.trim();
+    if (!new_name) return;
+    rename_coffee(cid, new_name);
+  }));
+
+  // ── FP Codes
+  app.querySelectorAll(".new-fp-code").forEach(inp => inp.addEventListener("input", e => {
+    const cid = Number(inp.dataset.cid);
+    if (!state.ui.new_fp[cid]) state.ui.new_fp[cid] = { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+    state.ui.new_fp[cid].fp_code = e.target.value;
+  }));
+  app.querySelectorAll(".new-fp-bag-name").forEach(inp => inp.addEventListener("input", e => {
+    const cid = Number(inp.dataset.cid);
+    if (!state.ui.new_fp[cid]) state.ui.new_fp[cid] = { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+    state.ui.new_fp[cid].bag_name = e.target.value;
+  }));
+  app.querySelectorAll(".new-fp-bag-size").forEach(sel => sel.addEventListener("change", e => {
+    const cid = Number(sel.dataset.cid);
+    if (!state.ui.new_fp[cid]) state.ui.new_fp[cid] = { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+    state.ui.new_fp[cid].bag_size = e.target.value;
+  }));
+  app.querySelectorAll(".add-fp-btn").forEach(btn => btn.addEventListener("click", () => {
+    const cid = Number(btn.dataset.cid);
+    const nfp = state.ui.new_fp[cid] || { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+    const fp_code = (document.querySelector(`.new-fp-code[data-cid="${cid}"]`)?.value || nfp.fp_code).trim();
+    const bag_name = (document.querySelector(`.new-fp-bag-name[data-cid="${cid}"]`)?.value || nfp.bag_name).trim();
+    const bag_size = nfp.bag_size || "100g";
+    if (!fp_code || !bag_name) {
+      state.ui.new_fp[cid] = { ...nfp, fp_code, bag_name, err:"FP code and bag name are required." };
+      render(); return;
+    }
+    add_fp_code(cid, fp_code, bag_name, bag_size);
+  }));
+  app.querySelectorAll("[data-delete-fp]").forEach(btn => btn.addEventListener("click", () => {
+    const [cid, fid] = btn.dataset.deleteFp.split("__").map(Number);
+    delete_fp_code(cid, fid);
+  }));
 
   // ── Suppliers
   app.querySelectorAll("[data-toggle-supplier]").forEach(el => el.addEventListener("click", () => {
     const i=Number(el.dataset.toggleSupplier);
-    state.ui.open_supplier=state.ui.open_supplier===i?null:i;
-    state.ui.parse_status=null;
+    state.ui.open_supplier = state.ui.open_supplier===i ? null : i;
+    state.ui.parse_status = null;
     render();
   }));
-
   app.querySelector("#add-supplier")?.addEventListener("click", () => {
     const form=document.getElementById("new-supplier-form");
     if (form) form.style.display=form.style.display==="none"?"block":"none";
   });
-
   app.querySelector("#save-new-supplier")?.addEventListener("click", async () => {
     const name=document.getElementById("new-supplier-name")?.value.trim();
     if (!name) { state.ui.supplier_err="Please enter a supplier name."; render(); return; }
     if (state.supplier_templates.find(s=>s.supplier_name===name)) { state.ui.supplier_err="Supplier already exists."; render(); return; }
-    const new_supplier = { id: gen_id(), supplier_name: name, contact: "", template: null, sample_text: null };
+    const new_supplier = { supplier_name: name, contact: "", template: null, sample_text: null };
     const ok = await save_supplier_template(new_supplier);
     if (ok) {
-      state.ui.supplier_err="";
+      state.ui.supplier_err = "";
       await load_supplier_templates();
       state.ui.open_supplier = state.supplier_templates.findIndex(s=>s.supplier_name===name);
       render();
     }
   });
-
   app.querySelector("#cancel-new-supplier")?.addEventListener("click", () => { state.ui.supplier_err=""; render(); });
 
-  // Delete supplier
   app.querySelectorAll("[data-delete-supplier]").forEach(btn => btn.addEventListener("click", async e => {
     e.stopPropagation();
     const name=btn.dataset.deleteSupplier;
@@ -605,11 +674,8 @@ function attach_listeners() {
     await delete_supplier_template(name);
   }));
 
-  // Upload sample PDF per supplier
   app.querySelectorAll(".sup-upload-btn").forEach(btn => btn.addEventListener("click", () => {
-    const si=Number(btn.dataset.si);
-    const file_input=document.getElementById(`sup-pdf-${si}`);
-    if (file_input) file_input.click();
+    document.getElementById(`sup-pdf-${btn.dataset.si}`)?.click();
   }));
 
   app.querySelectorAll("[id^='sup-pdf-']").forEach(input => input.addEventListener("change", async e => {
@@ -619,12 +685,11 @@ function attach_listeners() {
     try {
       const raw=await extract_pdf_text(file);
       const template=generate_template_from_text(raw);
-      // Save template and sample text back to state and Supabase
       state.supplier_templates[si].template    = template;
       state.supplier_templates[si].sample_text = raw;
       const ok=await save_supplier_template(state.supplier_templates[si]);
       state.ui.parse_status=ok
-        ?{ type:"ok",  msg:`✓ Template generated — ${template.coffee_mappings.length} coffee description${template.coffee_mappings.length!==1?"s":""} found. Review the mappings below and add your internal coffee names.` }
+        ?{ type:"ok",  msg:`✓ Template generated — ${template.coffee_mappings.length} coffee description${template.coffee_mappings.length!==1?"s":""} found. Review mappings below.` }
         :{ type:"err", msg:"Failed to save template. Please try again." };
     } catch(err) {
       state.ui.parse_status={ type:"err", msg:`Failed to parse PDF: ${err.message}` };
@@ -635,26 +700,22 @@ function attach_listeners() {
     e.target.value="";
   }));
 
-  // Save individual supplier
   app.querySelectorAll(".sup-save-btn").forEach(btn => btn.addEventListener("click", async () => {
     const si=Number(btn.dataset.si);
     const s=state.supplier_templates[si];
-    // Read current field values from DOM
-    const name_el    = app.querySelector(`.sup-name[data-si="${si}"]`);
-    const contact_el = app.querySelector(`.sup-contact[data-si="${si}"]`);
-    if (name_el)    s.supplier_name = name_el.value.trim();
-    if (contact_el) s.contact       = contact_el.value.trim();
-    // Read field mapping inputs
+    const name_el=app.querySelector(`.sup-name[data-si="${si}"]`);
+    const contact_el=app.querySelector(`.sup-contact[data-si="${si}"]`);
+    if (name_el)    s.supplier_name=name_el.value.trim();
+    if (contact_el) s.contact=contact_el.value.trim();
     app.querySelectorAll(`.sup-field[data-si="${si}"]`).forEach(inp => {
-      if (!s.template) s.template = {};
-      s.template[inp.dataset.field] = inp.value.trim();
+      if (!s.template) s.template={};
+      s.template[inp.dataset.field]=inp.value.trim();
     });
-    // Read coffee mappings
     if (s.template) {
       const maps=[];
       app.querySelectorAll(`.sup-coffee-supplier[data-si="${si}"]`).forEach((inp,j) => {
         const our_el=app.querySelector(`.sup-coffee-ours[data-si="${si}"][data-ci="${j}"]`);
-        maps.push({ supplier_description: inp.value.trim(), our_name: our_el?.value||"" });
+        maps.push({ supplier_description: inp.value.trim(), our_coffee_id: our_el?.value ? Number(our_el.value) : null });
       });
       s.template.coffee_mappings=maps;
     }
@@ -665,30 +726,27 @@ function attach_listeners() {
     render();
   }));
 
-  // Add coffee mapping row
   app.querySelectorAll("[data-add-coffee-map]").forEach(btn => btn.addEventListener("click", () => {
     const si=Number(btn.dataset.addCoffeeMap);
     if (!state.supplier_templates[si].template) state.supplier_templates[si].template={};
     if (!state.supplier_templates[si].template.coffee_mappings) state.supplier_templates[si].template.coffee_mappings=[];
-    state.supplier_templates[si].template.coffee_mappings.push({ supplier_description:"", our_name:"" });
+    state.supplier_templates[si].template.coffee_mappings.push({ supplier_description:"", our_coffee_id: null });
     render();
   }));
 
-  // Remove coffee mapping row
   app.querySelectorAll("[data-remove-coffee-map]").forEach(btn => btn.addEventListener("click", () => {
     const [si,ci]=btn.dataset.removeCoffeeMap.split("-").map(Number);
     state.supplier_templates[si].template.coffee_mappings.splice(ci,1);
     render();
   }));
 
-  // Live sync coffee mapping inputs
   app.querySelectorAll(".sup-coffee-supplier").forEach(inp => inp.addEventListener("input", e => {
     const si=Number(inp.dataset.si), ci=Number(inp.dataset.ci);
     state.supplier_templates[si].template.coffee_mappings[ci].supplier_description=e.target.value;
   }));
   app.querySelectorAll(".sup-coffee-ours").forEach(sel => sel.addEventListener("change", e => {
     const si=Number(sel.dataset.si), ci=Number(sel.dataset.ci);
-    state.supplier_templates[si].template.coffee_mappings[ci].our_name=e.target.value;
+    state.supplier_templates[si].template.coffee_mappings[ci].our_coffee_id = e.target.value ? Number(e.target.value) : null;
   }));
 }
 </script>
