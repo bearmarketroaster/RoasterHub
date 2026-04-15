@@ -86,12 +86,12 @@ supabaseClient.auth.getSession().then(({ data: { session } }) => {
 });
 
 const TABS = ["Containers","Orders","Deliveries","Recall","Reports"];
-const RETAIL_SIZES = [{ val:"0.2", label:"200g" },{ val:"0.5", label:"500g" },{ val:"1", label:"1kg" }];
+const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },{ val:"500g", label:"500g" },{ val:"1kg", label:"1kg" },{ val:"Bar 5kg", label:"Bar 5kg" }];
 const CONTAINER_SIZES = { XL:80, L:40, M:20, S:10 };
 
 const state = {
   tab: 0, containers: [], orders: [], dispatches: [],
-  coffees: [], coffee_mappings: [], base_url: "",
+  coffees: [], fp_codes: [], base_url: "",
   loading: true, saving: false, scan_id: null,
   editing_order: null, review_queue: [],
   ui: {
@@ -106,7 +106,8 @@ const state = {
 
 function today() { return new Date().toISOString().split("T")[0]; }
 function active_fill(c) { return c.fills[c.fills.length-1]; }
-function calc_kg(bags, bag_size) { return (Number(bags)||0)*Number(bag_size); }
+const BAG_SIZE_KG = { "100g":0.1, "200g":0.2, "500g":0.5, "1kg":1, "Bar 5kg":5 };
+function calc_kg(bags, bag_size) { return (Number(bags)||0)*(BAG_SIZE_KG[bag_size]||Number(bag_size)||0); }
 function to_upper(s) { return (s||"").trim().toUpperCase(); }
 function gen_id(prefix, list) { return `${prefix}-${today().replace(/-/g,"")}-${String(list.length+1).padStart(3,"0")}`; }
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
@@ -114,9 +115,9 @@ const PALETTE = ["#1a1008","#c8a96e","#4a9e6b","#e05c2a","#4a7c4e","#e0a82a","#8
 function color_for(i) { return PALETTE[i%PALETTE.length]; }
 
 function get_coffee_map(coffee_name) {
-  const map = (state.coffee_mappings||[]).find(m => m.app_name?.trim().toLowerCase()===coffee_name.trim().toLowerCase());
-  const fp_sizes = map?.fp_sizes||[];
-  const fp_codes = fp_sizes.map(s => to_upper(s.code)).filter(Boolean);
+  const matching_fp = (state.fp_codes||[]).filter(f => f.coffee_name?.trim().toLowerCase()===coffee_name.trim().toLowerCase());
+  const fp_sizes = matching_fp.map(f => ({ code: f.fp_code, size: f.bag_size }));
+  const fp_codes = matching_fp.map(f => to_upper(f.fp_code)).filter(Boolean);
   const keywords = coffee_name.toLowerCase().split(/\s+/).filter(w => w.length>3);
   return { fp_sizes, fp_codes, keywords };
 }
@@ -170,8 +171,12 @@ async function render_qr(el, value, size=140) {
 }
 
 async function load_data() {
-  const { data: settings } = await supabaseClient.from("settings").select("coffees, coffee_mappings, base_url").eq("id",1).single();
-  state.coffees=settings?.coffees||[]; state.coffee_mappings=settings?.coffee_mappings||[]; state.base_url=settings?.base_url||"";
+  const { data: settings } = await supabaseClient.from("settings").select("base_url").eq("id",1).single();
+  state.base_url = settings?.base_url || "";
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
+  state.coffees = (coffees_data||[]).map(c => c.name);
+  const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code");
+  state.fp_codes = (fp_codes_data||[]).map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
   const { data: containers } = await supabaseClient.from("containers").select("*, container_fills(*)").order("id");
   state.containers=(containers||[]).map(c=>({...c,fills:(c.container_fills||[]).sort((a,b)=>a.fill_number-b.fill_number)}));
   const { data: orders } = await supabaseClient.from("orders").select("*, order_items(*)").order("created_at",{ascending:false});
@@ -204,14 +209,7 @@ async function save_order(order) {
   const { error } = await supabaseClient.from("orders").insert({id:order_id,shop_name:order.shop_name,po_number:order.po_number||null,order_date:order.order_date||null,order_total:order.order_total||0,status:"pending"});
   if (error) { state.saving=false; return; }
   await supabaseClient.from("order_items").insert(order.items.map((item,i)=>({id:`${order_id}-I${i+1}`,order_id,code:item.code||null,description:item.description,quantity:item.quantity,unit:item.unit||"EACH",unit_cost:item.unit_cost||0,total:item.total||0})));
-  const fp_codes_in_order=[...new Set(order.items.map(i=>i.code?.trim().toUpperCase()).filter(c=>c&&/^FP\d{4}$/i.test(c)))];
-  if(fp_codes_in_order.length>0){
-    const{data:settings}=await supabaseClient.from("settings").select("coffee_mappings").eq("id",1).single();
-    const existing_mappings=settings?.coffee_mappings||[];
-    const existing_codes=existing_mappings.flatMap(m=>(m.fp_sizes||[]).map(fp=>fp.code?.trim().toUpperCase())).filter(Boolean);
-    const new_codes=fp_codes_in_order.filter(c=>!existing_codes.includes(c));
-    if(new_codes.length>0) await supabaseClient.from("settings").update({coffee_mappings:[...existing_mappings,...new_codes.map(code=>({app_name:"",fp_description:order.items.find(i=>i.code?.trim().toUpperCase()===code)?.description||"",fp_sizes:[{code,size:""}]}))]}).eq("id",1);
-  }
+
   state.saving=false; await load_data(); render();
 }
 
@@ -529,6 +527,8 @@ function build_reports_tab() {
 }
 
 const packing_state = { step:"select", selected_order_id:null, shop:"", bulk_kg:"", retail_lines:RETAIL_SIZES.map(s=>({bag_size:s.val,bags:"0"})), err:"" };
+// retail_lines uses val from RETAIL_SIZES e.g. "100g","200g","500g","1kg","Bar 5kg"
+
 
 function build_packing_page(container, fill) {
   const ps=packing_state;
