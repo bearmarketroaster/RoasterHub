@@ -136,7 +136,8 @@ async function save_delivery() {
   let invoice_path = null;
   if (state.ui.pending_invoice_file) {
     const file = state.ui.pending_invoice_file;
-    const path = `${delivery_id}/${file.name}`;
+    const safe_name = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+    const path = `${delivery_id}/${safe_name}`;
     const { error: up_err } = await supabaseClient.storage.from("invoices").upload(path, file);
     if (up_err) { state.ui.delivery_err="Failed to upload invoice PDF: "+up_err.message; state.saving=false; render(); return; }
     invoice_path = path;
