@@ -199,7 +199,8 @@ function parse_bc_po_page(lines) {
       if (NUM_RE.test(lines[i]||"")) { unit_cost=parseFloat(lines[i].replace(/,/g,"")); i++; }
       while (i < lines.length && SKIP_RE.test(lines[i])) i++;
       if (NUM_RE.test(lines[i]||"")) { total=parseFloat(lines[i].replace(/,/g,"")); i++; }
-      if (description && quantity > 0)
+      const known_fp = (state.fp_codes||[]).some(f => f.fp_code.toUpperCase() === code.toUpperCase());
+      if (description && quantity > 0 && known_fp)
         items.push({ code, description, quantity, unit, unit_cost, total });
     } else { i++; }
   }
