@@ -84,14 +84,14 @@ const state = {
   loading: true,
   saving: false,
   ui: {
-    show_upload_invoice: false,
-    upload_invoice_err:  "",
-    parsing_invoice:     false,
     show_delivery_form: false,
     show_adj_form: false,
     delivery_err: "",
     adj_err: "",
+    invoice_uploading: false,
+    invoice_err: "",
     delivery: new_delivery(),
+    pending_invoice_file: null,   // File object staged for upload after delivery saves
     adj: { coffee: "", change_kg: "", reason: "roast", note: "" },
   },
 };
@@ -101,7 +101,10 @@ function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"
 function gen_id(prefix, list) { return `${prefix}-${today().replace(/-/g,"")}-${String(list.length+1).padStart(3,"0")}`; }
 
 function new_delivery() {
-  return { date: today(), supplier: "", invoice_ref: "", due_date: "", items: [{ coffee:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" }] };
+  return { date: today(), supplier: "", invoice_ref: "", due_date: "", items: [new_delivery_item()] };
+}
+function new_delivery_item() {
+  return { coffee:"", green_name:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" };
 }
 
 async function load_data() {
@@ -128,13 +131,34 @@ async function save_delivery() {
   if (!d.date) { state.ui.delivery_err="Please enter a delivery date."; state.saving=false; render(); return; }
   if (!valid_items.length) { state.ui.delivery_err="Please add at least one item with a coffee and weight."; state.saving=false; render(); return; }
   const delivery_id = gen_id("DEL", state.deliveries);
-  const { error: del_err } = await supabaseClient.from("stock_deliveries").insert({ id: delivery_id, date: d.date, supplier: d.supplier||null, invoice_ref: d.invoice_ref||null });
+
+  // Upload invoice PDF if one was staged
+  let invoice_path = null;
+  if (state.ui.pending_invoice_file) {
+    const file = state.ui.pending_invoice_file;
+    const path = `${delivery_id}/${file.name}`;
+    const { error: up_err } = await supabaseClient.storage.from("invoices").upload(path, file);
+    if (up_err) { state.ui.delivery_err="Failed to upload invoice PDF: "+up_err.message; state.saving=false; render(); return; }
+    invoice_path = path;
+  }
+
+  const { error: del_err } = await supabaseClient.from("stock_deliveries").insert({
+    id: delivery_id, date: d.date, supplier: d.supplier||null,
+    invoice_ref: d.invoice_ref||null, invoice_path,
+  });
   if (del_err) { state.ui.delivery_err="Failed to save delivery."; state.saving=false; render(); return; }
+
   await supabaseClient.from("stock_delivery_items").insert(valid_items.map((item,i) => ({
-    id: `${delivery_id}-I${i+1}`, delivery_id, coffee: item.coffee, origin: item.origin||null,
-    lot_number: item.lot_number||null, bags: Number(item.bags)||null,
-    weight_kg: Number(item.weight_kg), price_per_kg: Number(item.price_per_kg)||null,
+    id: `${delivery_id}-I${i+1}`, delivery_id,
+    coffee: item.coffee,
+    green_name: item.green_name||null,
+    origin: item.origin||null,
+    lot_number: item.lot_number||null,
+    bags: Number(item.bags)||null,
+    weight_kg: Number(item.weight_kg),
+    price_per_kg: Number(item.price_per_kg)||null,
   })));
+
   for (const item of valid_items) {
     const existing = state.stock_items.find(s => s.coffee===item.coffee);
     if (existing) {
@@ -144,8 +168,20 @@ async function save_delivery() {
     }
     await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ",state.adjustments), date: d.date, coffee: item.coffee, change_kg: Number(item.weight_kg), reason: "delivery", note: `Delivery ${delivery_id}${d.invoice_ref?" · "+d.invoice_ref:""}`, auto: true });
   }
-  state.saving=false; state.ui.show_delivery_form=false; state.ui.delivery_err=""; state.ui.delivery=new_delivery();
+  state.saving=false; state.ui.show_delivery_form=false; state.ui.delivery_err="";
+  state.ui.delivery=new_delivery(); state.ui.pending_invoice_file=null;
   await load_data(); render();
+}
+
+async function download_invoice(invoice_path) {
+  const { data, error } = await supabaseClient.storage.from("invoices").download(invoice_path);
+  if (error) { alert("Failed to download invoice: "+error.message); return; }
+  const url = URL.createObjectURL(data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = invoice_path.split("/").pop();
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function save_adjustment() {
@@ -381,40 +417,29 @@ function build_green_stock() {
 }
 
 function build_deliveries() {
-  const { show_delivery_form, delivery, delivery_err, show_upload_invoice, upload_invoice_err, parsing_invoice } = state.ui;
-
-  const upload_panel = show_upload_invoice ? `
-    <div class="card mb-16">
-      <h3>Upload Delivery Invoice</h3>
-      <p class="hint mb-12">Select your supplier and upload their invoice PDF. The parser will pre-fill the delivery form automatically.</p>
-      <div class="grid-2 mb-12">
-        <div>
-          <label class="lbl">Supplier *</label>
-          <select id="invoice-supplier">
-            <option value="">— Select supplier —</option>
-            ${state.supplier_templates.map(s=>`<option value="${esc(s.supplier_name)}">${esc(s.supplier_name)}</option>`).join("")}
-          </select>
-        </div>
-        <div style="display:flex;align-items:flex-end">
-          <div style="flex:1">
-            <label class="lbl">Invoice PDF</label>
-            <input type="file" id="invoice-pdf" accept=".pdf" style="display:none" />
-            <button class="btn btn-dark" id="choose-invoice-pdf" ${parsing_invoice?"disabled":""}>${parsing_invoice?"⏳ Parsing…":"📄 Choose PDF"}</button>
-          </div>
-        </div>
-      </div>
-      ${upload_invoice_err?`<p class="err">${esc(upload_invoice_err)}</p>`:""}
-      <button class="btn btn-ghost btn-sm" id="cancel-upload-invoice">Cancel</button>
-    </div>` : "";
+  const { show_delivery_form, delivery, delivery_err, invoice_uploading, invoice_err } = state.ui;
+  const pending_file = state.ui.pending_invoice_file;
 
   const form_html = show_delivery_form ? `
     <div class="card mb-16">
       <h3>Log Delivery</h3>
       <div class="grid-3 mb-12">
         <div><label class="lbl">Delivery Date *</label><input type="date" id="del-date" value="${delivery.date}" /></div>
-<div><label class="lbl">Invoice / Ref No.</label><input id="del-invoice" value="${esc(delivery.invoice_ref)}" placeholder="e.g. INV-2026-042" /></div>
-<div><label class="lbl">Due Date</label><input type="date" id="del-due-date" value="${esc(delivery.due_date||"")}" /></div>
+        <div><label class="lbl">Supplier</label><input id="del-supplier" value="${esc(delivery.supplier)}" placeholder="e.g. D.R. Wakefield" /></div>
+        <div><label class="lbl">Invoice / Ref No.</label><input id="del-invoice" value="${esc(delivery.invoice_ref)}" placeholder="e.g. INV-2026-042" /></div>
       </div>
+
+      <div class="section-label" style="margin-bottom:8px">Attach Invoice PDF (optional)</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;background:#f5f0eb;border-radius:8px;padding:10px 14px">
+        <input type="file" id="del-invoice-pdf" accept=".pdf" style="display:none" />
+        <button class="btn btn-ghost btn-sm" id="choose-del-invoice-pdf">📎 Attach PDF</button>
+        ${pending_file
+          ? `<span style="font-size:13px;color:#4a9e6b;font-weight:600">✓ ${esc(pending_file.name)}</span>
+             <button id="clear-invoice-pdf" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:14px">✕</button>`
+          : `<span class="hint" style="font-size:13px">No file attached</span>`}
+        ${invoice_err ? `<span style="color:#e05c2a;font-size:12px">${esc(invoice_err)}</span>` : ""}
+      </div>
+
       <div class="section-label" style="margin-bottom:8px">Line Items</div>
       <div id="delivery-items">${delivery.items.map((item,i) => build_delivery_item_row(item,i)).join("")}</div>
       <button class="btn btn-ghost btn-sm mt-8" id="add-delivery-item">+ Add Item</button>
@@ -435,6 +460,7 @@ function build_deliveries() {
             <span style="font-weight:700;font-size:15px">${esc(d.supplier||"Delivery")}</span>
             <span class="tag" style="background:#fff8ee;color:#c8a96e">${d.date}</span>
             ${d.invoice_ref?`<span class="mono hint">${esc(d.invoice_ref)}</span>`:""}
+            ${d.invoice_path?`<button class="btn btn-ghost btn-sm" style="font-size:11px" data-download-invoice="${esc(d.invoice_path)}">📄 Download Invoice</button>`:""}
           </div>
           <div style="text-align:right">
             <div style="font-weight:700;font-size:16px">${total_kg.toFixed(1)}kg</div>
@@ -445,7 +471,8 @@ function build_deliveries() {
           ${d.items.map(item=>`
             <div style="display:flex;justify-content:space-between;align-items:center;background:#f5f0eb;border-radius:6px;padding:8px 12px;font-size:13px">
               <div>
-                <span style="font-weight:600">${esc(item.coffee)}</span>
+                <div style="font-weight:600">${esc(item.coffee)}</div>
+                ${item.green_name?`<div style="font-size:12px;color:#888;margin-top:1px">🌱 ${esc(item.green_name)}</div>`:""}
                 ${item.origin?`<span class="hint"> · ${esc(item.origin)}</span>`:""}
                 ${item.lot_number?`<span class="hint"> · Lot <span class="mono">${esc(item.lot_number)}</span></span>`:""}
               </div>
@@ -462,14 +489,10 @@ function build_deliveries() {
   return `
     <div class="flex-between mb-16">
       <h2>Deliveries</h2>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" id="toggle-upload-invoice">📄 Upload Invoice</button>
-        <button class="btn btn-dark" id="toggle-delivery-form">+ Manual Entry</button>
-      </div>
+      <button class="btn btn-dark" id="toggle-delivery-form">+ Log Delivery</button>
     </div>
-    ${upload_panel}
     ${form_html}
-    ${state.deliveries.length===0&&!show_delivery_form&&!show_upload_invoice
+    ${state.deliveries.length===0&&!show_delivery_form
       ? `<div class="card empty"><div class="icon">📦</div>No deliveries logged yet.</div>`
       : delivery_list}`;
 }
@@ -480,14 +503,14 @@ function build_delivery_item_row(item, i) {
         <span style="font-weight:600;font-size:13px;color:#888">Item ${i+1}</span>
         ${i>0?`<button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px" data-remove-item="${i}">✕</button>`:""}
       </div>
-      ${item.supplier_description?`<div class="hint mb-8">From invoice: <strong>${esc(item.supplier_description)}</strong></div>`:""}
       <div class="grid-2" style="gap:10px">
-        <div><label class="lbl">Coffee *</label>
+        <div><label class="lbl">Master Coffee Name *</label>
           <select class="item-coffee" data-idx="${i}">
             <option value="">— Select —</option>
             ${state.coffees.map(c=>`<option value="${esc(c)}" ${item.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
           </select>
         </div>
+        <div><label class="lbl">Green Name</label><input class="item-green-name" data-idx="${i}" value="${esc(item.green_name||"")}" placeholder="e.g. Ethiopia Yirgacheffe Kochere Gr.1" /></div>
         <div><label class="lbl">Origin / Country</label><input class="item-origin" data-idx="${i}" value="${esc(item.origin)}" placeholder="e.g. Ethiopia" /></div>
         <div><label class="lbl">ICO / Lot No.</label><input class="item-lot" data-idx="${i}" value="${esc(item.lot_number)}" placeholder="e.g. 002/4600/0524" /></div>
         <div><label class="lbl">No. of Bags</label><input type="number" class="item-bags" data-idx="${i}" value="${item.bags}" placeholder="0" /></div>
@@ -561,62 +584,72 @@ function attach_listeners() {
     const val=prompt(`Low stock alert threshold for ${coffee} (kg):`, current);
     if (val!==null&&Number(val)>0) set_threshold(coffee, Number(val));
   }));
-  app.querySelector("#toggle-delivery-form")?.addEventListener("click", () => { state.ui.show_delivery_form=!state.ui.show_delivery_form; state.ui.delivery=new_delivery(); state.ui.delivery_err=""; render(); });
-  app.querySelector("#cancel-delivery")?.addEventListener("click", () => { state.ui.show_delivery_form=false; state.ui.delivery_err=""; render(); });
-  app.querySelector("#add-delivery-item")?.addEventListener("click", () => { state.ui.delivery.items.push({coffee:"",origin:"",lot_number:"",bags:"",weight_kg:"",price_per_kg:""}); render(); });
-  app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => { state.ui.delivery.items.splice(Number(btn.dataset.removeItem),1); render(); }));
-  const sync = (sel, field) => app.querySelectorAll(sel).forEach(el => { el.addEventListener("input", e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; }); el.addEventListener("change", e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; }); });
-  sync(".item-coffee","coffee"); sync(".item-origin","origin"); sync(".item-lot","lot_number"); sync(".item-bags","bags"); sync(".item-weight","weight_kg"); sync(".item-price","price_per_kg");
+  app.querySelector("#toggle-delivery-form")?.addEventListener("click", () => {
+    state.ui.show_delivery_form=!state.ui.show_delivery_form;
+    state.ui.delivery=new_delivery();
+    state.ui.delivery_err="";
+    state.ui.pending_invoice_file=null;
+    render();
+  });
+  app.querySelector("#cancel-delivery")?.addEventListener("click", () => {
+    state.ui.show_delivery_form=false;
+    state.ui.delivery_err="";
+    state.ui.pending_invoice_file=null;
+    render();
+  });
+
+  // Invoice PDF attach
+  app.querySelector("#choose-del-invoice-pdf")?.addEventListener("click", () => {
+    document.getElementById("del-invoice-pdf")?.click();
+  });
+  app.querySelector("#del-invoice-pdf")?.addEventListener("change", e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") { state.ui.invoice_err="Please select a PDF file."; render(); return; }
+    state.ui.pending_invoice_file = file;
+    state.ui.invoice_err = "";
+    render();
+  });
+  app.querySelector("#clear-invoice-pdf")?.addEventListener("click", () => {
+    state.ui.pending_invoice_file = null;
+    render();
+  });
+
+  // Download invoice
+  app.querySelectorAll("[data-download-invoice]").forEach(btn => btn.addEventListener("click", () => {
+    download_invoice(btn.dataset.downloadInvoice);
+  }));
+
+  app.querySelector("#add-delivery-item")?.addEventListener("click", () => {
+    state.ui.delivery.items.push(new_delivery_item()); render();
+  });
+  app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.delivery.items.splice(Number(btn.dataset.removeItem),1); render();
+  }));
+  const sync = (sel, field) => app.querySelectorAll(sel).forEach(el => {
+    el.addEventListener("input",  e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; });
+    el.addEventListener("change", e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; });
+  });
+  sync(".item-coffee","coffee"); sync(".item-green-name","green_name"); sync(".item-origin","origin");
+  sync(".item-lot","lot_number"); sync(".item-bags","bags"); sync(".item-weight","weight_kg"); sync(".item-price","price_per_kg");
+
   app.querySelector("#save-delivery")?.addEventListener("click", () => {
-    app.querySelectorAll(".item-coffee").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].coffee=el.value; });
-    app.querySelectorAll(".item-origin").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].origin=el.value; });
-    app.querySelectorAll(".item-lot").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].lot_number=el.value; });
-    app.querySelectorAll(".item-bags").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].bags=el.value; });
-    app.querySelectorAll(".item-weight").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].weight_kg=el.value; });
-    app.querySelectorAll(".item-price").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].price_per_kg=el.value; });
+    app.querySelectorAll(".item-coffee").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].coffee=el.value; });
+    app.querySelectorAll(".item-green-name").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].green_name=el.value; });
+    app.querySelectorAll(".item-origin").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].origin=el.value; });
+    app.querySelectorAll(".item-lot").forEach(el        => { state.ui.delivery.items[Number(el.dataset.idx)].lot_number=el.value; });
+    app.querySelectorAll(".item-bags").forEach(el       => { state.ui.delivery.items[Number(el.dataset.idx)].bags=el.value; });
+    app.querySelectorAll(".item-weight").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].weight_kg=el.value; });
+    app.querySelectorAll(".item-price").forEach(el      => { state.ui.delivery.items[Number(el.dataset.idx)].price_per_kg=el.value; });
     state.ui.delivery.date=document.getElementById("del-date")?.value||state.ui.delivery.date;
     state.ui.delivery.supplier=document.getElementById("del-supplier")?.value||state.ui.delivery.supplier;
     state.ui.delivery.invoice_ref=document.getElementById("del-invoice")?.value||state.ui.delivery.invoice_ref;
     save_delivery();
   });
+
   app.querySelector("#toggle-adj-form")?.addEventListener("click", () => { state.ui.show_adj_form=!state.ui.show_adj_form; state.ui.adj_err=""; render(); });
   app.querySelector("#cancel-adj")?.addEventListener("click", () => { state.ui.show_adj_form=false; state.ui.adj_err=""; render(); });
   app.querySelector("#save-adj")?.addEventListener("click", () => save_adjustment());
-  app.querySelector("#toggle-upload-invoice")?.addEventListener("click", () => {
-  state.ui.show_upload_invoice = !state.ui.show_upload_invoice;
-  state.ui.show_delivery_form  = false;
-  state.ui.upload_invoice_err  = "";
-  render();
-});
-
-app.querySelector("#cancel-upload-invoice")?.addEventListener("click", () => {
-  state.ui.show_upload_invoice = false;
-  state.ui.upload_invoice_err  = "";
-  render();
-});
-
-app.querySelector("#choose-invoice-pdf")?.addEventListener("click", () => {
-  document.getElementById("invoice-pdf")?.click();
-});
-
-app.querySelector("#invoice-pdf")?.addEventListener("change", async e => {
-  const file = e.target.files?.[0]; if (!file) return;
-  const supplier = document.getElementById("invoice-supplier")?.value;
-  if (!supplier) { state.ui.upload_invoice_err="Please select a supplier first."; render(); return; }
-  state.ui.parsing_invoice=true; state.ui.upload_invoice_err=""; render();
-  try {
-    const parsed = await parse_delivery_note(file, supplier);
-    state.ui.delivery = parsed;
-    state.ui.show_upload_invoice = false;
-    state.ui.show_delivery_form  = true;
-    state.ui.parsing_invoice     = false;
-  } catch(err) {
-    state.ui.upload_invoice_err = err.message;
-    state.ui.parsing_invoice    = false;
-  }
-  render();
-  e.target.value = "";
-});
 }
 </script>
 </body>
