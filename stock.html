@@ -427,6 +427,7 @@ function build_deliveries() {
         <div><label class="lbl">Delivery Date *</label><input type="date" id="del-date" value="${delivery.date}" /></div>
         <div><label class="lbl">Supplier</label><input id="del-supplier" value="${esc(delivery.supplier)}" placeholder="e.g. D.R. Wakefield" /></div>
         <div><label class="lbl">Invoice / Ref No.</label><input id="del-invoice" value="${esc(delivery.invoice_ref)}" placeholder="e.g. INV-2026-042" /></div>
+        <div><label class="lbl">Due Date</label><input type="date" id="del-due-date" value="${esc(delivery.due_date||"")}" /></div>
       </div>
 
       <div class="section-label" style="margin-bottom:8px">Attach Invoice PDF (optional)</div>
@@ -644,6 +645,7 @@ function attach_listeners() {
     state.ui.delivery.date=document.getElementById("del-date")?.value||state.ui.delivery.date;
     state.ui.delivery.supplier=document.getElementById("del-supplier")?.value||state.ui.delivery.supplier;
     state.ui.delivery.invoice_ref=document.getElementById("del-invoice")?.value||state.ui.delivery.invoice_ref;
+    state.ui.delivery.due_date=document.getElementById("del-due-date")?.value||state.ui.delivery.due_date;
     save_delivery();
   });
 
