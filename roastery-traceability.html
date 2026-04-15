@@ -87,7 +87,6 @@ supabaseClient.auth.getSession().then(({ data: { session } }) => {
 
 const TABS = ["Containers","Orders","Deliveries","Recall","Reports"];
 const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },{ val:"500g", label:"500g" },{ val:"1kg", label:"1kg" },{ val:"Bar 5kg", label:"Bar 5kg" }];
-const CONTAINER_SIZES = { XL:80, L:40, M:20, S:10 };
 
 const state = {
   tab: 0, containers: [], orders: [], dispatches: [],
@@ -185,9 +184,9 @@ async function load_data() {
   state.dispatches=(dispatches||[]).map(d=>({...d,lines:d.dispatch_lines||[]}));
 }
 
-async function save_container(id, size, cap, coffee, date, roast_ids_raw) {
+async function save_container(id, coffee, date, roast_ids_raw) {
   state.saving=true; render();
-  const { error: c_err } = await supabaseClient.from("containers").insert({id,size,capacity:Number(cap)});
+  const { error: c_err } = await supabaseClient.from("containers").insert({id});
   if (c_err) { state.ui.container_err=c_err.code==="23505"?"Container ID already exists.":"Failed to save container."; state.saving=false; render(); return; }
   await supabaseClient.from("container_fills").insert({id:`${id}-F1`,container_id:id,fill_number:1,coffee,roast_ids:roast_ids_raw.split(",").map(r=>r.trim()).filter(Boolean),date,remaining:Number(cap)});
   state.ui.show_container_form=false; state.ui.container_err=""; state.saving=false;
@@ -198,7 +197,7 @@ async function save_refill(container_id, coffee, date, roast_ids_raw) {
   state.saving=true; render();
   const container=state.containers.find(c=>c.id===container_id);
   const fill_number=container.fills.length+1;
-  await supabaseClient.from("container_fills").insert({id:`${container_id}-F${fill_number}`,container_id,fill_number,coffee,roast_ids:roast_ids_raw.split(",").map(r=>r.trim()).filter(Boolean),date,remaining:container.capacity});
+  await supabaseClient.from("container_fills").insert({id:`${container_id}-F${fill_number}`,container_id,fill_number,coffee,roast_ids:roast_ids_raw.split(",").map(r=>r.trim()).filter(Boolean),date,remaining:0});
   state.ui.refill_id=null; state.saving=false;
   await load_data(); render();
 }
@@ -284,8 +283,6 @@ function build_containers_tab() {
     <div class="card mb-16"><h3>Register Container</h3>
       <div class="grid-2">
         <div class="field"><label class="lbl">Container ID *</label><input id="c-id" placeholder="e.g. XL01042601" /></div>
-        <div class="field"><label class="lbl">Size</label><select id="c-size">${Object.entries(CONTAINER_SIZES).map(([s,kg])=>`<option value="${s}">${s} (${kg}kg)</option>`).join("")}</select></div>
-        <div class="field"><label class="lbl">Capacity (kg)</label><input id="c-cap" type="number" value="80" /></div>
         <div class="field"><label class="lbl">Coffee Name *</label>${build_coffee_select("c-coffee","")}</div>
         <div class="field"><label class="lbl">Roast Date</label><input id="c-date" type="date" value="${today()}" /></div>
         <div class="field span-2"><label class="lbl">Cropster Roast IDs * (comma separated)</label><input id="c-roasts" placeholder="42,43,44,45" /></div>
@@ -300,9 +297,9 @@ function build_containers_tab() {
   const containers_html=state.containers.length===0&&!show_container_form?`<div class="card empty"><div class="icon">📦</div>No containers yet.</div>`:state.containers.map(c=>{
     const fill=active_fill(c);
     const in_transit=state.dispatches.find(d=>d.container_id===c.id&&d.fill_number===fill.fill_number&&!d.confirmed_at);
-    const border_color=in_transit?"#e0a82a":fill.remaining<c.capacity*0.25?"#e05c2a":"#4a9e6b";
-    const qr_open=expanded_qr===c.id, pct=Math.round((fill.remaining/c.capacity)*100);
-    const bar_color=fill.remaining<c.capacity*0.25?"#e05c2a":"#4a9e6b";
+    const border_color=in_transit?"#e0a82a":fill.remaining<10?"#e05c2a":"#4a9e6b";
+    const qr_open=expanded_qr===c.id;
+    const bar_color=fill.remaining<10?"#e05c2a":"#4a9e6b";
     const qr_url=`${base_url}?scan=${c.id}`;
     const qr_panel=qr_open?`<div style="margin:14px 0;padding:16px;background:#f5f0eb;border-radius:10px;display:flex;gap:20px;align-items:center;flex-wrap:wrap"><div style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.1)"><div data-qr="${esc(qr_url)}" style="width:140px;height:140px"></div></div><div style="flex:1;min-width:180px"><div style="font-weight:700;color:#1a1008;margin-bottom:6px">Container QR Code</div><div style="font-size:13px;color:#555;margin-bottom:8px">Print once and stick permanently on the container.</div><div class="mono" style="font-size:11px;color:#aaa;word-break:break-all;margin-bottom:10px">${esc(qr_url)}</div><button class="btn btn-dark btn-sm" onclick="window.print()">🖨️ Print QR</button></div></div>`:"";
     const fill_history=c.fills.length>1?`<details style="margin-top:10px"><summary>Fill history (${c.fills.length} fills)</summary><div style="margin-top:8px;display:grid;gap:6px">${[...c.fills].reverse().slice(1).map(f=>`<div style="background:#f5f0eb;border-radius:6px;padding:8px 10px;font-size:12px;color:#666"><strong>Fill #${f.fill_number}</strong> — ${esc(f.coffee)} — ${f.date} — <span class="mono">${esc((f.roast_ids||[]).join(", "))}</span></div>`).join("")}</div></details>`:"";
@@ -327,7 +324,7 @@ function build_containers_tab() {
         <div style="font-size:13px;color:#888;margin-top:2px">Filled: ${fill.date}</div>
         ${in_transit?`<div style="margin-top:8px;background:#fff8ee;border-radius:6px;padding:8px 12px;font-size:13px">📦 Packed for <strong>${esc(in_transit.shop)}</strong> — ${in_transit.total_kg}kg on ${in_transit.date}</div>`:""}
         <div style="margin-top:10px">
-          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>Remaining: <strong>${fill.remaining}kg</strong> of ${c.capacity}kg</span><span style="color:${bar_color}">${pct}%</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>Remaining: <strong>${fill.remaining}kg</strong></span></div>
           <div class="stock-track"><div class="stock-fill" style="background:${bar_color};width:${pct}%"></div></div>
         </div>
         ${fill_history}
@@ -561,9 +558,9 @@ function attach_listeners() {
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
   app.querySelector("#toggle-container-form")?.addEventListener("click", () => { state.ui.show_container_form=!state.ui.show_container_form; state.ui.container_err=""; render(); });
   app.querySelector("#save-container")?.addEventListener("click", () => {
-    const id=document.getElementById("c-id")?.value.trim(), size=document.getElementById("c-size")?.value, cap=document.getElementById("c-cap")?.value, coffee=document.getElementById("c-coffee")?.value, date=document.getElementById("c-date")?.value, roast_raw=document.getElementById("c-roasts")?.value;
+    const id=document.getElementById("c-id")?.value.trim(), coffee=document.getElementById("c-coffee")?.value, date=document.getElementById("c-date")?.value, roast_raw=document.getElementById("c-roasts")?.value;
     if (!id||!coffee||!roast_raw.trim()) { state.ui.container_err="Fill in all required fields."; render(); return; }
-    save_container(id,size,cap,coffee,date,roast_raw);
+    save_container(id,coffee,date,roast_raw);
   });
   app.querySelector("#cancel-container")?.addEventListener("click", () => { state.ui.show_container_form=false; state.ui.container_err=""; render(); });
   app.querySelectorAll("[data-toggle-qr]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_qr=state.ui.expanded_qr===btn.dataset.toggleQr?null:btn.dataset.toggleQr; render(); }));
