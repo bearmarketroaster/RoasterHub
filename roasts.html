@@ -117,8 +117,8 @@ function yield_pct(green, roasted) { if (!Number(green)||!Number(roasted)) retur
 function yield_class(pct) { if (pct===null) return "hint"; if (pct>=80&&pct<=90) return "yield-good"; if (pct>=75) return "yield-warn"; return "yield-bad"; }
 
 async function load_data() {
-  const { data: settings } = await supabaseClient.from("settings").select("coffees").eq("id",1).single();
-  state.coffees = settings?.coffees || [];
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
+  state.coffees = (coffees_data || []).map(c => c.name);
   const { data: sessions, error } = await supabaseClient.from("roast_sessions").select("*, roast_batches(*)").order("date", { ascending: false });
   if (error) { console.error("Failed to load roast sessions:", error); return; }
   state.roast_sessions = (sessions||[]).map(s => ({ ...s, batches: (s.roast_batches||[]).sort((a,b) => a.batch_number - b.batch_number) }));
