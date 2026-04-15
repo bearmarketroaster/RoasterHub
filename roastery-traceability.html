@@ -19,8 +19,8 @@
     .content { padding: 24px; max-width: 900px; margin: 0 auto; }
     .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
     .card + .card { margin-top: 12px; }
-    input[type=text], input[type=number], input[type=date], input[type=email], select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; }
-    input:focus, select:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; color: #1a1008; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; box-shadow: none; }
     label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
     .field { margin-bottom: 0; }
     .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
@@ -58,7 +58,7 @@
     .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
     .btn-logout:hover { background: #c8a96e; color: #1a1008; }
     .btn-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
-.btn-back:hover { color: #e8d5b0; }
+    .btn-back:hover { color: #e8d5b0; }
     .err { color: #e05c2a; font-size: 13px; margin-top: 8px; } .hint { color: #888; font-size: 13px; }
     .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
     details summary { font-size: 12px; color: #aaa; cursor: pointer; list-style: none; }
@@ -89,12 +89,12 @@ const TABS = ["Containers","Orders","Deliveries","Recall","Reports"];
 const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },{ val:"500g", label:"500g" },{ val:"1kg", label:"1kg" },{ val:"Bar 5kg", label:"Bar 5kg" }];
 
 const state = {
-  tab: 0, containers: [], orders: [], dispatches: [],
+  tab: 0, containers: [], roast_sessions: [], orders: [], dispatches: [],
   coffees: [], fp_codes: [], base_url: "",
   loading: true, saving: false, scan_id: null,
   editing_order: null, review_queue: [],
   ui: {
-    show_container_form: false, container_err: "", refill_id: null, expanded_qr: null,
+    expanded_qr: null,
     show_upload: false, upload_err: "", parsing: false,
     expanded_orders: {}, expanded_deliveries: {},
     recall_query: "", recall_results: null,
@@ -104,7 +104,7 @@ const state = {
 };
 
 function today() { return new Date().toISOString().split("T")[0]; }
-function active_fill(c) { return c.fills[c.fills.length-1]; }
+function active_fill(c) { return { coffee: c.coffee, remaining: c.remaining||0, fill_number: 1, date: c.roast_sessions?.[0]?.date||"" }; }
 const BAG_SIZE_KG = { "100g":0.1, "200g":0.2, "500g":0.5, "1kg":1, "Bar 5kg":5 };
 function calc_kg(bags, bag_size) { return (Number(bags)||0)*(BAG_SIZE_KG[bag_size]||Number(bag_size)||0); }
 function to_upper(s) { return (s||"").trim().toUpperCase(); }
@@ -176,31 +176,40 @@ async function load_data() {
   state.coffees = (coffees_data||[]).map(c => c.name);
   const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code");
   state.fp_codes = (fp_codes_data||[]).map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
-  const { data: containers } = await supabaseClient.from("containers").select("*, container_fills(*)").order("id");
-  state.containers=(containers||[]).map(c=>({...c,fills:(c.container_fills||[]).sort((a,b)=>a.fill_number-b.fill_number)}));
+  // Build containers from roast_sessions — group by container_id
+  const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight").order("date", { ascending: false });
+  state.roast_sessions = roast_sessions || [];
+
+  // Group roast sessions by container_id
+  const container_map = {};
+  (roast_sessions||[]).forEach(s => {
+    if (!s.container_id) return;
+    if (!container_map[s.container_id]) container_map[s.container_id] = { id: s.container_id, coffee: s.coffee, roast_sessions: [], total_roasted: 0, packed_kg: 0 };
+    container_map[s.container_id].roast_sessions.push(s);
+    container_map[s.container_id].total_roasted += Number(s.roasted_weight)||0;
+    // Use most recent coffee name
+    container_map[s.container_id].coffee = s.coffee;
+  });
+  state.containers = Object.values(container_map);
   const { data: orders } = await supabaseClient.from("orders").select("*, order_items(*)").order("created_at",{ascending:false});
   state.orders=(orders||[]).map(o=>({...o,items:o.order_items||[]}));
   const { data: dispatches } = await supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date",{ascending:false});
   state.dispatches=(dispatches||[]).map(d=>({...d,lines:d.dispatch_lines||[]}));
+
+  // Compute packed_kg per container from dispatch_lines
+  state.dispatches.forEach(d => {
+    const total = d.lines.reduce((s,l) => s + (Number(l.kg)||0) + d.lines.filter(l=>l.type==="retail").reduce((r,l) => r + calc_kg(l.bags, l.bag_size), 0), 0);
+    const c = state.containers.find(c => c.id === d.container_id);
+    if (c) c.packed_kg = (c.packed_kg||0) + (Number(d.total_kg)||0);
+  });
+
+  // Compute remaining per container
+  state.containers.forEach(c => {
+    c.remaining = Math.max(0, c.total_roasted - (c.packed_kg||0));
+  });
 }
 
-async function save_container(id, coffee, date, roast_ids_raw) {
-  state.saving=true; render();
-  const { error: c_err } = await supabaseClient.from("containers").insert({id});
-  if (c_err) { state.ui.container_err=c_err.code==="23505"?"Container ID already exists.":"Failed to save container."; state.saving=false; render(); return; }
-  await supabaseClient.from("container_fills").insert({id:`${id}-F1`,container_id:id,fill_number:1,coffee,roast_ids:roast_ids_raw.split(",").map(r=>r.trim()).filter(Boolean),date,remaining:Number(cap)});
-  state.ui.show_container_form=false; state.ui.container_err=""; state.saving=false;
-  await load_data(); render();
-}
 
-async function save_refill(container_id, coffee, date, roast_ids_raw) {
-  state.saving=true; render();
-  const container=state.containers.find(c=>c.id===container_id);
-  const fill_number=container.fills.length+1;
-  await supabaseClient.from("container_fills").insert({id:`${container_id}-F${fill_number}`,container_id,fill_number,coffee,roast_ids:roast_ids_raw.split(",").map(r=>r.trim()).filter(Boolean),date,remaining:0});
-  state.ui.refill_id=null; state.saving=false;
-  await load_data(); render();
-}
 
 async function save_order(order) {
   state.saving=true; render();
@@ -277,67 +286,89 @@ function build_scan_overlay() {
 }
 
 function build_containers_tab() {
-  const {show_container_form,container_err,refill_id,expanded_qr}=state.ui;
-  const base_url=state.base_url||"https://your-domain-here/scan";
-  const form_html=show_container_form?`
-    <div class="card mb-16"><h3>Register Container</h3>
-      <div class="grid-2">
-        <div class="field"><label class="lbl">Container ID *</label><input id="c-id" placeholder="e.g. XL01042601" /></div>
-        <div class="field"><label class="lbl">Coffee Name *</label>${build_coffee_select("c-coffee","")}</div>
-        <div class="field"><label class="lbl">Roast Date</label><input id="c-date" type="date" value="${today()}" /></div>
-        <div class="field span-2"><label class="lbl">Cropster Roast IDs * (comma separated)</label><input id="c-roasts" placeholder="42,43,44,45" /></div>
+  const { expanded_qr } = state.ui;
+  const base_url = state.base_url || "https://your-domain-here/scan";
+
+  // Only show containers with remaining stock
+  const active = state.containers.filter(c => c.remaining > 0);
+  const empty  = state.containers.filter(c => c.remaining <= 0);
+
+  const containers_html = active.length === 0
+    ? `<div class="card empty"><div class="icon">📦</div>No containers with stock remaining.<br/><span class="hint">Log a roast session in Roasts to register a container.</span></div>`
+    : active.map(c => {
+        const in_transit = state.dispatches.find(d => d.container_id===c.id && !d.confirmed_at);
+        const border_color = in_transit ? "#e0a82a" : c.remaining < 10 ? "#e05c2a" : "#4a9e6b";
+        const bar_color    = c.remaining < 10 ? "#e05c2a" : "#4a9e6b";
+        const qr_open = expanded_qr === c.id;
+        const qr_url  = `${base_url}?scan=${c.id}`;
+        const pct = c.total_roasted > 0 ? Math.min(100, Math.round((c.remaining / c.total_roasted) * 100)) : 0;
+        const roast_ids = [...new Set(c.roast_sessions.flatMap(s => s.roast_ids || [s.id]))].join(", ");
+        const latest_session = c.roast_sessions[0];
+
+        const qr_panel = qr_open ? `
+          <div style="margin:14px 0;padding:16px;background:#f5f0eb;border-radius:10px;display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+            <div style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.1)"><div data-qr="${esc(qr_url)}" style="width:140px;height:140px"></div></div>
+            <div style="flex:1;min-width:180px">
+              <div style="font-weight:700;color:#1a1008;margin-bottom:6px">Container QR Code</div>
+              <div style="font-size:13px;color:#555;margin-bottom:8px">Print once and stick permanently on the container.</div>
+              <div class="mono" style="font-size:11px;color:#aaa;word-break:break-all;margin-bottom:10px">${esc(qr_url)}</div>
+              <button class="btn btn-dark btn-sm" onclick="window.print()">🖨️ Print QR</button>
+            </div>
+          </div>` : "";
+
+        const sessions_html = c.roast_sessions.length > 1 ? `
+          <details style="margin-top:8px"><summary style="font-size:12px;color:#aaa;cursor:pointer">Roast sessions (${c.roast_sessions.length})</summary>
+            <div style="margin-top:6px;display:grid;gap:4px">
+              ${c.roast_sessions.map(s => `<div style="background:#f5f0eb;border-radius:6px;padding:6px 10px;font-size:12px;color:#666"><strong>${esc(s.id)}</strong> — ${s.date} — ${Number(s.roasted_weight).toFixed(1)}kg</div>`).join("")}
+            </div>
+          </details>` : "";
+
+        return `
+          <div class="card" style="border-left:4px solid ${border_color};margin-bottom:12px">
+            <div class="flex-between flex-wrap">
+              <div class="flex-wrap gap-6">
+                <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>
+                ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#e0a82a;border-radius:4px">⏳ In Transit</span>` : ""}
+              </div>
+              <div class="flex-wrap gap-6">
+                <button class="btn btn-amber btn-sm" data-toggle-qr="${esc(c.id)}">${qr_open ? "Hide QR" : "▦ QR"}</button>
+                <button class="btn btn-sm ${in_transit ? "btn-green" : "btn-dark"}" data-scan="${esc(c.id)}">${in_transit ? "📱 Shop Scan" : "📱 Pack"}</button>
+              </div>
+            </div>
+            ${qr_panel}
+            <div style="margin-top:10px;font-weight:600;font-size:15px">${esc(c.coffee)}</div>
+            <div style="font-size:13px;color:#888;margin-top:2px">Last roast: ${latest_session?.date || "—"} · Total roasted: ${c.total_roasted.toFixed(1)}kg</div>
+            ${in_transit ? `<div style="margin-top:8px;background:#fff8ee;border-radius:6px;padding:8px 12px;font-size:13px">📦 Packed for <strong>${esc(in_transit.shop)}</strong> — ${in_transit.total_kg}kg on ${in_transit.date}</div>` : ""}
+            <div style="margin-top:10px">
+              <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+                <span>Remaining: <strong>${c.remaining.toFixed(1)}kg</strong></span>
+                <span style="color:${bar_color}">${pct}%</span>
+              </div>
+              <div class="stock-track"><div class="stock-fill" style="background:${bar_color};width:${pct}%"></div></div>
+            </div>
+            ${sessions_html}
+          </div>`;
+      }).join("");
+
+  const empty_html = empty.length > 0 ? `
+    <details style="margin-top:16px"><summary style="font-size:13px;color:#aaa;cursor:pointer">Fully packed containers (${empty.length})</summary>
+      <div style="margin-top:8px;display:grid;gap:8px">
+        ${empty.map(c => `<div class="card" style="border-left:4px solid #ccc;opacity:0.7;padding:12px 16px">
+          <div style="font-weight:600">${esc(c.id)}</div>
+          <div style="font-size:13px;color:#888">${esc(c.coffee)} · ${c.total_roasted.toFixed(1)}kg roasted · fully packed</div>
+        </div>`).join("")}
       </div>
-      ${container_err?`<p class="err">${esc(container_err)}</p>`:""}
-      <div class="flex gap-8 mt-12">
-        <button class="btn btn-dark" id="save-container" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Container"}</button>
-        <button class="btn btn-grey" id="cancel-container">Cancel</button>
-      </div>
-    </div>`:"";
-  const refill_html=refill_id?build_refill_form(state.containers.find(c=>c.id===refill_id)):"";
-  const containers_html=state.containers.length===0&&!show_container_form?`<div class="card empty"><div class="icon">📦</div>No containers yet.</div>`:state.containers.map(c=>{
-    const fill=active_fill(c);
-    const in_transit=state.dispatches.find(d=>d.container_id===c.id&&d.fill_number===fill.fill_number&&!d.confirmed_at);
-    const border_color=in_transit?"#e0a82a":fill.remaining<10?"#e05c2a":"#4a9e6b";
-    const qr_open=expanded_qr===c.id;
-    const bar_color=fill.remaining<10?"#e05c2a":"#4a9e6b";
-    const qr_url=`${base_url}?scan=${c.id}`;
-    const qr_panel=qr_open?`<div style="margin:14px 0;padding:16px;background:#f5f0eb;border-radius:10px;display:flex;gap:20px;align-items:center;flex-wrap:wrap"><div style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.1)"><div data-qr="${esc(qr_url)}" style="width:140px;height:140px"></div></div><div style="flex:1;min-width:180px"><div style="font-weight:700;color:#1a1008;margin-bottom:6px">Container QR Code</div><div style="font-size:13px;color:#555;margin-bottom:8px">Print once and stick permanently on the container.</div><div class="mono" style="font-size:11px;color:#aaa;word-break:break-all;margin-bottom:10px">${esc(qr_url)}</div><button class="btn btn-dark btn-sm" onclick="window.print()">🖨️ Print QR</button></div></div>`:"";
-    const fill_history=c.fills.length>1?`<details style="margin-top:10px"><summary>Fill history (${c.fills.length} fills)</summary><div style="margin-top:8px;display:grid;gap:6px">${[...c.fills].reverse().slice(1).map(f=>`<div style="background:#f5f0eb;border-radius:6px;padding:8px 10px;font-size:12px;color:#666"><strong>Fill #${f.fill_number}</strong> — ${esc(f.coffee)} — ${f.date} — <span class="mono">${esc((f.roast_ids||[]).join(", "))}</span></div>`).join("")}</div></details>`:"";
-    return `
-      <div class="card" style="border-left:4px solid ${border_color};margin-bottom:12px">
-        <div class="flex-between flex-wrap">
-          <div class="flex-wrap gap-6">
-            <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>
-            <span class="tag" style="background:#e8d5b0;color:#5a3e1b;border-radius:4px">${c.size}</span>
-            <span class="tag" style="background:#f0ebe4;color:#888;border-radius:4px">Fill #${fill.fill_number}</span>
-            ${in_transit?`<span class="tag" style="background:#fff3e0;color:#e0a82a;border-radius:4px">⏳ In Transit</span>`:""}
-          </div>
-          <div class="flex-wrap gap-6">
-            <button class="btn btn-amber btn-sm" data-toggle-qr="${esc(c.id)}">${qr_open?"Hide QR":"▦ QR"}</button>
-            ${fill.remaining===0?`<button class="btn btn-dkgreen btn-sm" data-refill="${esc(c.id)}">🔄 Refill</button>`:""}
-            <button class="btn btn-sm ${in_transit?"btn-green":"btn-dark"}" data-scan="${esc(c.id)}">${in_transit?"📱 Shop Scan":"📱 Pack Scan"}</button>
-          </div>
-        </div>
-        ${qr_panel}
-        <div style="margin-top:10px;font-weight:500">${esc(fill.coffee)}</div>
-        <div style="margin-top:4px;font-size:13px;color:#555">Roast IDs: <span class="mono" style="background:#f0ebe4;padding:1px 6px;border-radius:3px">${esc((fill.roast_ids||[]).join(", "))}</span></div>
-        <div style="font-size:13px;color:#888;margin-top:2px">Filled: ${fill.date}</div>
-        ${in_transit?`<div style="margin-top:8px;background:#fff8ee;border-radius:6px;padding:8px 12px;font-size:13px">📦 Packed for <strong>${esc(in_transit.shop)}</strong> — ${in_transit.total_kg}kg on ${in_transit.date}</div>`:""}
-        <div style="margin-top:10px">
-          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>Remaining: <strong>${fill.remaining}kg</strong></span></div>
-          <div class="stock-track"><div class="stock-fill" style="background:${bar_color};width:${pct}%"></div></div>
-        </div>
-        ${fill_history}
-      </div>`;
-  }).join("");
-  return `<div class="flex-between mb-16"><h2 style="margin:0">Storage Containers</h2><button class="btn btn-dark" id="toggle-container-form">+ New Container</button></div>${form_html}${refill_html}${containers_html}`;
+    </details>` : "";
+
+  return `
+    <div class="flex-between mb-16">
+      <h2 style="margin:0">Storage Containers</h2>
+      <span class="hint" style="font-size:13px">${active.length} container${active.length!==1?"s":""} with stock</span>
+    </div>
+    ${containers_html}
+    ${empty_html}`;
 }
 
-function build_refill_form(container) {
-  if (!container) return "";
-  const cur=active_fill(container);
-  return `<div class="card mb-16" style="border-left:4px solid #4a7c4e"><h3>🔄 Refill — ${esc(container.id)}</h3><p class="hint" style="margin-bottom:14px">Registering Fill #${cur.fill_number+1}. Previous fill history is preserved.</p><div class="grid-2"><div><label class="lbl">Coffee Name *</label>${build_coffee_select("rf-coffee",cur.coffee)}</div><div><label class="lbl">Roast Date</label><input id="rf-date" type="date" value="${today()}" /></div><div class="span-2"><label class="lbl">Cropster Roast IDs * (comma separated)</label><input id="rf-roasts" placeholder="61,62,63,64" /></div></div><p id="rf-err" class="err" style="display:none"></p><div class="flex gap-8 mt-12"><button class="btn btn-dkgreen" id="confirm-refill" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Confirm Refill"}</button><button class="btn btn-grey" id="cancel-refill">Cancel</button></div></div>`;
-}
 
 function build_coffee_select(id, value) {
   if (state.coffees.length>0) return `<select id="${id}"><option value="">— Select coffee —</option>${state.coffees.map(c=>`<option value="${esc(c)}" ${c===value?"selected":""}>${esc(c)}</option>`).join("")}</select>`;
@@ -556,21 +587,7 @@ function attach_listeners() {
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
   app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => { state.tab=Number(btn.dataset.tab); render(); }));
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
-  app.querySelector("#toggle-container-form")?.addEventListener("click", () => { state.ui.show_container_form=!state.ui.show_container_form; state.ui.container_err=""; render(); });
-  app.querySelector("#save-container")?.addEventListener("click", () => {
-    const id=document.getElementById("c-id")?.value.trim(), coffee=document.getElementById("c-coffee")?.value, date=document.getElementById("c-date")?.value, roast_raw=document.getElementById("c-roasts")?.value;
-    if (!id||!coffee||!roast_raw.trim()) { state.ui.container_err="Fill in all required fields."; render(); return; }
-    save_container(id,coffee,date,roast_raw);
-  });
-  app.querySelector("#cancel-container")?.addEventListener("click", () => { state.ui.show_container_form=false; state.ui.container_err=""; render(); });
   app.querySelectorAll("[data-toggle-qr]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_qr=state.ui.expanded_qr===btn.dataset.toggleQr?null:btn.dataset.toggleQr; render(); }));
-  app.querySelectorAll("[data-refill]").forEach(btn => btn.addEventListener("click", () => { state.ui.refill_id=btn.dataset.refill; render(); }));
-  app.querySelector("#confirm-refill")?.addEventListener("click", () => {
-    const coffee=document.getElementById("rf-coffee")?.value, date=document.getElementById("rf-date")?.value, roast_raw=document.getElementById("rf-roasts")?.value, err_el=document.getElementById("rf-err");
-    if (!coffee||!roast_raw.trim()) { err_el.textContent="Fill in all required fields."; err_el.style.display="block"; return; }
-    save_refill(state.ui.refill_id,coffee,date,roast_raw);
-  });
-  app.querySelector("#cancel-refill")?.addEventListener("click", () => { state.ui.refill_id=null; render(); });
   app.querySelectorAll("[data-scan]").forEach(btn => btn.addEventListener("click", () => {
     packing_state.step="select"; packing_state.shop=""; packing_state.bulk_kg=""; packing_state.err="";
     packing_state.retail_lines=RETAIL_SIZES.map(s=>({bag_size:s.val,bags:"0"})); packing_state.selected_order_id=null;
