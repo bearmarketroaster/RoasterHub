@@ -199,9 +199,11 @@ function parse_bc_po_page(lines) {
       if (NUM_RE.test(lines[i]||"")) { unit_cost=parseFloat(lines[i].replace(/,/g,"")); i++; }
       while (i < lines.length && SKIP_RE.test(lines[i])) i++;
       if (NUM_RE.test(lines[i]||"")) { total=parseFloat(lines[i].replace(/,/g,"")); i++; }
-      const known_fp = (state.fp_codes||[]).some(f => f.fp_code.toUpperCase() === code.toUpperCase());
-      if (description && quantity > 0 && known_fp)
-        items.push({ code, description, quantity, unit, unit_cost, total });
+      const fp_match = (state.fp_codes||[]).find(f => f.fp_code.toUpperCase() === code.toUpperCase());
+      if (fp_match && quantity > 0) {
+        const friendly_desc = `${fp_match.coffee_name} - ${fp_match.bag_size}`;
+        items.push({ code, description: friendly_desc, quantity, unit, unit_cost, total });
+      }
     } else { i++; }
   }
   return { shop_name: resolve_shop_name(shop_name), po_number, order_date, order_total, items };
