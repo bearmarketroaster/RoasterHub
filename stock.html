@@ -105,8 +105,8 @@ function new_delivery() {
 }
 
 async function load_data() {
-  const { data: settings } = await supabaseClient.from("settings").select("coffees").eq("id",1).single();
-  state.coffees = settings?.coffees || [];
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
+  state.coffees = (coffees_data || []).map(c => c.name);
 
   const { data: stock_items } = await supabaseClient.from("stock_items").select("*").order("coffee");
   state.stock_items = stock_items || [];
