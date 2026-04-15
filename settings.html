@@ -49,8 +49,8 @@
     .coffee-card-body { padding: 16px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
 
     /* FP code table */
-    .fp-table-header { display: grid; grid-template-columns: 1.2fr 1.5fr 1fr auto; background: #f5f0eb; padding: 8px 12px; border-bottom: 1px solid #e0d5c5; gap: 8px; }
-    .fp-row { display: grid; grid-template-columns: 1.2fr 1.5fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
+    .fp-table-header { display: grid; grid-template-columns: 1fr 1fr auto; background: #f5f0eb; padding: 8px 12px; border-bottom: 1px solid #e0d5c5; gap: 8px; }
+    .fp-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
     .fp-row + .fp-row { border-top: 1px solid #f0ebe4; }
 
     /* Supplier cards */
@@ -73,7 +73,7 @@
     .parse-status.err { background: #fff0ee; color: #e05c2a; }
     .parse-status.info { background: #fff8ee; color: #c8a96e; }
     .inline-err { color: #e05c2a; font-size: 12px; margin-top: 4px; }
-    @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } .fp-table-header, .fp-row { grid-template-columns: 1fr 1fr auto; } .fp-table-header .fp-hdr-bag-name { display:none; } }
+    @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } }
   </style>
 </head>
 <body>
@@ -82,7 +82,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // BEAR ROASTERY — Settings
 // Coffees → coffees table (id, name)
-// FP Codes → fp_codes table (id, coffee_id, fp_code, bag_name, bag_size)
+// FP Codes → fp_codes table (id, coffee_id, fp_code, bag_size)
 // QR base URL → settings table row id=1
 // Supplier templates → supplier_templates table
 // Shop mappings → shop_mappings table (id, parsed_name, master_name)
@@ -99,7 +99,7 @@ const BAG_SIZES = ["100g","200g","500g","1kg"];
 
 const state = {
   base_url: "",
-  coffees: [],          // [{ id, name, fp_codes: [{id, fp_code, bag_name, bag_size}] }]
+  coffees: [],          // [{ id, name, fp_codes: [{id, fp_code, bag_size}] }]
   supplier_templates: [],
   loading: true,
   saving: false,
@@ -109,7 +109,7 @@ const state = {
     open_coffee: null,
     new_coffee_name: "",
     coffee_err: "",
-    // per-coffee inline new FP row: { [coffee_id]: { fp_code:"", bag_name:"", bag_size:"100g", err:"" } }
+    // per-coffee inline new FP row: { [coffee_id]: { fp_code:"", bag_size:"100g", err:"" } }
     new_fp: {},
     new_shop_parsed: "",
     new_shop_master: "",
@@ -214,9 +214,9 @@ async function rename_coffee(id, new_name) {
 }
 
 // ── FP CODES ──────────────────────────────────────────────────────────────────
-async function add_fp_code(coffee_id, fp_code, bag_name, bag_size) {
+async function add_fp_code(coffee_id, fp_code, bag_size) {
   const { data, error } = await supabaseClient.from("fp_codes")
-    .insert({ coffee_id, fp_code: fp_code.toUpperCase(), bag_name, bag_size })
+    .insert({ coffee_id, fp_code: fp_code.toUpperCase(), bag_size })
     .select().single();
   if (error) {
     state.ui.new_fp[coffee_id] = { ...state.ui.new_fp[coffee_id], err: error.message };
@@ -224,7 +224,7 @@ async function add_fp_code(coffee_id, fp_code, bag_name, bag_size) {
   }
   const coffee = state.coffees.find(c=>c.id===coffee_id);
   if (coffee) { coffee.fp_codes.push(data); coffee.fp_codes.sort((a,b)=>a.fp_code.localeCompare(b.fp_code)); }
-  state.ui.new_fp[coffee_id] = { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+  state.ui.new_fp[coffee_id] = { fp_code:"", bag_size:"100g", err:"" };
   render();
 }
 
@@ -344,12 +344,11 @@ function build_coffees_section() {
 
   const coffees_html = coffees.map(c => {
     const is_open = state.ui.open_coffee === c.id;
-    const nfp = state.ui.new_fp[c.id] || { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+    const nfp = state.ui.new_fp[c.id] || { fp_code:"", bag_size:"100g", err:"" };
 
     const fp_rows = c.fp_codes.map(f => `
       <div class="fp-row">
         <span class="mono" style="font-size:13px;font-weight:600;color:#1a1008">${esc(f.fp_code)}</span>
-        <span style="font-size:13px;color:#444">${esc(f.bag_name)}</span>
         <span class="tag" style="background:#f0ebe4;color:#5a3e1b;font-size:11px">${esc(f.bag_size)}</span>
         <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px" data-delete-fp="${c.id}__${f.id}" title="Remove FP code">✕</button>
       </div>`).join("");
@@ -377,7 +376,6 @@ function build_coffees_section() {
             <div class="card-white" style="margin-bottom:12px">
               <div class="fp-table-header">
                 <span class="lbl" style="margin:0">FP Code</span>
-                <span class="lbl fp-hdr-bag-name" style="margin:0">Bag Name</span>
                 <span class="lbl" style="margin:0">Size</span>
                 <span></span>
               </div>
@@ -388,10 +386,6 @@ function build_coffees_section() {
                   <div>
                     <label class="lbl">FP Code *</label>
                     <input class="new-fp-code" data-cid="${c.id}" value="${esc(nfp.fp_code)}" placeholder="e.g. FP0046" style="font-family:monospace;font-size:13px" />
-                  </div>
-                  <div>
-                    <label class="lbl">Bag Name *</label>
-                    <input class="new-fp-bag-name" data-cid="${c.id}" value="${esc(nfp.bag_name)}" placeholder="e.g. Holy Roast Espresso 1kg" style="font-size:13px" />
                   </div>
                   <div>
                     <label class="lbl">Size *</label>
@@ -682,30 +676,24 @@ function attach_listeners() {
   // ── FP Codes
   app.querySelectorAll(".new-fp-code").forEach(inp => inp.addEventListener("input", e => {
     const cid = Number(inp.dataset.cid);
-    if (!state.ui.new_fp[cid]) state.ui.new_fp[cid] = { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+    if (!state.ui.new_fp[cid]) state.ui.new_fp[cid] = { fp_code:"", bag_size:"100g", err:"" };
     state.ui.new_fp[cid].fp_code = e.target.value;
-  }));
-  app.querySelectorAll(".new-fp-bag-name").forEach(inp => inp.addEventListener("input", e => {
-    const cid = Number(inp.dataset.cid);
-    if (!state.ui.new_fp[cid]) state.ui.new_fp[cid] = { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
-    state.ui.new_fp[cid].bag_name = e.target.value;
   }));
   app.querySelectorAll(".new-fp-bag-size").forEach(sel => sel.addEventListener("change", e => {
     const cid = Number(sel.dataset.cid);
-    if (!state.ui.new_fp[cid]) state.ui.new_fp[cid] = { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+    if (!state.ui.new_fp[cid]) state.ui.new_fp[cid] = { fp_code:"", bag_size:"100g", err:"" };
     state.ui.new_fp[cid].bag_size = e.target.value;
   }));
   app.querySelectorAll(".add-fp-btn").forEach(btn => btn.addEventListener("click", () => {
     const cid = Number(btn.dataset.cid);
-    const nfp = state.ui.new_fp[cid] || { fp_code:"", bag_name:"", bag_size:"100g", err:"" };
+    const nfp = state.ui.new_fp[cid] || { fp_code:"", bag_size:"100g", err:"" };
     const fp_code = (document.querySelector(`.new-fp-code[data-cid="${cid}"]`)?.value || nfp.fp_code).trim();
-    const bag_name = (document.querySelector(`.new-fp-bag-name[data-cid="${cid}"]`)?.value || nfp.bag_name).trim();
     const bag_size = nfp.bag_size || "100g";
-    if (!fp_code || !bag_name) {
-      state.ui.new_fp[cid] = { ...nfp, fp_code, bag_name, err:"FP code and bag name are required." };
+    if (!fp_code) {
+      state.ui.new_fp[cid] = { ...nfp, fp_code, err:"FP code is required." };
       render(); return;
     }
-    add_fp_code(cid, fp_code, bag_name, bag_size);
+    add_fp_code(cid, fp_code, bag_size);
   }));
   app.querySelectorAll("[data-delete-fp]").forEach(btn => btn.addEventListener("click", () => {
     const [cid, fid] = btn.dataset.deleteFp.split("__").map(Number);
