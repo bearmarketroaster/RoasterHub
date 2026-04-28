@@ -98,7 +98,10 @@ const state = {
 
 function today() { return new Date().toISOString().split("T")[0]; }
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-function gen_id(prefix, list) { return `${prefix}-${today().replace(/-/g,"")}-${String(list.length+1).padStart(3,"0")}`; }
+function gen_id(prefix) {
+  const r = crypto.randomUUID().split("-")[0].toUpperCase();
+  return `${prefix}-${today().replace(/-/g,"")}-${r}`;
+}
 
 function new_delivery() {
   return { date: today(), supplier: "", invoice_ref: "", due_date: "", items: [new_delivery_item()] };
@@ -130,7 +133,7 @@ async function save_delivery() {
   const valid_items = d.items.filter(i => i.coffee && Number(i.weight_kg) > 0);
   if (!d.date) { state.ui.delivery_err="Please enter a delivery date."; state.saving=false; render(); return; }
   if (!valid_items.length) { state.ui.delivery_err="Please add at least one item with a coffee and weight."; state.saving=false; render(); return; }
-  const delivery_id = gen_id("DEL", state.deliveries);
+  const delivery_id = gen_id("DEL");
 
   // Upload invoice PDF if one was staged
   let invoice_path = null;
@@ -165,9 +168,9 @@ async function save_delivery() {
     if (existing) {
       await supabaseClient.from("stock_items").update({ current_kg: existing.current_kg+Number(item.weight_kg), origin: item.origin||existing.origin }).eq("id", existing.id);
     } else {
-      await supabaseClient.from("stock_items").insert({ id: gen_id("STK",state.stock_items), coffee: item.coffee, origin: item.origin||null, current_kg: Number(item.weight_kg), low_stock_threshold: LOW_STOCK_KG });
+      await supabaseClient.from("stock_items").insert({ id: gen_id("STK"), coffee: item.coffee, origin: item.origin||null, current_kg: Number(item.weight_kg), low_stock_threshold: LOW_STOCK_KG });
     }
-    await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ",state.adjustments), date: d.date, coffee: item.coffee, change_kg: Number(item.weight_kg), reason: "delivery", note: `Delivery ${delivery_id}${d.invoice_ref?" · "+d.invoice_ref:""}`, auto: true });
+    await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: d.date, coffee: item.coffee, change_kg: Number(item.weight_kg), reason: "delivery", note: `Delivery ${delivery_id}${d.invoice_ref?" · "+d.invoice_ref:""}`, auto: true });
   }
   state.saving=false; state.ui.show_delivery_form=false; state.ui.delivery_err="";
   state.ui.delivery=new_delivery(); state.ui.pending_invoice_file=null;
@@ -193,13 +196,13 @@ async function save_adjustment() {
   const note = document.getElementById("adj-note")?.value.trim();
   if (!coffee) { state.ui.adj_err="Please select a coffee."; state.saving=false; render(); return; }
   if (!change_kg) { state.ui.adj_err="Please enter a non-zero kg value."; state.saving=false; render(); return; }
-  const { error } = await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ",state.adjustments), date: today(), coffee, change_kg, reason, note: note||null, auto: false });
+  const { error } = await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: today(), coffee, change_kg, reason, note: note||null, auto: false });
   if (error) { state.ui.adj_err="Failed to save adjustment."; state.saving=false; render(); return; }
   const existing = state.stock_items.find(s => s.coffee===coffee);
   if (existing) {
     await supabaseClient.from("stock_items").update({ current_kg: Math.max(0, existing.current_kg+change_kg) }).eq("id", existing.id);
   } else {
-    await supabaseClient.from("stock_items").insert({ id: gen_id("STK",state.stock_items), coffee, current_kg: Math.max(0,change_kg), low_stock_threshold: LOW_STOCK_KG });
+    await supabaseClient.from("stock_items").insert({ id: gen_id("STK"), coffee, current_kg: Math.max(0,change_kg), low_stock_threshold: LOW_STOCK_KG });
   }
   state.saving=false; state.ui.adj={ coffee:"", change_kg:"", reason:"roast", note:"" }; state.ui.show_adj_form=false; state.ui.adj_err="";
   await load_data(); render();

@@ -108,7 +108,10 @@ function active_fill(c) { return { coffee: c.coffee, remaining: c.remaining||0, 
 const BAG_SIZE_KG = { "100g":0.1, "200g":0.2, "500g":0.5, "1kg":1, "Bar 5kg":5 };
 function calc_kg(bags, bag_size) { return (Number(bags)||0)*(BAG_SIZE_KG[bag_size]||Number(bag_size)||0); }
 function to_upper(s) { return (s||"").trim().toUpperCase(); }
-function gen_id(prefix, list) { return `${prefix}-${today().replace(/-/g,"")}-${String(list.length+1).padStart(3,"0")}`; }
+function gen_id(prefix) {
+  const r = crypto.randomUUID().split("-")[0].toUpperCase();
+  return `${prefix}-${today().replace(/-/g,"")}-${r}`;
+}
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 const PALETTE = ["#1a1008","#c8a96e","#4a9e6b","#e05c2a","#4a7c4e","#e0a82a","#888","#5a3e1b"];
 function color_for(i) { return PALETTE[i%PALETTE.length]; }
@@ -278,7 +281,7 @@ async function load_data() {
 
 async function save_order(order) {
   state.saving=true; render();
-  const order_id=gen_id("ORD",state.orders);
+  const order_id=gen_id("ORD");
   const { error } = await supabaseClient.from("orders").insert({id:order_id,shop_name:order.shop_name,po_number:order.po_number||null,order_date:order.order_date||null,order_total:order.order_total||0,status:"pending"});
   if (error) { state.saving=false; return; }
   await supabaseClient.from("order_items").insert(order.items.map((item,i)=>({id:`${order_id}-I${i+1}`,order_id,code:item.code||null,description:item.description,quantity:item.quantity,unit:item.unit||"EACH",unit_cost:item.unit_cost||0,total:item.total||0})));
@@ -301,7 +304,7 @@ async function update_order_status(order_id, status) {
 
 async function save_dispatch(container_id, fill_number, shop, lines, total_kg, order_id) {
   state.saving=true; render();
-  const dispatch_id=gen_id("DSP",state.dispatches);
+  const dispatch_id=gen_id("DSP");
   const { error: d_err } = await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,date:today(),shop,total_kg,confirmed_at:null,order_id:order_id||null});
   if (d_err) { state.saving=false; alert("Failed to save dispatch: "+d_err.message); return; }
   await supabaseClient.from("dispatch_lines").insert(lines.map((l,i)=>({id:`${dispatch_id}-L${i+1}`,dispatch_id,type:l.type,kg:l.kg,bags:l.bags||null,bag_size:l.bag_size||null})));
