@@ -302,11 +302,9 @@ async function update_order_status(order_id, status) {
 async function save_dispatch(container_id, fill_number, shop, lines, total_kg, order_id) {
   state.saving=true; render();
   const dispatch_id=gen_id("DSP",state.dispatches);
-  await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,fill_number,date:today(),shop,total_kg,confirmed_at:null,order_id:order_id||null});
+  const { error: d_err } = await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,date:today(),shop,total_kg,confirmed_at:null,order_id:order_id||null});
+  if (d_err) { state.saving=false; alert("Failed to save dispatch: "+d_err.message); return; }
   await supabaseClient.from("dispatch_lines").insert(lines.map((l,i)=>({id:`${dispatch_id}-L${i+1}`,dispatch_id,type:l.type,kg:l.kg,bags:l.bags||null,bag_size:l.bag_size||null})));
-  const container=state.containers.find(c=>c.id===container_id);
-  const fill=container?.fills.find(f=>f.fill_number===fill_number);
-  if (fill) await supabaseClient.from("container_fills").update({remaining:Math.max(0,fill.remaining-total_kg)}).eq("id",fill.id);
   state.saving=false; await load_data(); render();
 }
 
