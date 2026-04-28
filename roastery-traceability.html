@@ -304,6 +304,8 @@ async function update_order_status(order_id, status) {
 
 async function save_dispatch(container_id, fill_number, shop, lines, total_kg, order_id) {
   state.saving=true; render();
+  // Ensure the container row exists (FK requirement) — upsert is a no-op if it already does
+  await supabaseClient.from("containers").upsert({ id: container_id }, { onConflict: "id" });
   const dispatch_id=gen_id("DSP");
   const { error: d_err } = await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,date:today(),shop,total_kg,confirmed_at:null,order_id:order_id||null});
   if (d_err) { state.saving=false; alert("Failed to save dispatch: "+d_err.message); return; }

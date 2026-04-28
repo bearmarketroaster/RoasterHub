@@ -131,6 +131,10 @@ async function save_session() {
   const s = state.session;
   const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
   const id = gen_session_id();
+  // Ensure container row exists (FK requirement) — upsert is a no-op if it already does
+  if (s.container_id) {
+    await supabaseClient.from("containers").upsert({ id: s.container_id }, { onConflict: "id" });
+  }
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
     id, coffee: s.coffee, date: s.date, container_id: s.container_id,
     roasted_weight: Number(s.roasted_weight),
