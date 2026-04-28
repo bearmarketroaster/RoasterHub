@@ -407,11 +407,25 @@ function attach_listeners() {
   app.querySelectorAll(".b-id").forEach(inp => inp.addEventListener("input", e => { state.session.batches[Number(inp.dataset.idx)].cropster_id=e.target.value.trim(); }));
   app.querySelectorAll(".b-green").forEach(inp => inp.addEventListener("input", e => { state.session.batches[Number(inp.dataset.idx)].green_weight=e.target.value; }));
 
-  app.querySelector("#s2-next")?.addEventListener("click", () => {
+  app.querySelector("#s2-next")?.addEventListener("click", async () => {
     app.querySelectorAll(".b-id").forEach(inp => { state.session.batches[Number(inp.dataset.idx)].cropster_id=inp.value.trim(); });
     app.querySelectorAll(".b-green").forEach(inp => { state.session.batches[Number(inp.dataset.idx)].green_weight=inp.value; });
     const err_el = document.getElementById("s2-err");
     if (!state.session.batches.some(b=>b.cropster_id)) { err_el.textContent="Please enter at least one Cropster roast ID."; err_el.style.display="block"; return; }
+    // Validate green stock availability
+    const total_green = state.session.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
+    if (total_green > 0) {
+      const { data: stock_item } = await supabaseClient.from("stock_items").select("current_kg").eq("coffee", state.session.coffee).maybeSingle();
+      if (!stock_item) {
+        err_el.textContent = `No green stock found for ${state.session.coffee}. Log a delivery in the Stock module before roasting.`;
+        err_el.style.display = "block"; return;
+      }
+      if (stock_item.current_kg < total_green) {
+        err_el.textContent = `Not enough green stock — need ${total_green.toFixed(1)}kg of ${state.session.coffee}, only ${stock_item.current_kg.toFixed(1)}kg available. Update your stock before roasting.`;
+        err_el.style.display = "block"; return;
+      }
+    }
+    err_el.style.display = "none";
     state.ui.step=3; render();
   });
   app.querySelector("#s2-back")?.addEventListener("click", () => { state.ui.step=1; render(); });
