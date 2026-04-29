@@ -585,7 +585,7 @@ function build_reports_tab() {
   const first_date=state.dispatches.length?state.dispatches.reduce((min,d)=>d.date<min?d.date:min,state.dispatches[0].date):today();
   if (state.dispatches.length===0) return `<h2>Reports</h2><div class="card empty"><div class="icon">📊</div>No dispatch data yet.</div>`;
   const filtered=state.dispatches.filter(d=>d.date>=report_from&&d.date<=report_to);
-  function get_coffee_name(d) { const c=state.containers.find(x=>x.id===d.container_id); return c?.fills.find(f=>f.fill_number===d.fill_number)?.coffee??"Unknown"; }
+  function get_coffee_name(d) { const c=state.containers.find(x=>x.id===d.container_id); return c?.coffee??"Unknown"; }
   const shop_map={};
   filtered.forEach(d=>{ const shop=d.shop||"Unknown"; if(!shop_map[shop]) shop_map[shop]={total_kg:0,coffees:{},dispatches:0,last_date:""}; shop_map[shop].total_kg+=d.total_kg; shop_map[shop].dispatches++; if(d.date>shop_map[shop].last_date) shop_map[shop].last_date=d.date; const coffee=get_coffee_name(d); shop_map[shop].coffees[coffee]=(shop_map[shop].coffees[coffee]||0)+d.total_kg; });
   const shop_rows=Object.entries(shop_map).sort((a,b)=>b[1].total_kg-a[1].total_kg), max_shop_kg=shop_rows[0]?.[1].total_kg||1;
