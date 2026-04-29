@@ -523,18 +523,13 @@ function build_manual_order_entry() {
 }
 
 function build_deliveries_tab() {
-  const with_order=state.dispatches.filter(d=>d.order_id);
-  const without_order=state.dispatches.filter(d=>!d.order_id);
-  const by_order={};
-  with_order.forEach(d=>{ if(!by_order[d.order_id]) by_order[d.order_id]=[]; by_order[d.order_id].push(d); });
   const get_ref=d=>{ const c=state.containers.find(x=>x.id===d.container_id); return {c, fill: c ? { coffee: c.coffee, date: c.roast_sessions?.[0]?.date||"", fill_number: 1 } : null}; };
-  const in_transit_orders=state.orders.filter(o=>o.status!=="packed"&&by_order[o.id]);
-  const packed_orders=state.orders.filter(o=>o.status==="packed"&&by_order[o.id]);
   if (state.dispatches.length===0) return `<h2>Deliveries</h2><div class="card empty"><div class="icon">🚚</div>No dispatches yet.</div>`;
+  const in_transit = state.dispatches.filter(d => !d.confirmed_at);
+  const delivered  = state.dispatches.filter(d => d.confirmed_at);
   return `<h2>Deliveries</h2>
-    ${in_transit_orders.length>0?`<h3 style="color:#e0a82a;margin-top:0">⏳ In Transit (${in_transit_orders.length})</h3>${in_transit_orders.map(o=>build_order_delivery_card(o,by_order[o.id]||[],get_ref)).join("")}`:""}
-    ${packed_orders.length>0?`<h3 style="color:#4a9e6b;margin-top:${in_transit_orders.length?24:0}px">✓ Delivered (${packed_orders.length})</h3>${packed_orders.map(o=>build_order_delivery_card(o,by_order[o.id]||[],get_ref)).join("")}`:""}
-    ${without_order.length>0?`<h3 style="color:#888;margin-top:${in_transit_orders.length||packed_orders.length?24:0}px">📦 Ad-hoc (${without_order.length})</h3>${without_order.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,!!d.confirmed_at); }).join("")}`:""}`;
+    ${in_transit.length>0?`<h3 style="color:#e0a82a;margin-top:0">⏳ In Transit (${in_transit.length})</h3>${in_transit.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,false); }).join("")}`:""}
+    ${delivered.length>0?`<h3 style="color:#4a9e6b;margin-top:${in_transit.length?24:0}px">✓ Delivered (${delivered.length})</h3>${delivered.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,true); }).join("")}`:""}`;
 }
 
 function build_order_delivery_card(order, dispatches, get_ref) {
