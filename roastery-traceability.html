@@ -527,7 +527,7 @@ function build_deliveries_tab() {
   const without_order=state.dispatches.filter(d=>!d.order_id);
   const by_order={};
   with_order.forEach(d=>{ if(!by_order[d.order_id]) by_order[d.order_id]=[]; by_order[d.order_id].push(d); });
-  const get_ref=d=>{ const c=state.containers.find(x=>x.id===d.container_id); return {c,fill:c?.fills.find(f=>f.fill_number===d.fill_number)}; };
+  const get_ref=d=>{ const c=state.containers.find(x=>x.id===d.container_id); return {c, fill: c ? { coffee: c.coffee, date: c.roast_sessions?.[0]?.date||"", fill_number: 1 } : null}; };
   const in_transit_orders=state.orders.filter(o=>o.status!=="packed"&&by_order[o.id]);
   const packed_orders=state.orders.filter(o=>o.status==="packed"&&by_order[o.id]);
   if (state.dispatches.length===0) return `<h2>Deliveries</h2><div class="card empty"><div class="icon">🚚</div>No dispatches yet.</div>`;
