@@ -348,6 +348,8 @@ function build_scan_overlay() {
   if (state.loading) return `<div class="loading">Loading…</div>`;
   if (!container) return `<div class="overlay"><div class="modal" style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⚠️</div><h2 style="margin-bottom:8px">Container Not Found</h2><p class="hint">No container found with ID <strong>${esc(cid)}</strong>.</p><button class="btn btn-dark mt-16" id="close-scan">Go Back</button></div></div>`;
   const fill=active_fill(container);
+  // If we're mid-packing flow, stay in the packing flow regardless of pending dispatches
+  if (packing_state.step === "review" || packing_state.step === "done") return build_packing_page(container, fill);
   const pending=state.dispatches.find(d=>d.container_id===cid&&!d.confirmed_at);
   if (pending) return build_shop_confirm_page(container,fill,pending);
   return build_packing_page(container,fill);
@@ -757,7 +759,7 @@ function attach_listeners() {
     await save_dispatch(state.scan_id,fill.fill_number,packing_state.shop,lines,total_kg,order_id);
     packing_state.step="done"; render();
   });
-  app.querySelector("#packing-done")?.addEventListener("click", () => { state.scan_id=null; render(); });
+  app.querySelector("#packing-done")?.addEventListener("click", () => { state.scan_id=null; packing_state.step="select"; packing_state.shop=""; packing_state.bulk_kg=""; packing_state.selected_order_id=null; packing_state.retail_lines=RETAIL_SIZES.map(s=>({bag_size:s.val,bags:"0"})); render(); });
   app.querySelector("#confirm-delivery")?.addEventListener("click", async () => {
     const d=state.dispatches.find(x=>x.container_id===state.scan_id&&!x.confirmed_at);
     if (d) await confirm_delivery(d.id);
