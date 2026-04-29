@@ -52,18 +52,39 @@
     function hideMsg() { msgEl.style.display = "none"; }
 
     // Determine which mode we're in — login or set_password
-    // The set_password flow happens after a user clicks the email confirmation link.
-    // Supabase delivers a session via the URL hash, which the SDK auto-detects.
+    // Supabase email links arrive in a few different shapes depending on flow + version:
+    //   • New PKCE flow: ?code=xxx  → SDK auto-exchanges for session
+    //   • Legacy hash flow: #access_token=xxx&type=recovery|invite|signup
+    //   • Manual override: ?mode=set_password
     const url_params  = new URLSearchParams(window.location.search);
     const hash_params = new URLSearchParams(window.location.hash.slice(1));
-    const is_set_password_flow = url_params.get("mode") === "set_password" || hash_params.get("type") === "signup" || hash_params.get("type") === "invite" || hash_params.get("type") === "recovery";
+    const has_code         = url_params.has("code");
+    const hash_type        = hash_params.get("type");
+    const manual_set_pw    = url_params.get("mode") === "set_password";
+    const password_flows   = ["recovery", "invite", "signup", "magiclink"];
+    const is_set_password_flow = manual_set_pw || has_code || password_flows.includes(hash_type);
 
     async function bootstrap() {
-      const { data: { session } } = await supabaseClient.auth.getSession();
+      // Wait briefly for the SDK to process URL params (e.g. exchange ?code= for session)
+      // The SDK fires onAuthStateChange when this completes.
+      let session = (await supabaseClient.auth.getSession()).data.session;
+      if (!session && (has_code || hash_type)) {
+        session = await new Promise(resolve => {
+          const timeout = setTimeout(() => resolve(null), 3000);
+          supabaseClient.auth.onAuthStateChange((_evt, sess) => {
+            if (sess) { clearTimeout(timeout); resolve(sess); }
+          });
+        });
+      }
+
       if (is_set_password_flow && session) {
         renderSetPassword();
       } else if (session) {
         window.location.href = "index.html";
+      } else if (is_set_password_flow) {
+        // Tried to enter set-password flow but session never materialised
+        showMsg("Invitation link is invalid or has expired. Please ask an admin to resend it.");
+        renderLogin();
       } else {
         renderLogin();
       }
