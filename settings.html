@@ -100,6 +100,10 @@ const BAG_SIZES = ["100g","200g","500g","1kg","Bar 5kg"];
 const state = {
   base_url: "",
   coffees: [],          // [{ id, name, fp_codes: [{id, fp_code, bag_size}] }]
+  shop_mappings: [],    // [{ id, parsed_name, master_name }]
+  user_roles: [],
+  pending_invites: [],
+  current_user: null,
   supplier_templates: [],
   loading: true,
   saving: false,
@@ -114,6 +118,10 @@ const state = {
     new_shop_parsed: "",
     new_shop_master: "",
     shop_err: "",
+    new_user_email: "",
+    new_user_role: "viewer",
+    user_err: "",
+    user_msg: "",
     url_status: null,
     open_supplier: null,
     supplier_err: "",
@@ -169,8 +177,93 @@ async function delete_shop_mapping(id) {
   render();
 }
 
+async function load_users() {
+  const { data: roles } = await supabaseClient.from("user_roles").select("*").order("email");
+  state.user_roles = roles || [];
+  const { data: invites } = await supabaseClient.from("pending_invites").select("*").order("created_at");
+  state.pending_invites = invites || [];
+}
+
+async function load_current_user() {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) return;
+  const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", user.id).maybeSingle();
+  state.current_user = { id: user.id, email: user.email, role: role_row?.role || null };
+}
+
+async function invite_user(email, role) {
+  email = email.trim().toLowerCase();
+  if (!email || !["admin","viewer"].includes(role)) {
+    state.ui.user_err = "Please enter a valid email and select a role.";
+    render(); return;
+  }
+  // Check email isn't already a user or pending invite
+  if (state.user_roles.find(u => u.email === email)) {
+    state.ui.user_err = "That user already has access.";
+    render(); return;
+  }
+  if (state.pending_invites.find(i => i.email === email)) {
+    state.ui.user_err = "An invite is already pending for that email.";
+    render(); return;
+  }
+
+  // Insert pending invite (the trigger will create user_roles on signup)
+  const { error: inv_err } = await supabaseClient.from("pending_invites").insert({ email, role, invited_by: state.current_user.id });
+  if (inv_err) { state.ui.user_err = inv_err.message; render(); return; }
+
+  // Trigger the Supabase signup confirmation email
+  const redirect_url = window.location.origin + window.location.pathname.replace(/[^/]*$/, "") + "login.html?mode=set_password";
+  const { error: sup_err } = await supabaseClient.auth.signUp({
+    email,
+    password: crypto.randomUUID(),  // random temp password — user resets via email link
+    options: { emailRedirectTo: redirect_url },
+  });
+  if (sup_err) {
+    // Roll back the pending invite if signup failed
+    await supabaseClient.from("pending_invites").delete().eq("email", email);
+    state.ui.user_err = sup_err.message;
+    render(); return;
+  }
+
+  state.ui.new_user_email = "";
+  state.ui.new_user_role = "viewer";
+  state.ui.user_err = "";
+  state.ui.user_msg = `Invitation sent to ${email}.`;
+  await load_users();
+  render();
+  setTimeout(() => { state.ui.user_msg = ""; render(); }, 5000);
+}
+
+async function update_user_role(user_id, new_role) {
+  const { error } = await supabaseClient.from("user_roles").update({ role: new_role }).eq("user_id", user_id);
+  if (error) { alert("Failed to update role: " + error.message); return; }
+  await load_users();
+  render();
+}
+
+async function remove_user(user_id, email) {
+  if (!confirm(`Remove ${email}'s access? They will no longer be able to log in.`)) return;
+  // Note: this only removes them from user_roles. Removing from auth.users requires admin API.
+  // After removing the role, RLS policies will block them from doing anything.
+  const { error } = await supabaseClient.from("user_roles").delete().eq("user_id", user_id);
+  if (error) { alert("Failed to remove user: " + error.message); return; }
+  await load_users();
+  render();
+}
+
+async function cancel_invite(email) {
+  if (!confirm(`Cancel pending invite for ${email}?`)) return;
+  const { error } = await supabaseClient.from("pending_invites").delete().eq("email", email);
+  if (error) { alert("Failed to cancel invite: " + error.message); return; }
+  await load_users();
+  render();
+}
+
 async function init() {
-  await Promise.all([load_base_url(), load_coffees(), load_shop_mappings(), load_supplier_templates()]);
+  await load_current_user();
+  // Viewers shouldn't be in Settings at all — redirect to Reports
+  if (state.current_user?.role !== "admin") { window.location.href = "reports.html"; return; }
+  await Promise.all([load_base_url(), load_coffees(), load_shop_mappings(), load_supplier_templates(), load_users()]);
   state.loading = false;
   render();
 }
@@ -313,6 +406,93 @@ function generate_template_from_text(raw) {
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
+// ── USERS SECTION ────────────────────────────────────────────────────────────
+function build_users_section() {
+  const open = state.open_section === "users";
+  const { new_user_email, new_user_role, user_err, user_msg } = state.ui;
+  const users = state.user_roles;
+  const invites = state.pending_invites;
+
+  const users_html = users.map(u => {
+    const is_self = state.current_user?.id === u.user_id;
+    return `
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4">
+        <div>
+          <div style="font-size:13px;font-weight:600">${esc(u.email)}${is_self?` <span class="hint" style="font-size:11px;font-weight:400">(you)</span>`:""}</div>
+          <div style="font-size:11px;color:#aaa">Joined ${u.created_at?new Date(u.created_at).toLocaleDateString():"—"}</div>
+        </div>
+        <select class="user-role-select" data-uid="${u.user_id}" ${is_self?"disabled":""} style="font-size:12px;width:100px">
+          <option value="admin"  ${u.role==="admin" ?"selected":""}>Admin</option>
+          <option value="viewer" ${u.role==="viewer"?"selected":""}>Viewer</option>
+        </select>
+        ${is_self?'<span style="width:24px"></span>':`<button data-remove-user="${u.user_id}__${esc(u.email)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>`}
+      </div>`;
+  }).join("");
+
+  const invites_html = invites.length ? `
+    <div class="section-label" style="margin-top:16px;margin-bottom:8px">Pending Invites (${invites.length})</div>
+    <div class="card-white">
+      ${invites.map(i => `
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4">
+          <div>
+            <div style="font-size:13px;font-weight:600">${esc(i.email)}</div>
+            <div style="font-size:11px;color:#aaa">Invited ${i.created_at?new Date(i.created_at).toLocaleDateString():"—"} as ${i.role}</div>
+          </div>
+          <span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">⏳ Pending</span>
+          <button data-cancel-invite="${esc(i.email)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>
+        </div>`).join("")}
+    </div>` : "";
+
+  const body = open ? `
+    <div class="section-body">
+      <p class="hint mb-12">Manage who can access RoasterHub. Admins can do everything; viewers can only see Reports.</p>
+
+      <div class="section-label">Active Users</div>
+      <div class="card-white" style="margin-bottom:0">
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;background:#f5f0eb;padding:8px 12px;border-bottom:1px solid #e0d5c5">
+          <span class="lbl" style="margin:0">Email</span>
+          <span class="lbl" style="margin:0">Role</span>
+          <span></span>
+        </div>
+        ${users.length === 0 ? '<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No active users.</div>' : users_html}
+      </div>
+
+      ${invites_html}
+
+      <div class="section-label" style="margin-top:16px">Invite New User</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:flex-end">
+          <div>
+            <label class="lbl">Email *</label>
+            <input id="new-user-email" type="email" value="${esc(new_user_email)}" placeholder="user@example.com" style="font-size:13px" />
+          </div>
+          <div>
+            <label class="lbl">Role *</label>
+            <select id="new-user-role" style="font-size:13px;width:120px">
+              <option value="viewer" ${new_user_role==="viewer"?"selected":""}>Viewer</option>
+              <option value="admin"  ${new_user_role==="admin" ?"selected":""}>Admin</option>
+            </select>
+          </div>
+          <button class="btn btn-dark btn-sm" id="invite-user-btn">Send Invite</button>
+        </div>
+        ${user_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:8px">${esc(user_err)}</p>` : ""}
+        ${user_msg ? `<p style="color:#4a9e6b;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(user_msg)}</p>` : ""}
+      </div>
+    </div>` : "";
+
+  return `
+    <div class="section">
+      <div class="section-header" data-toggle-section="users">
+        <div>
+          <div class="section-title"><span class="icon">👥</span> Users</div>
+          <div class="section-desc">${users.length} user${users.length!==1?"s":""}${invites.length?` · ${invites.length} pending`:""}</div>
+        </div>
+        <span class="section-arrow">${open ? "▾" : "▸"}</span>
+      </div>
+      ${body}
+    </div>`;
+}
+
 function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
 
 function build_app() {
@@ -333,6 +513,7 @@ function build_app() {
       ${build_traceability_section()}
       ${build_shops_section()}
       ${build_suppliers_section()}
+      ${build_users_section()}
     </div>`;
 }
 
@@ -714,6 +895,25 @@ function attach_listeners() {
   app.querySelectorAll("[data-delete-shop]").forEach(btn => btn.addEventListener("click", () => {
     if (!confirm("Remove this shop mapping?")) return;
     delete_shop_mapping(Number(btn.dataset.deleteShop));
+  }));
+
+  // ── Users
+  app.querySelector("#new-user-email")?.addEventListener("input", e => { state.ui.new_user_email = e.target.value; });
+  app.querySelector("#new-user-role")?.addEventListener("change", e => { state.ui.new_user_role = e.target.value; });
+  app.querySelector("#invite-user-btn")?.addEventListener("click", () => {
+    const email = document.getElementById("new-user-email")?.value.trim();
+    const role  = document.getElementById("new-user-role")?.value;
+    invite_user(email, role);
+  });
+  app.querySelectorAll(".user-role-select").forEach(sel => sel.addEventListener("change", e => {
+    update_user_role(sel.dataset.uid, e.target.value);
+  }));
+  app.querySelectorAll("[data-remove-user]").forEach(btn => btn.addEventListener("click", () => {
+    const [uid, email] = btn.dataset.removeUser.split("__");
+    remove_user(uid, email);
+  }));
+  app.querySelectorAll("[data-cancel-invite]").forEach(btn => btn.addEventListener("click", () => {
+    cancel_invite(btn.dataset.cancelInvite);
   }));
 
   // ── Suppliers

@@ -86,9 +86,11 @@
 
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
-supabaseClient.auth.getSession().then(({ data: { session } }) => {
-  if (!session) window.location.href = "login.html";
-  else init();
+supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
+  if (!session) { window.location.href = "login.html"; return; }
+  const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+  if (role_row?.role !== "admin") { window.location.href = "reports.html"; return; }
+  init();
 });
 
 

@@ -91,11 +91,18 @@
       if (session) {
         userEl.textContent = session.user.email;
         authBtn.textContent = "Log Out";
-        authBtn.onclick = async () => { await supabaseClient.auth.signOut(); updateAuthUI(); };
+        authBtn.onclick = async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; };
+
+        // Look up the user's role and hide tiles they shouldn't see
+        const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+        const role = role_row?.role;
+        if (role === "viewer") {
+          // Viewers only see Reports — redirect them straight there
+          window.location.href = "reports.html";
+          return;
+        }
       } else {
-        userEl.textContent = "";
-        authBtn.textContent = "Log In";
-        authBtn.onclick = () => window.location.href = "login.html";
+        window.location.href = "login.html";
       }
     }
     supabaseClient.auth.onAuthStateChange(() => updateAuthUI());

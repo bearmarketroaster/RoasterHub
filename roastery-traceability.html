@@ -79,10 +79,14 @@
 
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
-supabaseClient.auth.getSession().then(({ data: { session } }) => {
+supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
   const is_shop_scan = window.location.search.includes("scan=");
-  if (!session && !is_shop_scan) window.location.href = "login.html";
-  else init();
+  // Shop scans are public — no login required
+  if (is_shop_scan) { init(); return; }
+  if (!session) { window.location.href = "login.html"; return; }
+  const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+  if (role_row?.role !== "admin") { window.location.href = "reports.html"; return; }
+  init();
 });
 
 const TABS = ["Containers","Orders","Deliveries"];

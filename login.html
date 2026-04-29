@@ -1,4 +1,7 @@
-<meta charset="UTF-8">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Log In — Bear Roastery</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -21,57 +24,110 @@
     .msg-err  { background: #fff0ee; border: 1px solid #e05c2a; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #e05c2a; margin-top: 14px; }
     .msg-info { background: #fff8ee; border: 1px solid #c8a96e; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #5a3e1b; margin-top: 14px; }
     .login-footer { margin-top: 24px; text-align: center; font-size: 12px; color: #c8a96e; }
+    h2 { font-size: 18px; margin-bottom: 6px; }
+    .hint { font-size: 13px; color: #888; margin-bottom: 18px; line-height: 1.5; }
   </style>
-
-
-  <div class="login-card">
+</head>
+<body>
+  <div class="login-card" id="card">
     <div class="brand">
       <div class="brand-logo">🐻</div>
       <div class="brand-name">Bear Roastery</div>
       <div class="brand-sub">Operations Platform</div>
     </div>
-    <div class="field">
-      <label for="email">Email</label>
-      <input type="email" id="email" placeholder="you@bearroastery.ie" autocomplete="email">
-    </div>
-    <div class="field">
-      <label for="password">Password</label>
-      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
-    </div>
-    <button class="btn-login" id="login-btn">Log In</button>
+    <div id="form-area"></div>
     <div id="msg" style="display:none"></div>
   </div>
   <div class="login-footer">Bear Roastery · Internal Use Only</div>
   <script>
     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
-      if (session) window.location.href = "index.html";
-    });
-    const emailEl = document.getElementById("email");
-    const passwordEl = document.getElementById("password");
-    const loginBtn  = document.getElementById("login-btn");
-    const msgEl     = document.getElementById("msg");
+    const formArea = document.getElementById("form-area");
+    const msgEl    = document.getElementById("msg");
+
     function showMsg(text, type="err") {
       msgEl.className = type==="err" ? "msg-err" : "msg-info";
       msgEl.textContent = text;
       msgEl.style.display = "block";
     }
-    async function doLogin() {
-      const email = emailEl.value.trim(), password = passwordEl.value;
-      if (!email || !password) { showMsg("Please enter your email and password."); return; }
-      loginBtn.disabled = true; loginBtn.textContent = "Logging in…"; msgEl.style.display = "none";
-      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-      if (error) {
-        const friendly = error.message.includes("Invalid login") ? "Incorrect email or password. Please try again."
-          : error.message.includes("Email not confirmed") ? "Please confirm your email address before logging in."
-          : error.message;
-        showMsg(friendly); loginBtn.disabled = false; loginBtn.textContent = "Log In";
-      } else {
-        showMsg("Logged in! Redirecting…", "info");
+    function hideMsg() { msgEl.style.display = "none"; }
+
+    // Determine which mode we're in — login or set_password
+    // The set_password flow happens after a user clicks the email confirmation link.
+    // Supabase delivers a session via the URL hash, which the SDK auto-detects.
+    const url_params  = new URLSearchParams(window.location.search);
+    const hash_params = new URLSearchParams(window.location.hash.slice(1));
+    const is_set_password_flow = url_params.get("mode") === "set_password" || hash_params.get("type") === "signup" || hash_params.get("type") === "invite" || hash_params.get("type") === "recovery";
+
+    async function bootstrap() {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (is_set_password_flow && session) {
+        renderSetPassword();
+      } else if (session) {
         window.location.href = "index.html";
+      } else {
+        renderLogin();
       }
     }
-    loginBtn.addEventListener("click", doLogin);
-    passwordEl.addEventListener("keydown", e => { if (e.key==="Enter") doLogin(); });
-    emailEl.addEventListener("keydown",    e => { if (e.key==="Enter") passwordEl.focus(); });
+
+    function renderLogin() {
+      formArea.innerHTML = `
+        <div class="field"><label for="email">Email</label><input type="email" id="email" placeholder="you@bearmarket.ie" autocomplete="email"></div>
+        <div class="field"><label for="password">Password</label><input type="password" id="password" placeholder="••••••••" autocomplete="current-password"></div>
+        <button class="btn-login" id="login-btn">Log In</button>`;
+      const emailEl    = document.getElementById("email");
+      const passwordEl = document.getElementById("password");
+      const loginBtn   = document.getElementById("login-btn");
+      async function doLogin() {
+        const email = emailEl.value.trim().toLowerCase(), password = passwordEl.value;
+        if (!email || !password) { showMsg("Please enter your email and password."); return; }
+        loginBtn.disabled = true; loginBtn.textContent = "Logging in…"; hideMsg();
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) {
+          const friendly = error.message.includes("Invalid login") ? "Incorrect email or password. Please try again."
+            : error.message.includes("Email not confirmed") ? "Please confirm your email address before logging in."
+            : error.message;
+          showMsg(friendly); loginBtn.disabled = false; loginBtn.textContent = "Log In";
+        } else {
+          showMsg("Logged in! Redirecting…", "info");
+          window.location.href = "index.html";
+        }
+      }
+      loginBtn.addEventListener("click", doLogin);
+      passwordEl.addEventListener("keydown", e => { if (e.key==="Enter") doLogin(); });
+      emailEl.addEventListener("keydown",    e => { if (e.key==="Enter") passwordEl.focus(); });
+    }
+
+    function renderSetPassword() {
+      formArea.innerHTML = `
+        <h2>Welcome! Set your password</h2>
+        <p class="hint">Choose a password to finish setting up your RoasterHub account.</p>
+        <div class="field"><label for="new-password">New password</label><input type="password" id="new-password" placeholder="At least 8 characters" autocomplete="new-password"></div>
+        <div class="field"><label for="confirm-password">Confirm password</label><input type="password" id="confirm-password" placeholder="Repeat password" autocomplete="new-password"></div>
+        <button class="btn-login" id="set-password-btn">Set Password &amp; Continue</button>`;
+      const newPwEl  = document.getElementById("new-password");
+      const confPwEl = document.getElementById("confirm-password");
+      const btn      = document.getElementById("set-password-btn");
+      async function doSet() {
+        const pw1 = newPwEl.value, pw2 = confPwEl.value;
+        if (pw1.length < 8) { showMsg("Password must be at least 8 characters."); return; }
+        if (pw1 !== pw2)    { showMsg("Passwords don't match.");  return; }
+        btn.disabled = true; btn.textContent = "Setting password…"; hideMsg();
+        const { error } = await supabaseClient.auth.updateUser({ password: pw1 });
+        if (error) {
+          showMsg(error.message); btn.disabled = false; btn.textContent = "Set Password & Continue";
+        } else {
+          showMsg("Password set! Redirecting…", "info");
+          // Strip hash params so a refresh doesn't bounce back here
+          history.replaceState(null, "", window.location.pathname);
+          setTimeout(() => { window.location.href = "index.html"; }, 800);
+        }
+      }
+      btn.addEventListener("click", doSet);
+      confPwEl.addEventListener("keydown", e => { if (e.key==="Enter") doSet(); });
+      newPwEl.addEventListener("keydown",  e => { if (e.key==="Enter") confPwEl.focus(); });
+    }
+
+    bootstrap();
   </script>
+</body>
+</html>
