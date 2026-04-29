@@ -85,7 +85,7 @@ supabaseClient.auth.getSession().then(({ data: { session } }) => {
   else init();
 });
 
-const TABS = ["Containers","Orders","Deliveries","Recall","Reports"];
+const TABS = ["Containers","Orders","Deliveries","Reports"];
 const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },{ val:"500g", label:"500g" },{ val:"1kg", label:"1kg" },{ val:"Bar 5kg", label:"Bar" }];
 
 const state = {
@@ -97,7 +97,6 @@ const state = {
     expanded_qr: null,
     show_upload: false, upload_err: "", parsing: false,
     expanded_orders: {}, expanded_deliveries: {},
-    recall_query: "", recall_results: null,
     report_from: today(), report_to: today(), report_view: "shops",
     review_items_open: false,
   },
@@ -340,7 +339,7 @@ function build_app() {
   const badges={Orders:state.orders.filter(o=>o.status==="pending").length,Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
   return header+`
     <div class="tabs">${TABS.map((t,i)=>`<button class="tab-btn${state.tab===i?" active":""}" data-tab="${i}">${esc(t)}${badges[t]>0?`<span class="tag" style="background:#e05c2a;color:#fff;margin-left:6px">${badges[t]}</span>`:""}</button>`).join("")}</div>
-    <div class="content">${[build_containers_tab,build_orders_tab,build_deliveries_tab,build_recall_tab,build_reports_tab][state.tab]()}</div>`;
+    <div class="content">${[build_containers_tab,build_orders_tab,build_deliveries_tab,build_reports_tab][state.tab]()}</div>`;
 }
 
 function build_scan_overlay() {
@@ -581,12 +580,6 @@ function info_row(label, value) {
   return `<div><span style="color:#888;font-size:12px">${esc(label)}</span><br/><span style="font-weight:500">${esc(value??"—")}</span></div>`;
 }
 
-function build_recall_tab() {
-  const {recall_query,recall_results}=state.ui;
-  const results_html=recall_results?(recall_results.matched.length===0?`<p class="hint">No results found for "${esc(recall_results.query)}".</p>`:`<h3>⚠️ ${recall_results.matched.length} dispatch${recall_results.matched.length>1?"es":""} found</h3>${recall_results.matched.map(({d,c,fill})=>build_dispatch_card(d,c,fill,!!d.confirmed_at,false)).join("")}`):"";
-  return `<h2>Recall Search</h2><p class="hint" style="margin-bottom:20px">Search by container ID, roast ID, coffee name, or shop name.</p><div class="flex gap-10 mb-20"><input id="recall-input" value="${esc(recall_query)}" placeholder="e.g. XL01042601  or  44  or  Ethiopia  or  Brew Bar…" style="flex:1;font-size:15px" /><button class="btn btn-dark" id="do-recall">Search</button></div>${results_html}`;
-}
-
 function build_reports_tab() {
   const {report_from,report_to,report_view}=state.ui;
   const first_date=state.dispatches.length?state.dispatches.reduce((min,d)=>d.date<min?d.date:min,state.dispatches[0].date):today();
@@ -709,15 +702,6 @@ function attach_listeners() {
   app.querySelectorAll("[data-remove-edit-item]").forEach(btn => btn.addEventListener("click", () => { state.editing_order.items.splice(Number(btn.dataset.removeEditItem),1); render(); }));
   app.querySelector("#cancel-edit-order")?.addEventListener("click", () => { state.editing_order=null; render(); });
   app.querySelectorAll("[data-toggle-delivery]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_deliveries[btn.dataset.toggleDelivery]=!state.ui.expanded_deliveries[btn.dataset.toggleDelivery]; render(); }));
-  const do_recall=app.querySelector("#do-recall"), recall_input=app.querySelector("#recall-input");
-  if (do_recall&&recall_input) {
-    const do_search=() => {
-      const q=recall_input.value.trim().toLowerCase(); state.ui.recall_query=recall_input.value; if(!q) return;
-      const matched=state.dispatches.reduce((acc,d)=>{ const c=state.containers.find(x=>x.id===d.container_id); if(!c) return acc; const fill=c.fills.find(f=>f.fill_number===d.fill_number); if(!fill) return acc; if(c.id.toLowerCase().includes(q)||fill.coffee.toLowerCase().includes(q)||(fill.roast_ids||[]).some(r=>r.toLowerCase().includes(q))||d.shop?.toLowerCase().includes(q)) acc.push({d,c,fill}); return acc; },[]);
-      state.ui.recall_results={query:recall_input.value,matched}; render();
-    };
-    do_recall.addEventListener("click",do_search); recall_input.addEventListener("keydown",e=>{ if(e.key==="Enter") do_search(); });
-  }
   app.querySelector("#report-from")?.addEventListener("change", e => { state.ui.report_from=e.target.value; render(); });
   app.querySelector("#report-to")?.addEventListener("change", e => { state.ui.report_to=e.target.value; render(); });
   app.querySelectorAll("[data-report-range]").forEach(btn => btn.addEventListener("click", () => { const range=btn.dataset.reportRange,d=new Date(); if(range==="all"){state.ui.report_from=btn.dataset.first||today();}else{d.setDate(d.getDate()-Number(range));state.ui.report_from=d.toISOString().split("T")[0];} state.ui.report_to=today(); render(); }));
