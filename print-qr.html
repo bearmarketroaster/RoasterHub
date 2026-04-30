@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Print QR Codes — Bear Roastery</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    .toolbar { background: #1a1008; color: #e8d5b0; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; position: sticky; top: 0; z-index: 10; }
+    .toolbar-left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .toolbar-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; }
+    .toolbar-back:hover { color: #e8d5b0; }
+    .toolbar-title { font-weight: 700; font-size: 16px; }
+    .toolbar-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .toolbar label { font-size: 12px; color: #c8a96e; margin-right: 4px; }
+    .toolbar select, .toolbar input { background: #2d1e0f; color: #e8d5b0; border: 1px solid #5a3e1b; border-radius: 4px; padding: 4px 8px; font-size: 13px; font-family: inherit; }
+    .toolbar select option { background: #1a1008; color: #e8d5b0; }
+    .btn-print { background: #c8a96e; color: #1a1008; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .btn-print:hover { background: #d4b88a; }
+    .picker { background: #fff; padding: 16px 24px; border-bottom: 1px solid #e0d5c5; }
+    .picker h3 { font-size: 14px; margin-bottom: 10px; }
+    .pick-item { display: inline-flex; align-items: center; gap: 6px; background: #f5f0eb; border-radius: 4px; padding: 4px 10px; margin: 2px; cursor: pointer; font-size: 12px; user-select: none; border: 1px solid #e0d5c5; }
+    .pick-item.selected { background: #1a1008; color: #e8d5b0; border-color: #1a1008; }
+    .sheet { padding: 20px; max-width: 1100px; margin: 0 auto; }
+    .qr-grid { display: grid; gap: var(--gap, 10px); grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 140px), max-content)); justify-content: center; }
+    .qr-tile { background: #fff; border: 1px dashed #ddd; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; }
+    .qr-tile .qr-canvas { width: var(--qr-size, 140px); height: var(--qr-size, 140px); margin: 0 auto; }
+    .qr-tile .qr-canvas img, .qr-tile .qr-canvas canvas { width: 100% !important; height: 100% !important; }
+    .qr-tile .qr-label { font-family: monospace; font-size: var(--qr-label-size, 11px); font-weight: 600; color: #1a1008; margin-top: 6px; word-break: break-all; }
+    .empty { text-align: center; padding: 60px 20px; color: #888; }
+    @media print {
+      .toolbar, .picker { display: none !important; }
+      body { background: #fff; }
+      .sheet { padding: 0; max-width: none; }
+      .qr-tile { border: none; padding: 4px; }
+      @page { margin: 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <button class="toolbar-back" id="go-back">← Back</button>
+      <div class="toolbar-title">🖨️ QR Code Printer</div>
+    </div>
+    <div class="toolbar-controls">
+      <label>Type</label>
+      <select id="type-select">
+        <option value="bucket">Buckets</option>
+        <option value="fp">Bag Labels (FP codes)</option>
+      </select>
+      <label>Size</label>
+      <select id="size-select">
+        <option value="60">XS · 20mm (label)</option>
+        <option value="100">S · 30mm</option>
+        <option value="140" selected>M · 40mm</option>
+        <option value="200">L · 60mm</option>
+        <option value="280">XL · 80mm</option>
+      </select>
+      <label>Show ID</label>
+      <select id="label-select">
+        <option value="show" selected>Show</option>
+        <option value="hide">Hide</option>
+      </select>
+      <button class="btn-print" id="print-btn">🖨️ Print</button>
+    </div>
+  </div>
+
+  <div class="picker" id="picker"></div>
+  <div class="sheet"><div id="grid" class="qr-grid"></div></div>
+
+  <script>
+    const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { window.location.href = "login.html"; return; }
+      init();
+    });
+
+    const url_params = new URLSearchParams(window.location.search);
+    const init_type  = url_params.get("type") || "bucket";
+    const init_ids   = url_params.get("ids") ? url_params.get("ids").split(",") : null;
+
+    const state = {
+      type: init_type,
+      size: 140,
+      show_label: true,
+      buckets: [],
+      fp_codes: [],
+      selected_ids: new Set(init_ids || []),
+    };
+
+    async function init() {
+      document.getElementById("type-select").value = state.type;
+      document.getElementById("go-back").addEventListener("click", () => window.history.back());
+      document.getElementById("print-btn").addEventListener("click", () => window.print());
+      document.getElementById("type-select").addEventListener("change", e => {
+        state.type = e.target.value;
+        state.selected_ids = new Set();
+        render_picker(); render_grid();
+      });
+      document.getElementById("size-select").addEventListener("change", e => {
+        state.size = Number(e.target.value);
+        render_grid();
+      });
+      document.getElementById("label-select").addEventListener("change", e => {
+        state.show_label = e.target.value === "show";
+        render_grid();
+      });
+
+      const [{ data: buckets }, { data: fp_codes }] = await Promise.all([
+        supabaseClient.from("buckets").select("id, retired_at").order("created_at", { ascending: false }),
+        supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code"),
+      ]);
+      state.buckets = (buckets||[]).filter(b => !b.retired_at);
+      state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}` }));
+
+      // If specific IDs were passed in the URL and they all match a bucket, auto-select them
+      // Otherwise default to all of the chosen type
+      if (init_ids && init_ids.length) {
+        // already in selected_ids set
+      } else {
+        const all = state.type === "bucket" ? state.buckets.map(b => b.id) : state.fp_codes.map(f => f.id);
+        state.selected_ids = new Set(all);
+      }
+
+      render_picker();
+      render_grid();
+    }
+
+    function render_picker() {
+      const el = document.getElementById("picker");
+      const items = state.type === "bucket"
+        ? state.buckets.map(b => ({ id: b.id, label: b.id }))
+        : state.fp_codes;
+      if (items.length === 0) {
+        el.innerHTML = `<p style="color:#888;font-size:13px;font-style:italic">No ${state.type === "bucket" ? "buckets" : "FP codes"} available.</p>`;
+        return;
+      }
+      const all_selected = items.every(i => state.selected_ids.has(i.id));
+      el.innerHTML = `
+        <h3>Pick ${state.type === "bucket" ? "buckets" : "FP codes"} to print</h3>
+        <div style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="pick-item" id="select-all" style="font-weight:600">${all_selected ? "Deselect all" : "Select all"}</button>
+          <span style="font-size:12px;color:#888;align-self:center">${state.selected_ids.size} selected</span>
+        </div>
+        <div>${items.map(i => `<span class="pick-item ${state.selected_ids.has(i.id)?"selected":""}" data-id="${i.id}">${i.label}</span>`).join("")}</div>`;
+
+      el.querySelector("#select-all").addEventListener("click", () => {
+        if (all_selected) state.selected_ids = new Set();
+        else state.selected_ids = new Set(items.map(i => i.id));
+        render_picker(); render_grid();
+      });
+      el.querySelectorAll(".pick-item[data-id]").forEach(btn => btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        if (state.selected_ids.has(id)) state.selected_ids.delete(id);
+        else state.selected_ids.add(id);
+        render_picker(); render_grid();
+      }));
+    }
+
+    function render_grid() {
+      const grid = document.getElementById("grid");
+      const items = state.type === "bucket"
+        ? state.buckets.filter(b => state.selected_ids.has(b.id)).map(b => ({ id: b.id, value: b.id, label: b.id }))
+        : state.fp_codes.filter(f => state.selected_ids.has(f.id)).map(f => ({ id: f.id, value: f.id, label: `${f.id}\n${f.label}` }));
+
+      grid.style.setProperty("--qr-size", state.size + "px");
+      grid.style.setProperty("--qr-label-size", Math.max(9, Math.round(state.size / 14)) + "px");
+      grid.style.setProperty("--gap", Math.max(6, Math.round(state.size / 14)) + "px");
+
+      if (items.length === 0) {
+        grid.innerHTML = `<div class="empty">Nothing selected. Pick items above.</div>`;
+        return;
+      }
+
+      grid.innerHTML = items.map(it => `
+        <div class="qr-tile">
+          <div class="qr-canvas" data-value="${it.value}"></div>
+          ${state.show_label ? `<div class="qr-label">${it.label.replace(/\\n/g,"<br>")}</div>` : ""}
+        </div>`).join("");
+
+      grid.querySelectorAll(".qr-canvas").forEach(el => {
+        el.innerHTML = "";
+        new window.QRCode(el, {
+          text: el.dataset.value,
+          width: state.size,
+          height: state.size,
+          colorDark: "#1a1008",
+          colorLight: "#ffffff",
+          correctLevel: window.QRCode.CorrectLevel.H,  // High error correction so they survive smudging
+        });
+      });
+    }
+  </script>
+</body>
+</html>

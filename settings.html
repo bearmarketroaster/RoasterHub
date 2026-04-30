@@ -101,6 +101,7 @@ const state = {
   base_url: "",
   coffees: [],          // [{ id, name, fp_codes: [{id, fp_code, bag_size}] }]
   shop_mappings: [],    // [{ id, parsed_name, master_name }]
+  buckets: [],          // [{ id, created_at, retired_at, notes }]
   user_roles: [],
   pending_invites: [],
   current_user: null,
@@ -122,6 +123,10 @@ const state = {
     new_user_role: "viewer",
     user_err: "",
     user_msg: "",
+    bucket_count: 10,
+    bucket_filter: "active",
+    bucket_err: "",
+    bucket_msg: "",
     url_status: null,
     open_supplier: null,
     supplier_err: "",
@@ -259,11 +264,67 @@ async function cancel_invite(email) {
   render();
 }
 
+async function load_buckets() {
+  // Load buckets + their dispatch counts via dispatch_buckets join
+  const { data: buckets } = await supabaseClient.from("buckets").select("*").order("created_at", { ascending: false });
+  state.buckets = buckets || [];
+  // Get dispatch info per bucket
+  const { data: db } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at");
+  const { data: dispatches } = await supabaseClient.from("dispatches").select("id, shop, date");
+  const dispatch_map = {};
+  (dispatches||[]).forEach(d => dispatch_map[d.id] = d);
+  const bucket_dispatches = {};
+  (db||[]).forEach(b => {
+    if (!bucket_dispatches[b.bucket_id]) bucket_dispatches[b.bucket_id] = [];
+    const d = dispatch_map[b.dispatch_id];
+    if (d) bucket_dispatches[b.bucket_id].push({ shop: d.shop, date: d.date });
+  });
+  state.buckets.forEach(b => {
+    const ds = bucket_dispatches[b.id] || [];
+    b.dispatch_count = ds.length;
+    b.last_shop = ds[0]?.shop || null;
+    b.last_date = ds[0]?.date || null;
+  });
+}
+
+async function generate_buckets(count) {
+  const n = Number(count);
+  if (!n || n < 1 || n > 100) {
+    state.ui.bucket_err = "Please enter a number between 1 and 100.";
+    render(); return;
+  }
+  const new_buckets = [];
+  for (let i = 0; i < n; i++) {
+    const r = crypto.randomUUID().split("-")[0].toUpperCase();
+    new_buckets.push({ id: `BKT-${r}` });
+  }
+  const { error } = await supabaseClient.from("buckets").insert(new_buckets);
+  if (error) { state.ui.bucket_err = error.message; render(); return; }
+  state.ui.bucket_err = "";
+  state.ui.bucket_msg = `Generated ${n} new bucket${n!==1?"s":""}. Open the QR print page to print labels.`;
+  await load_buckets();
+  render();
+  setTimeout(() => { state.ui.bucket_msg = ""; render(); }, 5000);
+}
+
+async function retire_bucket(id) {
+  if (!confirm(`Retire bucket ${id}? It can be restored later.`)) return;
+  await supabaseClient.from("buckets").update({ retired_at: new Date().toISOString() }).eq("id", id);
+  await load_buckets();
+  render();
+}
+
+async function restore_bucket(id) {
+  await supabaseClient.from("buckets").update({ retired_at: null }).eq("id", id);
+  await load_buckets();
+  render();
+}
+
 async function init() {
   await load_current_user();
   // Viewers shouldn't be in Settings at all — redirect to Reports
   if (state.current_user?.role !== "admin") { window.location.href = "reports.html"; return; }
-  await Promise.all([load_base_url(), load_coffees(), load_shop_mappings(), load_supplier_templates(), load_users()]);
+  await Promise.all([load_base_url(), load_coffees(), load_shop_mappings(), load_supplier_templates(), load_users(), load_buckets()]);
   state.loading = false;
   render();
 }
@@ -406,6 +467,88 @@ function generate_template_from_text(raw) {
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
+// ── BUCKETS SECTION ──────────────────────────────────────────────────────────
+function build_buckets_section() {
+  const open = state.open_section === "buckets";
+  const { bucket_count, bucket_filter, bucket_err, bucket_msg } = state.ui;
+  const buckets = state.buckets;
+  const filtered = bucket_filter === "active"  ? buckets.filter(b => !b.retired_at)
+                 : bucket_filter === "retired" ? buckets.filter(b =>  b.retired_at)
+                 : buckets;
+
+  const active_count  = buckets.filter(b => !b.retired_at).length;
+  const retired_count = buckets.filter(b =>  b.retired_at).length;
+
+  const print_url = filtered.length
+    ? `print-qr.html?ids=${filtered.map(b => encodeURIComponent(b.id)).join(",")}`
+    : "print-qr.html";
+
+  const buckets_html = filtered.map(b => {
+    const retired = !!b.retired_at;
+    return `
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4;${retired?"opacity:0.5":""}">
+        <span class="mono" style="background:#f0ebe4;color:#5a3e1b;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(b.id)}</span>
+        <div style="font-size:12px;color:#888">
+          ${b.dispatch_count > 0 ? `${b.dispatch_count} dispatch${b.dispatch_count!==1?"es":""} · Last: ${esc(b.last_shop||"")} ${b.last_date||""}` : "Never used"}
+          ${retired?` · <span style="color:#e05c2a">retired</span>`:""}
+        </div>
+        ${retired
+          ? `<button data-restore-bucket="${esc(b.id)}" class="btn btn-ghost btn-sm" style="font-size:11px">↻ Restore</button>`
+          : `<button data-retire-bucket="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:14px;line-height:1;padding:0 6px">✕</button>`}
+        <a href="print-qr.html?ids=${encodeURIComponent(b.id)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">🖨️</a>
+      </div>`;
+  }).join("");
+
+  const body = open ? `
+    <div class="section-body">
+      <p class="hint mb-12">Manage 5kg bucket QR codes. Each bucket has a unique ID and can be tracked through dispatches.</p>
+
+      <div class="card-white" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;background:#f5f0eb;padding:10px 12px;border-bottom:1px solid #e0d5c5">
+          <div class="flex gap-6">
+            <button class="btn ${bucket_filter==="active"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="active" style="${bucket_filter==="active"?"color:#e8d5b0":""}">Active (${active_count})</button>
+            <button class="btn ${bucket_filter==="retired"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="retired" style="${bucket_filter==="retired"?"color:#e8d5b0":""}">Retired (${retired_count})</button>
+            <button class="btn ${bucket_filter==="all"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="all" style="${bucket_filter==="all"?"color:#e8d5b0":""}">All</button>
+          </div>
+          ${filtered.length > 0 ? `<a href="${print_url}" target="_blank" class="btn btn-amber btn-sm" style="margin-left:auto;text-decoration:none">🖨️ Print All Visible</a>` : ""}
+        </div>
+        ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#aaa;font-style:italic">No buckets in this view.</div>' : buckets_html}
+      </div>
+
+      <div class="section-label">Generate New Buckets</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:flex-end">
+          <div style="width:120px">
+            <label class="lbl">How many?</label>
+            <input id="bucket-count" type="number" value="${bucket_count}" min="1" max="100" style="font-size:13px" />
+          </div>
+          <div class="hint" style="font-size:12px;padding-bottom:8px">New buckets are created with random IDs (e.g. BKT-A3F2C918). Print and stick the QR labels onto your physical buckets.</div>
+          <button class="btn btn-dark btn-sm" id="generate-buckets-btn">Generate</button>
+        </div>
+        ${bucket_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:8px">${esc(bucket_err)}</p>` : ""}
+        ${bucket_msg ? `<p style="color:#4a9e6b;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(bucket_msg)}</p>` : ""}
+      </div>
+
+      <div class="section-label" style="margin-top:16px">Print Bag Label QRs</div>
+      <div class="card">
+        <p class="hint mb-12">Need to print QR codes to stick on bag labels? Open the QR print page and select FP codes from your master list.</p>
+        <a href="print-qr.html?type=fp" target="_blank" class="btn btn-dark btn-sm" style="text-decoration:none;display:inline-block">🖨️ Open Bag Label QR Printer</a>
+      </div>
+    </div>` : "";
+
+  return `
+    <div class="section">
+      <div class="section-header" data-toggle-section="buckets">
+        <div>
+          <div class="section-title"><span class="icon">🪣</span> Buckets</div>
+          <div class="section-desc">${active_count} active${retired_count?` · ${retired_count} retired`:""}</div>
+        </div>
+        <span class="section-arrow">${open ? "▾" : "▸"}</span>
+      </div>
+      ${body}
+    </div>`;
+}
+
 // ── USERS SECTION ────────────────────────────────────────────────────────────
 function build_users_section() {
   const open = state.open_section === "users";
@@ -515,6 +658,7 @@ function build_app() {
       ${build_traceability_section()}
       ${build_shops_section()}
       ${build_suppliers_section()}
+      ${build_buckets_section()}
       ${build_users_section()}
     </div>`;
 }
@@ -897,6 +1041,23 @@ function attach_listeners() {
   app.querySelectorAll("[data-delete-shop]").forEach(btn => btn.addEventListener("click", () => {
     if (!confirm("Remove this shop mapping?")) return;
     delete_shop_mapping(Number(btn.dataset.deleteShop));
+  }));
+
+  // ── Buckets
+  app.querySelector("#bucket-count")?.addEventListener("input", e => { state.ui.bucket_count = e.target.value; });
+  app.querySelector("#generate-buckets-btn")?.addEventListener("click", () => {
+    const n = document.getElementById("bucket-count")?.value;
+    generate_buckets(n);
+  });
+  app.querySelectorAll("[data-bucket-filter]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.bucket_filter = btn.dataset.bucketFilter;
+    render();
+  }));
+  app.querySelectorAll("[data-retire-bucket]").forEach(btn => btn.addEventListener("click", () => {
+    retire_bucket(btn.dataset.retireBucket);
+  }));
+  app.querySelectorAll("[data-restore-bucket]").forEach(btn => btn.addEventListener("click", () => {
+    restore_bucket(btn.dataset.restoreBucket);
   }));
 
   // ── Users
