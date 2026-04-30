@@ -199,6 +199,15 @@ async function save_adjustment() {
   const note = (state.ui.adj.note || "").trim();
   if (!coffee) { state.ui.adj_err="Please select a coffee."; state.saving=false; render(); return; }
   if (!raw || isNaN(change_kg) || change_kg === 0) { state.ui.adj_err="Please enter a non-zero kg value (use - for deductions)."; state.saving=false; render(); return; }
+  // Validate deductions don't exceed available stock
+  if (change_kg < 0) {
+    const existing_check = state.stock_items.find(s => s.coffee === coffee);
+    const available = existing_check?.current_kg || 0;
+    if (Math.abs(change_kg) > available) {
+      state.ui.adj_err = `Cannot deduct ${Math.abs(change_kg).toFixed(1)}kg of ${coffee} — only ${available.toFixed(1)}kg available.`;
+      state.saving=false; render(); return;
+    }
+  }
   const { error } = await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: today(), coffee, change_kg, reason, note: note||null, auto: false });
   if (error) { state.ui.adj_err="Failed to save adjustment."; state.saving=false; render(); return; }
   const existing = state.stock_items.find(s => s.coffee===coffee);
