@@ -578,7 +578,7 @@ function build_adjustments() {
         <span class="hint">${reason_labels[a.reason]||a.reason}</span>
         ${a.note?`<span class="hint" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.note)}</span>`:""}
         <span class="hint" style="white-space:nowrap">${a.date}</span>
-        ${a.auto?`<span class="tag" style="background:#f5f0eb;color:#aaa;font-size:10px">auto</span>`:""}
+        ${a.auto?`<span class="tag" style="background:#f5f0eb;color:#aaa;font-size:10px">auto</span>`:`<span class="tag" style="background:#fff8ee;color:#c8a96e;font-size:10px;font-weight:600">MANUAL</span>`}
       </div>`;
   }).join("");
   return `
