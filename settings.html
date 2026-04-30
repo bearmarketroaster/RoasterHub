@@ -193,7 +193,7 @@ async function load_current_user() {
 
 async function invite_user(email, role) {
   email = email.trim().toLowerCase();
-  if (!email || !["admin","viewer"].includes(role)) {
+  if (!email || !["admin","viewer","packer"].includes(role)) {
     state.ui.user_err = "Please enter a valid email and select a role.";
     render(); return;
   }
@@ -421,8 +421,9 @@ function build_users_section() {
           <div style="font-size:13px;font-weight:600">${esc(u.email)}${is_self?` <span class="hint" style="font-size:11px;font-weight:400">(you)</span>`:""}</div>
           <div style="font-size:11px;color:#aaa">Joined ${u.created_at?new Date(u.created_at).toLocaleDateString():"—"}</div>
         </div>
-        <select class="user-role-select" data-uid="${u.user_id}" ${is_self?"disabled":""} style="font-size:12px;width:100px">
+        <select class="user-role-select" data-uid="${u.user_id}" ${is_self?"disabled":""} style="font-size:12px;width:110px">
           <option value="admin"  ${u.role==="admin" ?"selected":""}>Admin</option>
+          <option value="packer" ${u.role==="packer"?"selected":""}>Packer</option>
           <option value="viewer" ${u.role==="viewer"?"selected":""}>Viewer</option>
         </select>
         ${is_self?'<span style="width:24px"></span>':`<button data-remove-user="${u.user_id}__${esc(u.email)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>`}
@@ -445,7 +446,7 @@ function build_users_section() {
 
   const body = open ? `
     <div class="section-body">
-      <p class="hint mb-12">Manage who can access RoasterHub. Admins can do everything; viewers can only see Reports.</p>
+      <p class="hint mb-12">Manage who can access RoasterHub. Admins can do everything; packers can pack and dispatch orders; viewers can only see Reports.</p>
 
       <div class="section-label">Active Users</div>
       <div class="card-white" style="margin-bottom:0">
@@ -468,8 +469,9 @@ function build_users_section() {
           </div>
           <div>
             <label class="lbl">Role *</label>
-            <select id="new-user-role" style="font-size:13px;width:120px">
+            <select id="new-user-role" style="font-size:13px;width:130px">
               <option value="viewer" ${new_user_role==="viewer"?"selected":""}>Viewer</option>
+              <option value="packer" ${new_user_role==="packer"?"selected":""}>Packer</option>
               <option value="admin"  ${new_user_role==="admin" ?"selected":""}>Admin</option>
             </select>
           </div>

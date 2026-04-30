@@ -99,9 +99,17 @@
       const { data: { session } } = await supabaseClient.auth.getSession();
       if (!session) { window.location.href = "login.html"; return; }
       userEl.textContent = session.user.email;
-      // Look up the user's role and redirect viewers to Reports
+      // Look up the user's role and adjust accordingly
       const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
-      if (role_row?.role === "viewer") { window.location.href = "reports.html"; return; }
+      const role = role_row?.role;
+      if (role === "viewer") { window.location.href = "reports.html"; return; }
+      if (role === "packer") {
+        // Packers only see the Roastery Traceability tile — hide everything else
+        document.querySelectorAll(".module-card").forEach(card => {
+          const href = card.getAttribute("href") || "";
+          if (!href.includes("roastery-traceability")) card.style.display = "none";
+        });
+      }
     }
     updateAuthUI();
   </script>

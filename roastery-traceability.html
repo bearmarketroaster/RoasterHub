@@ -85,7 +85,9 @@ supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
   if (is_shop_scan) { init(); return; }
   if (!session) { window.location.href = "login.html"; return; }
   const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
-  if (role_row?.role !== "admin") { window.location.href = "reports.html"; return; }
+  const role = role_row?.role;
+  if (role !== "admin" && role !== "packer") { window.location.href = "reports.html"; return; }
+  state.user_role = role;  // Stash for UI hiding (e.g. PO upload button for packers)
   init();
 });
 
@@ -95,6 +97,7 @@ const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },
 const state = {
   tab: 0, containers: [], roast_sessions: [], orders: [], dispatches: [],
   coffees: [], fp_codes: [], shop_mappings: [], base_url: "",
+  user_role: null,
   loading: true, saving: false, scan_id: null,
   editing_order: null, review_queue: [],
   ui: {
@@ -463,7 +466,7 @@ function build_orders_tab() {
   const confirmed=state.orders.filter(o=>o.status==="confirmed");
   const packed=state.orders.filter(o=>o.status==="packed");
   return `
-    <div class="flex-between mb-16"><h2 style="margin:0">Orders</h2><div class="flex gap-8"><button class="btn btn-grey" style="font-size:13px" id="show-manual-order">+ Manual</button><button class="btn btn-dark" id="toggle-upload">+ Upload PO</button></div></div>
+    <div class="flex-between mb-16"><h2 style="margin:0">Orders</h2>${state.user_role==="admin"?`<div class="flex gap-8"><button class="btn btn-grey" style="font-size:13px" id="show-manual-order">+ Manual</button><button class="btn btn-dark" id="toggle-upload">+ Upload PO</button></div>`:""}</div>
     ${upload_panel}
     ${state.orders.length===0&&!show_upload?`<div class="card empty"><div class="icon">📋</div>No orders yet. Upload a PO to get started.</div>`:""}
     ${pending.length>0?`<h3 style="color:#e05c2a;margin-top:0">⏳ Awaiting Review (${pending.length})</h3>${pending.map(o=>build_order_card(o)).join("")}`:""}
