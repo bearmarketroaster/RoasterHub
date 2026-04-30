@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Green Stock Movement — Bear Roastery</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    input, select, button { font-family: inherit; font-size: 14px; } button { cursor: pointer; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; color: #1a1008; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; box-shadow: none; }
+    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #e8d5b0; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #c8a96e; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
+    .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
+    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
+    .card.empty { text-align: center; padding: 48px 16px; color: #888; }
+    .card.empty .icon { font-size: 36px; margin-bottom: 8px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .flex { display: flex; }
+    .gap-6 { gap: 6px; } .gap-12 { gap: 12px; }
+    .mb-16 { margin-bottom: 16px; }
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
+    .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
+    .hint { color: #888; font-size: 13px; }
+    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
+    @media (max-width: 600px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .content { padding: 16px; } }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+supabaseClient.auth.getSession().then(({ data: { session } }) => {
+  if (!session) window.location.href = "login.html";
+  else init();
+});
+
+const today = () => new Date().toISOString().split("T")[0];
+const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+const state = {
+  stock_adjustments: [],
+  loading: true,
+  ui: { report_from: today(), report_to: today() },
+};
+
+async function init() {
+  await load_data();
+  if (state.stock_adjustments.length) {
+    const d = new Date(); d.setDate(d.getDate()-30);
+    state.ui.report_from = d.toISOString().split("T")[0];
+    state.ui.report_to = today();
+  }
+  state.loading = false;
+  render();
+}
+
+async function load_data() {
+  const { data: adjustments } = await supabaseClient.from("stock_adjustments").select("*").order("date", { ascending: false });
+  state.stock_adjustments = adjustments || [];
+}
+
+function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
+
+function build_app() {
+  const header = `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="go-reports">← Reports</button>
+        <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+        <div><div class="header-title">🌱 Green Stock Movement</div><div class="header-sub">Bear Roastery</div></div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>`;
+  if (state.loading) return header + `<div class="loading">Loading…</div>`;
+  return header + `<div class="content">${build_stock_report()}</div>`;
+}
+
+function build_stock_report() {
+  const { report_from, report_to } = state.ui;
+  if (state.stock_adjustments.length === 0) return `<div class="card empty"><div class="icon">🌱</div>No stock movements recorded yet.</div>`;
+  const first_date = state.stock_adjustments.reduce((min,a) => a.date<min ? a.date : min, state.stock_adjustments[0].date);
+
+  const filtered = state.stock_adjustments.filter(a => a.date >= report_from && a.date <= report_to);
+
+  const total_in  = filtered.filter(a => a.change_kg > 0).reduce((s,a) => s + a.change_kg, 0);
+  const total_out = filtered.filter(a => a.change_kg < 0).reduce((s,a) => s + Math.abs(a.change_kg), 0);
+  const net       = total_in - total_out;
+  const manual_count = filtered.filter(a => !a.auto).length;
+  const auto_count   = filtered.filter(a =>  a.auto).length;
+
+  const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", other:"📝 Other" };
+  const by_reason = {};
+  filtered.forEach(a => {
+    if (!by_reason[a.reason]) by_reason[a.reason] = { in:0, out:0, count:0 };
+    if (a.change_kg > 0) by_reason[a.reason].in  += a.change_kg;
+    else                 by_reason[a.reason].out += Math.abs(a.change_kg);
+    by_reason[a.reason].count++;
+  });
+  const reason_rows = Object.entries(by_reason).sort((a,b) => (b[1].in+b[1].out) - (a[1].in+a[1].out));
+
+  const by_coffee = {};
+  filtered.forEach(a => {
+    if (!by_coffee[a.coffee]) by_coffee[a.coffee] = { in:0, out:0, count:0 };
+    if (a.change_kg > 0) by_coffee[a.coffee].in  += a.change_kg;
+    else                 by_coffee[a.coffee].out += Math.abs(a.change_kg);
+    by_coffee[a.coffee].count++;
+  });
+  const coffee_rows = Object.entries(by_coffee).sort((a,b) => (b[1].in+b[1].out) - (a[1].in+a[1].out));
+
+  const recent = filtered.slice(0, 50);
+  const recent_html = recent.map(a => `
+    <div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #f0ebe4;font-size:13px">
+      <span class="tag" style="background:${a.change_kg>0?"#edf7f0":"#fff0ee"};color:${a.change_kg>0?"#4a9e6b":"#e05c2a"};min-width:70px;text-align:center;font-weight:600">${a.change_kg>0?"+":""}${Number(a.change_kg).toFixed(1)}kg</span>
+      <span style="font-weight:500">${esc(a.coffee)}</span>
+      <span style="color:#888">${esc(reason_labels[a.reason]||a.reason)}</span>
+      <span style="color:#888">${a.date}</span>
+      ${a.auto?'<span class="tag" style="background:#f5f0eb;color:#aaa;font-size:10px">auto</span>':'<span class="tag" style="background:#fff8ee;color:#c8a96e;font-size:10px;font-weight:600">MANUAL</span>'}
+    </div>`).join("");
+
+  return `
+    <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end">
+      <div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div>
+      <div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div>
+      <div class="flex gap-6">
+        <button class="btn btn-ghost btn-sm" data-report-range="30">30d</button>
+        <button class="btn btn-ghost btn-sm" data-report-range="90">90d</button>
+        <button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button>
+      </div>
+    </div></div>
+
+    <div class="grid-4 mb-16">
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📥</div><div style="font-size:22px;font-weight:700;color:#4a9e6b">+${total_in.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Stock In</div></div>
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📤</div><div style="font-size:22px;font-weight:700;color:#e05c2a">-${total_out.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Stock Out</div></div>
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">⚖️</div><div style="font-size:22px;font-weight:700;color:${net>=0?"#1a1008":"#e05c2a"}">${net>=0?"+":""}${net.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Net Change</div></div>
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📝</div><div style="font-size:22px;font-weight:700;color:#1a1008">${manual_count}</div><div style="font-size:11px;color:#888;margin-top:2px">Manual / ${auto_count} Auto</div></div>
+    </div>
+
+    <div class="card mb-16">
+      <div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">By Reason</div>
+      ${reason_rows.length===0?'<p class="hint">No movements in this range.</p>':reason_rows.map(([r,d]) => `
+        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0ebe4;font-size:13px">
+          <span style="font-weight:500">${esc(reason_labels[r]||r)}</span>
+          <span style="color:#4a9e6b;font-weight:600">+${d.in.toFixed(1)}kg</span>
+          <span style="color:#e05c2a;font-weight:600">-${d.out.toFixed(1)}kg</span>
+          <span style="color:#888;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
+        </div>`).join("")}
+    </div>
+
+    <div class="card mb-16">
+      <div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">By Coffee</div>
+      ${coffee_rows.length===0?'<p class="hint">No movements in this range.</p>':coffee_rows.map(([c,d]) => `
+        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0ebe4;font-size:13px">
+          <span style="font-weight:500">${esc(c)}</span>
+          <span style="color:#4a9e6b;font-weight:600">+${d.in.toFixed(1)}kg</span>
+          <span style="color:#e05c2a;font-weight:600">-${d.out.toFixed(1)}kg</span>
+          <span style="color:#888;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
+        </div>`).join("")}
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700;color:#1a1008;margin-bottom:6px;font-size:15px">Recent Movements ${recent.length<filtered.length?`<span class="hint" style="font-weight:400;font-size:12px">(latest 50 of ${filtered.length})</span>`:""}</div>
+      ${recent_html||'<p class="hint">No movements in this range.</p>'}
+    </div>`;
+}
+
+function attach_listeners() {
+  const app = document.getElementById("app");
+  app.querySelector("#go-reports")?.addEventListener("click", () => window.location.href="reports.html");
+  app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
+  app.querySelector("#report-from")?.addEventListener("change", e => { state.ui.report_from=e.target.value; render(); });
+  app.querySelector("#report-to")?.addEventListener("change", e => { state.ui.report_to=e.target.value; render(); });
+  app.querySelectorAll("[data-report-range]").forEach(btn => btn.addEventListener("click", () => {
+    const range = btn.dataset.reportRange, d = new Date();
+    if (range==="all") { state.ui.report_from = btn.dataset.first || today(); }
+    else { d.setDate(d.getDate()-Number(range)); state.ui.report_from = d.toISOString().split("T")[0]; }
+    state.ui.report_to = today();
+    render();
+  }));
+}
+</script>
+</body>
+</html>

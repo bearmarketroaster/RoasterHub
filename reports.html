@@ -1,321 +1,99 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Reports — Bear Roastery</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
-    input, select, button { font-family: inherit; font-size: 14px; } button { cursor: pointer; }
-    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; color: #1a1008; }
-    input:focus, select:focus, textarea:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; box-shadow: none; }
-    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header { background: #1a1008; color: #e8d5b0; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 14px; }
     .header-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
     .header-back:hover { color: #e8d5b0; }
-    .header-title { font-weight: 700; font-size: 18px; }
-    .header-sub { font-size: 12px; color: #c8a96e; margin-top: 1px; }
-    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
-    .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
-    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
-    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
-    .card.empty { text-align: center; padding: 48px 16px; color: #888; }
-    .card.empty .icon { font-size: 36px; margin-bottom: 8px; }
-    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-    .flex { display: flex; } .flex-between { display: flex; justify-content: space-between; align-items: center; }
-    .gap-6 { gap: 6px; } .gap-8 { gap: 8px; } .gap-10 { gap: 10px; } .gap-12 { gap: 12px; }
-    .mb-10 { margin-bottom: 10px; } .mb-12 { margin-bottom: 12px; } .mb-16 { margin-bottom: 16px; }
-    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
-    .btn-dark { background: #1a1008; }
-    .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; }
-    .stock-track { background: #f0ebe4; border-radius: 4px; height: 8px; overflow: hidden; }
-    .report-bar-track { background: #f0ebe4; border-radius: 3px; height: 6px; width: 80px; }
-    .report-bar-fill { border-radius: 3px; height: 6px; }
-    .chart-wrap { display: flex; align-items: flex-end; gap: 4px; height: 100px; overflow-x: auto; padding-bottom: 4px; }
-    .chart-col { display: flex; flex-direction: column; align-items: center; min-width: 38px; }
-    .chart-val { font-size: 10px; color: #888; margin-bottom: 2px; }
-    .chart-bar { background: #c8a96e; border-radius: 3px 3px 0 0; width: 22px; min-height: 2px; }
-    .chart-lbl { font-size: 9px; color: #aaa; margin-top: 4px; }
-    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
-    @media (max-width: 600px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .content { padding: 16px; } }
+    .header-logo { font-size: 28px; }
+    .header-brand { display: flex; flex-direction: column; }
+    .header-title { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+    .header-sub   { font-size: 12px; color: #c8a96e; margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    .header-user  { font-size: 13px; color: #c8a96e; }
+    .btn-auth { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-auth:hover { background: #c8a96e; color: #1a1008; }
+    .main { padding: 40px 32px; max-width: 960px; margin: 0 auto; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c8a96e; margin-bottom: 16px; }
+    .module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-bottom: 48px; }
+    .module-card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); text-decoration: none; color: inherit; display: flex; flex-direction: column; gap: 12px; border: 2px solid transparent; transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s; cursor: pointer; }
+    .module-card:hover { border-color: #c8a96e; box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-2px); }
+    .module-card.coming-soon { opacity: 0.5; cursor: default; pointer-events: none; }
+    .module-icon { font-size: 32px; width: 56px; height: 56px; background: #f5f0eb; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+    .module-name { font-size: 16px; font-weight: 700; color: #1a1008; }
+    .module-desc { font-size: 13px; color: #888; line-height: 1.5; }
+    .module-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 12px; border-top: 1px solid #f0ebe4; }
+    .module-status { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
+    .status-active { background: #edf7f0; color: #4a9e6b; }
+    .status-soon   { background: #f5f0eb; color: #c8a96e; }
+    .module-arrow  { font-size: 18px; color: #c8a96e; }
+    @media (max-width: 600px) { .header { padding: 16px 20px; } .main { padding: 24px 16px; } .module-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-<div id="app"></div>
-<script>
-const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-supabaseClient.auth.getSession().then(({ data: { session } }) => {
-  if (!session) window.location.href = "login.html";
-  else init();
-});
-
-const today = () => new Date().toISOString().split("T")[0];
-const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-const PALETTE = ["#1a1008","#c8a96e","#4a9e6b","#e05c2a","#4a7c4e","#e0a82a","#888","#5a3e1b"];
-const color_for = i => PALETTE[i%PALETTE.length];
-
-const state = {
-  containers: [],
-  dispatches: [],
-  stock_adjustments: [],
-  loading: true,
-  ui: { report_from: today(), report_to: today(), report_view: "shops", report_status: "all", report_section: "dispatch" },
-};
-
-async function init() {
-  await load_data();
-  // Set default range to last 30 days if there's data
-  if (state.dispatches.length) {
-    const d = new Date(); d.setDate(d.getDate()-30);
-    state.ui.report_from = d.toISOString().split("T")[0];
-    state.ui.report_to = today();
-  }
-  state.loading = false;
-  render();
-}
-
-async function load_data() {
-  // Containers from roast_sessions
-  const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight").order("date", { ascending: false });
-  const container_map = {};
-  (roast_sessions||[]).forEach(s => {
-    if (!s.container_id) return;
-    if (!container_map[s.container_id]) container_map[s.container_id] = { id: s.container_id, coffee: s.coffee };
-    container_map[s.container_id].coffee = s.coffee;
-  });
-  state.containers = Object.values(container_map);
-
-  const { data: dispatches } = await supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date", { ascending: false });
-  state.dispatches = (dispatches||[]).map(d => ({ ...d, lines: d.dispatch_lines||[] }));
-
-  const { data: adjustments } = await supabaseClient.from("stock_adjustments").select("*").order("date", { ascending: false });
-  state.stock_adjustments = adjustments || [];
-}
-
-function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
-
-function build_app() {
-  const header = `
-    <div class="header">
-      <div class="header-left">
-        <button class="header-back" id="go-dashboard">← Dashboard</button>
-        <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
-        <div><div class="header-title">📊 Reports</div><div class="header-sub">Bear Roastery</div></div>
+  <div class="header">
+    <div class="header-left">
+      <button class="header-back" id="go-dashboard">← Dashboard</button>
+      <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+      <div class="header-logo">📊</div>
+      <div class="header-brand">
+        <div class="header-title">Reports</div>
+        <div class="header-sub">Bear Roastery</div>
       </div>
-      <button class="btn-logout" id="logout-btn">Log Out</button>
-    </div>`;
-  if (state.loading) return header + `<div class="loading">Loading reports…</div>`;
-  const tabs = `
-    <div class="flex gap-8 mb-16">
-      <button class="btn ${state.ui.report_section==="dispatch"?"btn-dark":"btn-ghost"}" style="flex:1;color:${state.ui.report_section==="dispatch"?"#e8d5b0":"#5a3e1b"}" data-section="dispatch">🚚 Dispatch</button>
-      <button class="btn ${state.ui.report_section==="stock"?"btn-dark":"btn-ghost"}" style="flex:1;color:${state.ui.report_section==="stock"?"#e8d5b0":"#5a3e1b"}" data-section="stock">🌱 Green Stock Movement</button>
-    </div>`;
-  const body = state.ui.report_section === "stock" ? build_stock_report() : build_reports();
-  return header + `<div class="content">${tabs}${body}</div>`;
-}
-
-function build_reports() {
-  const { report_from, report_to, report_view, report_status } = state.ui;
-  if (state.dispatches.length === 0) return `<div class="card empty"><div class="icon">📊</div>No dispatch data yet.</div>`;
-  const first_date = state.dispatches.reduce((min,d) => d.date<min ? d.date : min, state.dispatches[0].date);
-
-  const filtered = state.dispatches.filter(d => {
-    if (d.date<report_from || d.date>report_to) return false;
-    if (report_status==="in_transit") return !d.confirmed_at;
-    if (report_status==="delivered")  return !!d.confirmed_at;
-    return true;
-  });
-
-  const get_coffee_name = d => state.containers.find(c => c.id===d.container_id)?.coffee ?? "Unknown";
-
-  const shop_map = {};
-  filtered.forEach(d => {
-    const shop = d.shop || "Unknown";
-    if (!shop_map[shop]) shop_map[shop] = { total_kg:0, coffees:{}, dispatches:0, last_date:"" };
-    shop_map[shop].total_kg += d.total_kg;
-    shop_map[shop].dispatches++;
-    if (d.date > shop_map[shop].last_date) shop_map[shop].last_date = d.date;
-    const coffee = get_coffee_name(d);
-    shop_map[shop].coffees[coffee] = (shop_map[shop].coffees[coffee]||0) + d.total_kg;
-  });
-  const shop_rows = Object.entries(shop_map).sort((a,b) => b[1].total_kg - a[1].total_kg);
-  const max_shop_kg = shop_rows[0]?.[1].total_kg || 1;
-
-  const coffee_map = {};
-  filtered.forEach(d => {
-    const coffee = get_coffee_name(d);
-    if (!coffee_map[coffee]) coffee_map[coffee] = { total_kg:0, shops:{}, dispatches:0 };
-    coffee_map[coffee].total_kg += d.total_kg;
-    coffee_map[coffee].dispatches++;
-    const shop = d.shop || "Unknown";
-    coffee_map[coffee].shops[shop] = (coffee_map[coffee].shops[shop]||0) + d.total_kg;
-  });
-  const coffee_rows = Object.entries(coffee_map).sort((a,b) => b[1].total_kg - a[1].total_kg);
-  const max_coffee_kg = coffee_rows[0]?.[1].total_kg || 1;
-
-  const week_map = {};
-  filtered.forEach(d => {
-    const dt = new Date(d.date), day=dt.getDay(), diff=dt.getDate()-day+(day===0?-6:1);
-    const mon = new Date(new Date(d.date).setDate(diff));
-    const key = mon.toISOString().split("T")[0];
-    week_map[key] = (week_map[key]||0) + d.total_kg;
-  });
-  const weeks = Object.entries(week_map).sort((a,b) => a[0].localeCompare(b[0]));
-  const max_week_kg = Math.max(...weeks.map(w => w[1]), 1);
-
-  const total_kg = filtered.reduce((s,d) => s+d.total_kg, 0);
-  const unique_shops = new Set(filtered.map(d => d.shop)).size;
-  const unique_coffees = new Set(filtered.map(d => get_coffee_name(d))).size;
-  const total_label = report_status==="in_transit" ? "In Transit" : report_status==="delivered" ? "Delivered" : "Total Dispatched";
-
-  const stats_html = [
-    { label: total_label, value: `${total_kg.toFixed(1)}kg`, icon: "⚖️" },
-    { label: "Dispatches", value: filtered.length, icon: "🚚" },
-    { label: "Shops Served", value: unique_shops, icon: "🏪" },
-    { label: "Coffees", value: unique_coffees, icon: "☕" },
-  ].map(({label,value,icon}) => `<div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">${icon}</div><div style="font-size:22px;font-weight:700;color:#1a1008">${value}</div><div style="font-size:11px;color:#888;margin-top:2px">${label}</div></div>`).join("");
-
-  const weekly_chart = weeks.length > 1 ? `<div class="card mb-16"><div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">📅 Weekly Dispatch Volume (kg)</div><div class="chart-wrap">${weeks.map(([week,kg])=>{ const h=Math.round((kg/max_week_kg)*90); return `<div class="chart-col"><div class="chart-val">${kg.toFixed(0)}</div><div class="chart-bar" style="height:${h}px"></div><div class="chart-lbl">${week.slice(5)}</div></div>`; }).join("")}</div></div>` : "";
-
-  const breakdown_row = (label, kg, total, ci) => `<div style="display:flex;align-items:center;gap:8px"><div style="width:10px;height:10px;border-radius:2px;background:${color_for(ci)};flex-shrink:0"></div><div style="flex:1;font-size:13px">${esc(label)}</div><div style="font-size:13px;font-weight:600;color:#555;min-width:50px;text-align:right">${kg.toFixed(1)}kg</div><div class="report-bar-track"><div class="report-bar-fill" style="background:${color_for(ci)};width:${Math.round((kg/total)*100)}%"></div></div><div style="font-size:11px;color:#aaa;min-width:32px;text-align:right">${Math.round((kg/total)*100)}%</div></div>`;
-
-  const shops_view = shop_rows.map(([shop,data]) => {
-    const entries = Object.entries(data.coffees).sort((a,b) => b[1]-a[1]);
-    return `<div class="card"><div class="flex-between mb-10"><div><div style="font-weight:700;font-size:15px">${esc(shop)}</div><div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches!==1?"es":""} · Last: ${data.last_date}</div></div><div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div></div><div class="stock-track mb-12"><div style="background:#1a1008;border-radius:4px;height:8px;width:${Math.round((data.total_kg/max_shop_kg)*100)}%;transition:width 0.4s"></div></div><div style="display:grid;gap:6px">${entries.map(([coffee,kg],ci) => breakdown_row(coffee,kg,data.total_kg,ci)).join("")}</div></div>`;
-  }).join("");
-
-  const coffees_view = coffee_rows.map(([coffee,data],ci) => {
-    const entries = Object.entries(data.shops).sort((a,b) => b[1]-a[1]);
-    return `<div class="card"><div class="flex-between mb-10"><div><div style="font-weight:700;font-size:15px">${esc(coffee)}</div><div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches!==1?"es":""} · ${entries.length} shop${entries.length!==1?"s":""}</div></div><div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div></div><div class="stock-track mb-12"><div style="background:${color_for(ci)};border-radius:4px;height:8px;width:${Math.round((data.total_kg/max_coffee_kg)*100)}%;transition:width 0.4s"></div></div><div style="display:grid;gap:6px">${entries.map(([shop,kg],si) => breakdown_row(shop,kg,data.total_kg,si)).join("")}</div></div>`;
-  }).join("");
-
-  return `
-    <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end"><div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div><div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div><div class="flex gap-6"><button class="btn btn-ghost btn-sm" data-report-range="30">30d</button><button class="btn btn-ghost btn-sm" data-report-range="90">90d</button><button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button></div></div></div>
-    <div class="grid-4 mb-16">${stats_html}</div>
-    ${weekly_chart}
-    <div class="flex gap-8 mb-12"><button class="btn ${report_status==="all"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="all"?"#e8d5b0":"#5a3e1b"}" data-report-status="all">All</button><button class="btn ${report_status==="in_transit"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="in_transit"?"#e8d5b0":"#5a3e1b"}" data-report-status="in_transit">⏳ In Transit</button><button class="btn ${report_status==="delivered"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="delivered"?"#e8d5b0":"#5a3e1b"}" data-report-status="delivered">✓ Delivered</button></div>
-    <div class="flex gap-8 mb-16"><button class="btn ${report_view==="shops"?"btn-dark":"btn-ghost"}" style="flex:1;color:${report_view==="shops"?"#e8d5b0":"#5a3e1b"}" data-report-view="shops">🏪 By Shop</button><button class="btn ${report_view==="coffees"?"btn-dark":"btn-ghost"}" style="flex:1;color:${report_view==="coffees"?"#e8d5b0":"#5a3e1b"}" data-report-view="coffees">☕ By Coffee</button></div>
-    ${filtered.length===0?`<div class="card empty"><div class="icon">📊</div>No data for this period.</div>`:""}
-    ${report_view==="shops"  ? `<div style="display:grid;gap:10px">${shops_view}</div>`   : ""}
-    ${report_view==="coffees"? `<div style="display:grid;gap:10px">${coffees_view}</div>` : ""}`;
-}
-
-function build_stock_report() {
-  const { report_from, report_to } = state.ui;
-  if (state.stock_adjustments.length === 0) return `<div class="card empty"><div class="icon">🌱</div>No stock movements recorded yet.</div>`;
-
-  const filtered = state.stock_adjustments.filter(a => a.date >= report_from && a.date <= report_to);
-
-  // Aggregate
-  const total_in  = filtered.filter(a => a.change_kg > 0).reduce((s,a) => s + a.change_kg, 0);
-  const total_out = filtered.filter(a => a.change_kg < 0).reduce((s,a) => s + Math.abs(a.change_kg), 0);
-  const net       = total_in - total_out;
-  const manual_count = filtered.filter(a => !a.auto).length;
-  const auto_count   = filtered.filter(a =>  a.auto).length;
-
-  // By reason
-  const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", other:"📝 Other" };
-  const by_reason = {};
-  filtered.forEach(a => {
-    if (!by_reason[a.reason]) by_reason[a.reason] = { in:0, out:0, count:0 };
-    if (a.change_kg > 0) by_reason[a.reason].in  += a.change_kg;
-    else                 by_reason[a.reason].out += Math.abs(a.change_kg);
-    by_reason[a.reason].count++;
-  });
-  const reason_rows = Object.entries(by_reason).sort((a,b) => (b[1].in+b[1].out) - (a[1].in+a[1].out));
-
-  // By coffee
-  const by_coffee = {};
-  filtered.forEach(a => {
-    if (!by_coffee[a.coffee]) by_coffee[a.coffee] = { in:0, out:0, count:0 };
-    if (a.change_kg > 0) by_coffee[a.coffee].in  += a.change_kg;
-    else                 by_coffee[a.coffee].out += Math.abs(a.change_kg);
-    by_coffee[a.coffee].count++;
-  });
-  const coffee_rows = Object.entries(by_coffee).sort((a,b) => (b[1].in+b[1].out) - (a[1].in+a[1].out));
-
-  // Recent movements list
-  const recent = filtered.slice(0, 50);
-  const recent_html = recent.map(a => `
-    <div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #f0ebe4;font-size:13px">
-      <span class="tag" style="background:${a.change_kg>0?"#edf7f0":"#fff0ee"};color:${a.change_kg>0?"#4a9e6b":"#e05c2a"};min-width:70px;text-align:center;font-weight:600">${a.change_kg>0?"+":""}${Number(a.change_kg).toFixed(1)}kg</span>
-      <span style="font-weight:500">${esc(a.coffee)}</span>
-      <span style="color:#888">${esc(reason_labels[a.reason]||a.reason)}</span>
-      <span style="color:#888">${a.date}</span>
-      ${a.auto?'<span class="tag" style="background:#f5f0eb;color:#aaa;font-size:10px">auto</span>':'<span class="tag" style="background:#fff8ee;color:#c8a96e;font-size:10px;font-weight:600">MANUAL</span>'}
-    </div>`).join("");
-
-  return `
-    <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end">
-      <div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div>
-      <div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div>
-      <div class="flex gap-6">
-        <button class="btn btn-ghost btn-sm" data-report-range="30">30d</button>
-        <button class="btn btn-ghost btn-sm" data-report-range="90">90d</button>
-        <button class="btn btn-ghost btn-sm" data-report-range="all">All</button>
+    </div>
+    <div class="header-right">
+      <span class="header-user" id="header-user"></span>
+      <button class="btn-auth" id="auth-btn">Log Out</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="section-label">Available Reports</div>
+    <div class="module-grid">
+      <a class="module-card" href="reports-dispatch.html">
+        <div class="module-icon">🚚</div>
+        <div><div class="module-name">Dispatch</div><div class="module-desc">Coffee dispatched per shop, by status, with weekly trends and breakdowns by coffee.</div></div>
+        <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
+      </a>
+      <a class="module-card" href="reports-stock.html">
+        <div class="module-icon">🌱</div>
+        <div><div class="module-name">Green Stock Movement</div><div class="module-desc">Stock in/out, manual adjustments, write-offs, broken down by coffee and reason.</div></div>
+        <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
+      </a>
+      <div class="module-card coming-soon">
+        <div class="module-icon">🔥</div>
+        <div><div class="module-name">Roasts</div><div class="module-desc">Roast volumes, yields, weight loss percentages, and batch tracking.</div></div>
+        <div class="module-footer"><span class="module-status status-soon">Coming Soon</span></div>
       </div>
-    </div></div>
-
-    <div class="grid-4 mb-16">
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📥</div><div style="font-size:22px;font-weight:700;color:#4a9e6b">+${total_in.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Stock In</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📤</div><div style="font-size:22px;font-weight:700;color:#e05c2a">-${total_out.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Stock Out</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">⚖️</div><div style="font-size:22px;font-weight:700;color:${net>=0?"#1a1008":"#e05c2a"}">${net>=0?"+":""}${net.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Net Change</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📝</div><div style="font-size:22px;font-weight:700;color:#1a1008">${manual_count}</div><div style="font-size:11px;color:#888;margin-top:2px">Manual / ${auto_count} Auto</div></div>
+      <div class="module-card coming-soon">
+        <div class="module-icon">📦</div>
+        <div><div class="module-name">Suppliers</div><div class="module-desc">Green coffee deliveries, costs over time, lead times by supplier.</div></div>
+        <div class="module-footer"><span class="module-status status-soon">Coming Soon</span></div>
+      </div>
     </div>
-
-    <div class="card mb-16">
-      <div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">By Reason</div>
-      ${reason_rows.length===0?'<p class="hint">No movements in this range.</p>':reason_rows.map(([r,d]) => `
-        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0ebe4;font-size:13px">
-          <span style="font-weight:500">${esc(reason_labels[r]||r)}</span>
-          <span style="color:#4a9e6b;font-weight:600">+${d.in.toFixed(1)}kg</span>
-          <span style="color:#e05c2a;font-weight:600">-${d.out.toFixed(1)}kg</span>
-          <span style="color:#888;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
-        </div>`).join("")}
-    </div>
-
-    <div class="card mb-16">
-      <div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">By Coffee</div>
-      ${coffee_rows.length===0?'<p class="hint">No movements in this range.</p>':coffee_rows.map(([c,d]) => `
-        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0ebe4;font-size:13px">
-          <span style="font-weight:500">${esc(c)}</span>
-          <span style="color:#4a9e6b;font-weight:600">+${d.in.toFixed(1)}kg</span>
-          <span style="color:#e05c2a;font-weight:600">-${d.out.toFixed(1)}kg</span>
-          <span style="color:#888;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
-        </div>`).join("")}
-    </div>
-
-    <div class="card">
-      <div style="font-weight:700;color:#1a1008;margin-bottom:6px;font-size:15px">Recent Movements ${recent.length<filtered.length?`<span class="hint" style="font-weight:400;font-size:12px">(latest 50 of ${filtered.length})</span>`:""}</div>
-      ${recent_html||'<p class="hint">No movements in this range.</p>'}
-    </div>`;
-}
-
-function attach_listeners() {
-  const app = document.getElementById("app");
-  app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
-  app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
-  app.querySelector("#report-from")?.addEventListener("change", e => { state.ui.report_from=e.target.value; render(); });
-  app.querySelector("#report-to")?.addEventListener("change", e => { state.ui.report_to=e.target.value; render(); });
-  app.querySelectorAll("[data-section]").forEach(btn => btn.addEventListener("click", () => {
-    state.ui.report_section = btn.dataset.section;
-    render();
-  }));
-  app.querySelectorAll("[data-report-range]").forEach(btn => btn.addEventListener("click", () => {
-    const range = btn.dataset.reportRange, d = new Date();
-    if (range==="all") { state.ui.report_from = btn.dataset.first || today(); }
-    else { d.setDate(d.getDate()-Number(range)); state.ui.report_from = d.toISOString().split("T")[0]; }
-    state.ui.report_to = today();
-    render();
-  }));
-  app.querySelectorAll("[data-report-view]").forEach(btn => btn.addEventListener("click", () => { state.ui.report_view=btn.dataset.reportView; render(); }));
-  app.querySelectorAll("[data-report-status]").forEach(btn => btn.addEventListener("click", () => { state.ui.report_status=btn.dataset.reportStatus; render(); }));
-}
-</script>
+  </div>
+  <script>
+    const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    const authBtn = document.getElementById("auth-btn");
+    const userEl  = document.getElementById("header-user");
+    document.getElementById("go-dashboard").addEventListener("click", () => window.location.href = "index.html");
+    authBtn.addEventListener("click", async () => {
+      authBtn.disabled = true; authBtn.textContent = "Logging out…";
+      await supabaseClient.auth.signOut();
+      window.location.href = "login.html";
+    });
+    (async () => {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (!session) { window.location.href = "login.html"; return; }
+      userEl.textContent = session.user.email;
+    })();
+  </script>
 </body>
 </html>
