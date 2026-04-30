@@ -86,25 +86,22 @@
     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
     const authBtn = document.getElementById("auth-btn");
     const userEl  = document.getElementById("header-user");
+
+    // Always-on logout handler — works regardless of session check status
+    authBtn.addEventListener("click", async () => {
+      authBtn.disabled = true;
+      authBtn.textContent = "Logging out…";
+      await supabaseClient.auth.signOut();
+      window.location.href = "login.html";
+    });
+
     async function updateAuthUI() {
       const { data: { session } } = await supabaseClient.auth.getSession();
-      if (session) {
-        userEl.textContent = session.user.email;
-        authBtn.textContent = "Log Out";
-        authBtn.onclick = async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; };
-
-        // Look up the user's role and hide tiles they shouldn't see
-        const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
-        const role = role_row?.role;
-        if (role === "viewer") {
-          // Viewers only see Reports — redirect them straight there
-          window.location.href = "reports.html";
-          return;
-        }
-      } else {
-        window.location.href = "login.html";
-      }
+      if (!session) { window.location.href = "login.html"; return; }
+      userEl.textContent = session.user.email;
+      // Look up the user's role and redirect viewers to Reports
+      const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+      if (role_row?.role === "viewer") { window.location.href = "reports.html"; return; }
     }
-    supabaseClient.auth.onAuthStateChange(() => updateAuthUI());
     updateAuthUI();
   </script>
