@@ -94,7 +94,9 @@
       formArea.innerHTML = `
         <div class="field"><label for="email">Email</label><input type="email" id="email" placeholder="you@bearmarket.ie" autocomplete="email"></div>
         <div class="field"><label for="password">Password</label><input type="password" id="password" placeholder="••••••••" autocomplete="current-password"></div>
-        <button class="btn-login" id="login-btn">Log In</button>`;
+        <button class="btn-login" id="login-btn">Log In</button>
+        <div style="text-align:center;margin-top:14px"><a href="#" id="forgot-link" style="font-size:13px;color:#c8a96e;text-decoration:none;font-weight:500">Forgot your password?</a></div>`;
+      document.getElementById("forgot-link")?.addEventListener("click", e => { e.preventDefault(); renderForgot(); });
       const emailEl    = document.getElementById("email");
       const passwordEl = document.getElementById("password");
       const loginBtn   = document.getElementById("login-btn");
@@ -116,6 +118,34 @@
       loginBtn.addEventListener("click", doLogin);
       passwordEl.addEventListener("keydown", e => { if (e.key==="Enter") doLogin(); });
       emailEl.addEventListener("keydown",    e => { if (e.key==="Enter") passwordEl.focus(); });
+    }
+
+    function renderForgot() {
+      hideMsg();
+      formArea.innerHTML = `
+        <h2>Reset your password</h2>
+        <p class="hint">Enter your email and we'll send you a link to reset your password.</p>
+        <div class="field"><label for="forgot-email">Email</label><input type="email" id="forgot-email" placeholder="you@bearmarket.ie" autocomplete="email"></div>
+        <button class="btn-login" id="forgot-btn">Send Reset Link</button>
+        <div style="text-align:center;margin-top:14px"><a href="#" id="back-to-login" style="font-size:13px;color:#c8a96e;text-decoration:none;font-weight:500">← Back to log in</a></div>`;
+      const emailEl = document.getElementById("forgot-email");
+      const btn     = document.getElementById("forgot-btn");
+      async function doReset() {
+        const email = emailEl.value.trim().toLowerCase();
+        if (!email) { showMsg("Please enter your email."); return; }
+        btn.disabled = true; btn.textContent = "Sending…"; hideMsg();
+        const redirect_url = window.location.origin + window.location.pathname;
+        const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: redirect_url });
+        if (error) {
+          showMsg(error.message); btn.disabled = false; btn.textContent = "Send Reset Link";
+        } else {
+          showMsg(`If an account exists for ${email}, a reset link has been sent. Check your inbox.`, "info");
+          btn.textContent = "Sent ✓";
+        }
+      }
+      btn.addEventListener("click", doReset);
+      emailEl.addEventListener("keydown", e => { if (e.key==="Enter") doReset(); });
+      document.getElementById("back-to-login")?.addEventListener("click", e => { e.preventDefault(); hideMsg(); renderLogin(); });
     }
 
     function renderSetPassword() {
