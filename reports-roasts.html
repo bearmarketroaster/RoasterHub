@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roast Report — Bear Roastery</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    input, select, button { font-family: inherit; font-size: 14px; } button { cursor: pointer; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; color: #1a1008; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; box-shadow: none; }
+    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #e8d5b0; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #c8a96e; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
+    .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
+    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
+    .card.empty { text-align: center; padding: 48px 16px; color: #888; }
+    .card.empty .icon { font-size: 36px; margin-bottom: 8px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .flex { display: flex; }
+    .gap-6 { gap: 6px; } .gap-12 { gap: 12px; }
+    .mb-12 { margin-bottom: 12px; } .mb-16 { margin-bottom: 16px; }
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
+    .btn-dark  { background: #1a1008; }
+    .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
+    .btn-sm    { padding: 4px 10px; font-size: 12px; }
+    .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
+    .hint { color: #888; font-size: 13px; }
+    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
+    /* Chart styles */
+    .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .chart-box { background: #fafafa; border-radius: 8px; padding: 12px; }
+    .chart-title { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 6px; display: flex; justify-content: space-between; }
+    .chart-svg { width: 100%; height: 130px; display: block; }
+    .out-of-band { font-size: 11px; color: #e05c2a; font-weight: 600; }
+    @media (max-width: 720px) { .chart-grid { grid-template-columns: 1fr; } .grid-4 { grid-template-columns: repeat(2, 1fr); } .content { padding: 16px; } }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+supabaseClient.auth.getSession().then(({ data: { session } }) => {
+  if (!session) window.location.href = "login.html";
+  else init();
+});
+
+const today = () => new Date().toISOString().split("T")[0];
+const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+const state = {
+  sessions: [],   // [{ id, coffee, date, roasted_weight, green_weight (sum of batches), loss_pct }]
+  loading: true,
+  ui: { report_from: today(), report_to: today(), grouping: "session" },  // session | weekly | monthly
+};
+
+async function init() {
+  await load_data();
+  if (state.sessions.length) {
+    const d = new Date(); d.setDate(d.getDate()-90);
+    state.ui.report_from = d.toISOString().split("T")[0];
+    state.ui.report_to = today();
+  }
+  state.loading = false;
+  render();
+}
+
+async function load_data() {
+  const { data: sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, roasted_weight").order("date", { ascending: true });
+  const { data: batches }  = await supabaseClient.from("roast_batches").select("roast_session_id, green_weight");
+
+  const green_per_session = {};
+  (batches||[]).forEach(b => {
+    if (!b.roast_session_id) return;
+    green_per_session[b.roast_session_id] = (green_per_session[b.roast_session_id]||0) + (Number(b.green_weight)||0);
+  });
+
+  state.sessions = (sessions||[]).map(s => {
+    const green = green_per_session[s.id] || 0;
+    const roasted = Number(s.roasted_weight) || 0;
+    const loss_pct = green > 0 ? ((green - roasted) / green) * 100 : 0;
+    return { id: s.id, coffee: s.coffee, date: s.date, roasted_weight: roasted, green_weight: green, loss_pct };
+  }).filter(s => s.green_weight > 0 && s.roasted_weight > 0);
+}
+
+function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
+
+function build_app() {
+  const header = `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="go-reports">← Reports</button>
+        <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+        <div><div class="header-title">🔥 Roast Report</div><div class="header-sub">End-weight consistency per coffee</div></div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>`;
+  if (state.loading) return header + `<div class="loading">Loading…</div>`;
+  return header + `<div class="content">${build_report()}</div>`;
+}
+
+// Group an array of session objects into time buckets
+function group_sessions(sessions, mode) {
+  if (mode === "session") return sessions.map(s => ({ key: s.date, label: s.date, items: [s] }));
+  const map = {};
+  sessions.forEach(s => {
+    let key, label;
+    if (mode === "weekly") {
+      const dt = new Date(s.date), day = dt.getDay(), diff = dt.getDate() - day + (day===0?-6:1);
+      const mon = new Date(new Date(s.date).setDate(diff));
+      key = mon.toISOString().split("T")[0];
+      label = `Wk ${key.slice(5)}`;
+    } else { // monthly
+      key = s.date.slice(0, 7); // YYYY-MM
+      label = key;
+    }
+    if (!map[key]) map[key] = { key, label, items: [] };
+    map[key].items.push(s);
+  });
+  return Object.values(map).sort((a,b) => a.key.localeCompare(b.key));
+}
+
+function avg(arr) { return arr.length ? arr.reduce((s,n)=>s+n,0) / arr.length : 0; }
+function stddev(arr) {
+  if (arr.length < 2) return 0;
+  const m = avg(arr);
+  return Math.sqrt(avg(arr.map(n => (n-m)*(n-m))));
+}
+
+// Build SVG chart with tolerance band shading + dots/lines
+function build_chart_svg(points, value_key, color, unit) {
+  if (points.length === 0) return `<svg class="chart-svg"></svg>`;
+  const W = 600, H = 130, pad_l = 40, pad_r = 12, pad_t = 12, pad_b = 22;
+  const inner_w = W - pad_l - pad_r;
+  const inner_h = H - pad_t - pad_b;
+
+  const values = points.map(p => p[value_key]);
+  const m = avg(values);
+  const sd = stddev(values);
+  const band_lo = m - sd * 1.5;
+  const band_hi = m + sd * 1.5;
+
+  // Y range — pad a bit outside the band so it's always visible
+  const all = [...values, band_lo, band_hi];
+  const v_min = Math.min(...all), v_max = Math.max(...all);
+  const v_pad = (v_max - v_min) * 0.1 || 1;
+  const y_min = v_min - v_pad, y_max = v_max + v_pad;
+  const x_step = points.length > 1 ? inner_w / (points.length - 1) : 0;
+  const y_for = v => pad_t + inner_h - ((v - y_min) / (y_max - y_min)) * inner_h;
+  const x_for = i => pad_l + (points.length === 1 ? inner_w/2 : i * x_step);
+
+  // Tolerance band
+  const band_y_lo = y_for(band_lo);
+  const band_y_hi = y_for(band_hi);
+  const band_rect = sd > 0 ? `<rect x="${pad_l}" y="${band_y_hi}" width="${inner_w}" height="${band_y_lo - band_y_hi}" fill="${color}" fill-opacity="0.08"/>` : "";
+  const band_line_top = sd > 0 ? `<line x1="${pad_l}" y1="${band_y_hi}" x2="${W-pad_r}" y2="${band_y_hi}" stroke="${color}" stroke-opacity="0.3" stroke-dasharray="3 3"/>` : "";
+  const band_line_bot = sd > 0 ? `<line x1="${pad_l}" y1="${band_y_lo}" x2="${W-pad_r}" y2="${band_y_lo}" stroke="${color}" stroke-opacity="0.3" stroke-dasharray="3 3"/>` : "";
+  const mean_line   = `<line x1="${pad_l}" y1="${y_for(m)}" x2="${W-pad_r}" y2="${y_for(m)}" stroke="${color}" stroke-opacity="0.5" stroke-width="1"/>`;
+
+  // Y axis labels (3 ticks)
+  const ticks = [y_min, (y_min+y_max)/2, y_max];
+  const y_labels = ticks.map(t => `<text x="${pad_l - 6}" y="${y_for(t)+3}" font-size="9" fill="#888" text-anchor="end">${t.toFixed(unit==="%"?1:1)}${unit}</text>`).join("");
+
+  // Connect points with line, then dots
+  const line_pts = points.map((p,i) => `${x_for(i)},${y_for(p[value_key])}`).join(" ");
+  const polyline = points.length > 1 ? `<polyline points="${line_pts}" fill="none" stroke="${color}" stroke-width="1.5"/>` : "";
+  const dots = points.map((p,i) => {
+    const v = p[value_key];
+    const out = sd > 0 && (v < band_lo || v > band_hi);
+    return `<circle cx="${x_for(i)}" cy="${y_for(v)}" r="${out?4.5:3}" fill="${out?"#e05c2a":color}" stroke="#fff" stroke-width="1.5"><title>${p.label} — ${v.toFixed(unit==="%"?1:1)}${unit}</title></circle>`;
+  }).join("");
+
+  // X axis labels — show only first, middle, last to avoid clutter
+  const x_label_indices = points.length <= 4
+    ? points.map((_,i) => i)
+    : [0, Math.floor(points.length/2), points.length-1];
+  const x_labels = x_label_indices.map(i => `<text x="${x_for(i)}" y="${H - 6}" font-size="9" fill="#888" text-anchor="middle">${esc(points[i].label.length > 10 ? points[i].label.slice(5) : points[i].label)}</text>`).join("");
+
+  return `<svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${band_rect}${band_line_top}${band_line_bot}${mean_line}${polyline}${dots}${y_labels}${x_labels}</svg>`;
+}
+
+function build_report() {
+  const { report_from, report_to, grouping } = state.ui;
+  if (state.sessions.length === 0) return `<div class="card empty"><div class="icon">🔥</div>No roast sessions logged yet.</div>`;
+  const first_date = state.sessions[0].date;
+
+  const filtered = state.sessions.filter(s => s.date >= report_from && s.date <= report_to);
+
+  // Stats
+  const total_green = filtered.reduce((s,r) => s+r.green_weight, 0);
+  const total_roast = filtered.reduce((s,r) => s+r.roasted_weight, 0);
+  const overall_loss = total_green > 0 ? ((total_green - total_roast) / total_green) * 100 : 0;
+
+  const stats_html = [
+    { label: "Roast Sessions", value: filtered.length, icon: "🔥" },
+    { label: "Green In",       value: `${total_green.toFixed(1)}kg`, icon: "🌱" },
+    { label: "Roasted Out",    value: `${total_roast.toFixed(1)}kg`, icon: "☕" },
+    { label: "Avg Loss",       value: `${overall_loss.toFixed(1)}%`, icon: "📉" },
+  ].map(({label,value,icon}) => `<div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">${icon}</div><div style="font-size:22px;font-weight:700;color:#1a1008">${value}</div><div style="font-size:11px;color:#888;margin-top:2px">${label}</div></div>`).join("");
+
+  // Group sessions by coffee
+  const by_coffee = {};
+  filtered.forEach(s => {
+    if (!by_coffee[s.coffee]) by_coffee[s.coffee] = [];
+    by_coffee[s.coffee].push(s);
+  });
+  const coffee_entries = Object.entries(by_coffee).sort((a,b) => b[1].length - a[1].length);
+
+  const coffee_cards = coffee_entries.map(([coffee, sessions]) => {
+    // Group by chosen time bucket
+    const groups = group_sessions(sessions, grouping);
+    // Aggregate within each group: average roasted weight, average loss %
+    const points = groups.map(g => ({
+      key: g.key,
+      label: g.label,
+      roasted: avg(g.items.map(i => i.roasted_weight)),
+      loss: avg(g.items.map(i => i.loss_pct)),
+      n: g.items.length,
+    }));
+
+    const all_roasted = sessions.map(s => s.roasted_weight);
+    const all_loss    = sessions.map(s => s.loss_pct);
+    const r_avg = avg(all_roasted), r_sd = stddev(all_roasted);
+    const l_avg = avg(all_loss),    l_sd = stddev(all_loss);
+    const r_out = points.filter(p => r_sd>0 && (p.roasted < r_avg-1.5*r_sd || p.roasted > r_avg+1.5*r_sd)).length;
+    const l_out = points.filter(p => l_sd>0 && (p.loss    < l_avg-1.5*l_sd || p.loss    > l_avg+1.5*l_sd)).length;
+
+    return `
+      <div class="card mb-12">
+        <div class="flex" style="justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-weight:700;font-size:16px">${esc(coffee)}</div>
+            <div class="hint" style="font-size:12px;margin-top:2px">${sessions.length} session${sessions.length!==1?"s":""} · Avg ${r_avg.toFixed(1)}kg out · ${l_avg.toFixed(1)}% loss</div>
+          </div>
+        </div>
+        <div class="chart-grid">
+          <div class="chart-box">
+            <div class="chart-title"><span>End Weight (kg)</span>${r_out>0?`<span class="out-of-band">${r_out} outlier${r_out!==1?"s":""}</span>`:""}</div>
+            ${build_chart_svg(points, "roasted", "#1a1008", "kg")}
+          </div>
+          <div class="chart-box">
+            <div class="chart-title"><span>Weight Loss (%)</span>${l_out>0?`<span class="out-of-band">${l_out} outlier${l_out!==1?"s":""}</span>`:""}</div>
+            ${build_chart_svg(points, "loss", "#c8a96e", "%")}
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end">
+      <div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div>
+      <div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div>
+      <div class="flex gap-6">
+        <button class="btn btn-ghost btn-sm" data-report-range="30">30d</button>
+        <button class="btn btn-ghost btn-sm" data-report-range="90">90d</button>
+        <button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button>
+      </div>
+      <div style="margin-left:auto"><label class="lbl">Group by</label>
+        <div class="flex gap-6">
+          <button class="btn ${grouping==="session"?"btn-dark":"btn-ghost"} btn-sm" data-grouping="session" style="${grouping==="session"?"color:#e8d5b0":""}">Per Roast</button>
+          <button class="btn ${grouping==="weekly"?"btn-dark":"btn-ghost"} btn-sm"  data-grouping="weekly"  style="${grouping==="weekly"?"color:#e8d5b0":""}">Weekly</button>
+          <button class="btn ${grouping==="monthly"?"btn-dark":"btn-ghost"} btn-sm" data-grouping="monthly" style="${grouping==="monthly"?"color:#e8d5b0":""}">Monthly</button>
+        </div>
+      </div>
+    </div></div>
+
+    <div class="grid-4 mb-16">${stats_html}</div>
+
+    ${filtered.length===0 ? `<div class="card empty"><div class="icon">🔥</div>No roasts in this period.</div>` : ""}
+    ${coffee_cards}
+
+    <div class="card" style="background:#fafafa;font-size:12px;color:#888;line-height:1.6">
+      <strong style="color:#555">How to read these charts:</strong> The shaded band shows ±1.5 standard deviations from each coffee's own historical average — points outside that band are flagged in orange as outliers. The horizontal line is the mean. As you log more roasts, the band tightens, making consistency drift easier to spot.
+    </div>`;
+}
+
+function attach_listeners() {
+  const app = document.getElementById("app");
+  app.querySelector("#go-reports")?.addEventListener("click", () => window.location.href="reports.html");
+  app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
+  app.querySelector("#report-from")?.addEventListener("change", e => { state.ui.report_from=e.target.value; render(); });
+  app.querySelector("#report-to")?.addEventListener("change", e => { state.ui.report_to=e.target.value; render(); });
+  app.querySelectorAll("[data-report-range]").forEach(btn => btn.addEventListener("click", () => {
+    const range = btn.dataset.reportRange, d = new Date();
+    if (range==="all") { state.ui.report_from = btn.dataset.first || today(); }
+    else { d.setDate(d.getDate()-Number(range)); state.ui.report_from = d.toISOString().split("T")[0]; }
+    state.ui.report_to = today();
+    render();
+  }));
+  app.querySelectorAll("[data-grouping]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.grouping = btn.dataset.grouping;
+    render();
+  }));
+}
+</script>
+</body>
+</html>
