@@ -62,6 +62,7 @@ const color_for = i => PALETTE[i%PALETTE.length];
 const state = {
   containers: [],
   dispatches: [],
+  fill_coffee_map: {},
   loading: true,
   ui: { report_from: today(), report_to: today(), report_view: "shops", report_status: "all" },
 };
@@ -78,12 +79,14 @@ async function init() {
 }
 
 async function load_data() {
-  const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight").order("date", { ascending: false });
+  const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false });
+  // Map fill_id -> coffee for accurate historical attribution
+  state.fill_coffee_map = {};
+  // Fallback container_id -> coffee for legacy dispatches without fill_id
   const container_map = {};
   (roast_sessions||[]).forEach(s => {
-    if (!s.container_id) return;
-    if (!container_map[s.container_id]) container_map[s.container_id] = { id: s.container_id, coffee: s.coffee };
-    container_map[s.container_id].coffee = s.coffee;
+    if (s.fill_id) state.fill_coffee_map[s.fill_id] = s.coffee;
+    if (s.container_id && !container_map[s.container_id]) container_map[s.container_id] = { id: s.container_id, coffee: s.coffee };
   });
   state.containers = Object.values(container_map);
 
@@ -119,7 +122,7 @@ function build_reports() {
     return true;
   });
 
-  const get_coffee_name = d => state.containers.find(c => c.id===d.container_id)?.coffee ?? "Unknown";
+  const get_coffee_name = d => state.fill_coffee_map?.[d.fill_id] || state.containers.find(c => c.id===d.container_id)?.coffee || "Unknown";
 
   const shop_map = {};
   filtered.forEach(d => {

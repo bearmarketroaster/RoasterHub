@@ -247,18 +247,22 @@ async function load_data() {
   const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name");
   state.shop_mappings = shop_mappings_data || [];
   // Build containers from roast_sessions — group by container_id
-  const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight").order("date", { ascending: false });
+  const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false });
   state.roast_sessions = roast_sessions || [];
 
   // Group roast sessions by container_id
   const container_map = {};
   (roast_sessions||[]).forEach(s => {
     if (!s.container_id) return;
-    if (!container_map[s.container_id]) container_map[s.container_id] = { id: s.container_id, coffee: s.coffee, roast_sessions: [], total_roasted: 0, packed_kg: 0 };
+    if (!container_map[s.container_id]) container_map[s.container_id] = { id: s.container_id, coffee: s.coffee, fill_id: s.fill_id, roast_sessions: [], total_roasted: 0, packed_kg: 0 };
     container_map[s.container_id].roast_sessions.push(s);
     container_map[s.container_id].total_roasted += Number(s.roasted_weight)||0;
-    // Use most recent coffee name
-    container_map[s.container_id].coffee = s.coffee;
+    // Use most recent (first sorted by date desc) coffee + fill_id as the active fill
+    if (!container_map[s.container_id]._latest_set) {
+      container_map[s.container_id].coffee = s.coffee;
+      container_map[s.container_id].fill_id = s.fill_id;
+      container_map[s.container_id]._latest_set = true;
+    }
   });
   state.containers = Object.values(container_map);
   const { data: orders } = await supabaseClient.from("orders").select("*, order_items(*)").order("created_at",{ascending:false});
@@ -308,8 +312,11 @@ async function save_dispatch(container_id, fill_number, shop, lines, total_kg, o
   state.saving=true; render();
   // Ensure the container row exists (FK requirement) — upsert is a no-op if it already does
   await supabaseClient.from("containers").upsert({ id: container_id }, { onConflict: "id" });
+  // Resolve current fill_id for this container (most recent roast session)
+  const container = state.containers.find(c => c.id === container_id);
+  const fill_id = container?.fill_id || null;
   const dispatch_id=gen_id("DSP");
-  const { error: d_err } = await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,date:today(),shop,total_kg,confirmed_at:null,order_id:order_id||null});
+  const { error: d_err } = await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,fill_id,date:today(),shop,total_kg,confirmed_at:null,order_id:order_id||null});
   if (d_err) { state.saving=false; alert("Failed to save dispatch: "+d_err.message); return; }
   await supabaseClient.from("dispatch_lines").insert(lines.map((l,i)=>({id:`${dispatch_id}-L${i+1}`,dispatch_id,type:l.type,kg:l.kg,bags:l.bags||null,bag_size:l.bag_size||null})));
   state.saving=false; await load_data(); render();
@@ -399,7 +406,7 @@ function build_containers_tab() {
           <div class="card" style="border-left:4px solid ${border_color};margin-bottom:12px">
             <div class="flex-between flex-wrap">
               <div class="flex-wrap gap-6">
-                <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>
+                <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>${c.fill_id ? `<span class="mono" style="background:#f0ebe4;color:#888;padding:2px 8px;border-radius:4px;font-size:11px">${esc(c.fill_id)}</span>` : ""}
                 ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#e0a82a;border-radius:4px">⏳ In Transit</span>` : ""}
               </div>
               <div class="flex-wrap gap-6">

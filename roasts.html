@@ -137,9 +137,11 @@ async function save_session() {
   if (s.container_id) {
     await supabaseClient.from("containers").upsert({ id: s.container_id }, { onConflict: "id" });
   }
+  // Generate fill_id from container_id + date (one fill per day max)
+  const fill_id = s.container_id ? `${s.container_id}-${s.date.replace(/-/g,"")}` : null;
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
     id, coffee: s.coffee, date: s.date, container_id: s.container_id,
-    roasted_weight: Number(s.roasted_weight),
+    roasted_weight: Number(s.roasted_weight), fill_id,
   });
   if (session_err) { state.saving = false; state.ui.err = "Failed to save session. Please try again."; render(); return; }
 
