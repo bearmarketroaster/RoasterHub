@@ -191,12 +191,12 @@ async function download_invoice(invoice_path) {
 }
 
 async function save_adjustment() {
-  state.saving = true; render();
-  const coffee = document.getElementById("adj-coffee")?.value;
-  const raw = (document.getElementById("adj-kg")?.value || "").trim();
+  state.saving = true;
+  const coffee = state.ui.adj.coffee;
+  const raw = String(state.ui.adj.change_kg || "").trim();
   const change_kg = parseFloat(raw);
-  const reason = document.getElementById("adj-reason")?.value;
-  const note = document.getElementById("adj-note")?.value.trim();
+  const reason = state.ui.adj.reason;
+  const note = (state.ui.adj.note || "").trim();
   if (!coffee) { state.ui.adj_err="Please select a coffee."; state.saving=false; render(); return; }
   if (!raw || isNaN(change_kg) || change_kg === 0) { state.ui.adj_err="Please enter a non-zero kg value (use - for deductions)."; state.saving=false; render(); return; }
   const { error } = await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: today(), coffee, change_kg, reason, note: note||null, auto: false });
@@ -658,7 +658,18 @@ function attach_listeners() {
 
   app.querySelector("#toggle-adj-form")?.addEventListener("click", () => { state.ui.show_adj_form=!state.ui.show_adj_form; state.ui.adj_err=""; render(); });
   app.querySelector("#cancel-adj")?.addEventListener("click", () => { state.ui.show_adj_form=false; state.ui.adj_err=""; render(); });
-  app.querySelector("#save-adj")?.addEventListener("click", () => save_adjustment());
+  app.querySelector("#adj-coffee")?.addEventListener("change", e => { state.ui.adj.coffee = e.target.value; });
+  app.querySelector("#adj-reason")?.addEventListener("change", e => { state.ui.adj.reason = e.target.value; });
+  app.querySelector("#adj-kg")?.addEventListener("input", e => { state.ui.adj.change_kg = e.target.value; });
+  app.querySelector("#adj-note")?.addEventListener("input", e => { state.ui.adj.note = e.target.value; });
+  app.querySelector("#save-adj")?.addEventListener("click", () => {
+    // Read from DOM in case the user typed without firing change/input (autofill, paste etc)
+    state.ui.adj.coffee    = document.getElementById("adj-coffee")?.value    || state.ui.adj.coffee;
+    state.ui.adj.reason    = document.getElementById("adj-reason")?.value    || state.ui.adj.reason;
+    state.ui.adj.change_kg = document.getElementById("adj-kg")?.value         ?? state.ui.adj.change_kg;
+    state.ui.adj.note      = document.getElementById("adj-note")?.value      ?? state.ui.adj.note;
+    save_adjustment();
+  });
 }
 </script>
 </body>
