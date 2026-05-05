@@ -67,6 +67,7 @@
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -91,25 +92,57 @@ supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
   init();
 });
 
-const TABS = ["Containers","Orders","Deliveries"];
+const TABS = ["Containers","Deliveries"];
 const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },{ val:"500g", label:"500g" },{ val:"1kg", label:"1kg" },{ val:"Bar 5kg", label:"Bar" }];
 
 const state = {
-  tab: 0, containers: [], roast_sessions: [], orders: [], dispatches: [],
+  tab: 0, containers: [], roast_sessions: [], dispatches: [],
   coffees: [], fp_codes: [], shop_mappings: [], base_url: "",
   user_role: null,
   loading: true, saving: false, scan_id: null,
-  editing_order: null, review_queue: [],
   ui: {
     expanded_qr: null,
-    show_upload: false, upload_err: "", parsing: false,
-    expanded_orders: {}, expanded_deliveries: {},
-    review_items_open: false,
+    expanded_deliveries: {},
   },
 };
 
 function today() { return new Date().toISOString().split("T")[0]; }
 function active_fill(c) { return { coffee: c.coffee, remaining: c.remaining||0, fill_number: 1, date: c.roast_sessions?.[0]?.date||"" }; }
+
+// ── HTML5 QR scanner integration ──
+let _html5_qr = null;
+function start_qr_scanner() {
+  if (packing_state.scanner_active) return;
+  if (!window.Html5Qrcode) {
+    flash_scan("Camera scanner not loaded — use manual entry", "error");
+    return;
+  }
+  const el = document.getElementById("qr-scanner");
+  if (!el) return;
+  packing_state.scanner_active = true;
+  _html5_qr = new window.Html5Qrcode("qr-scanner", { verbose: false });
+  _html5_qr.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 220, height: 220 } },
+    decoded => process_scan(decoded),
+    () => {} // ignore parse errors (every frame without a code)
+  ).catch(err => {
+    packing_state.scanner_active = false;
+    flash_scan("Camera unavailable — use manual entry", "error");
+    console.error("Scanner start failed:", err);
+  });
+}
+function stop_qr_scanner() {
+  if (!_html5_qr || !packing_state.scanner_active) {
+    packing_state.scanner_active = false;
+    return;
+  }
+  _html5_qr.stop().then(() => _html5_qr.clear()).catch(()=>{}).finally(() => {
+    packing_state.scanner_active = false;
+    _html5_qr = null;
+  });
+}
+
 const BAG_SIZE_KG = { "100g":0.1, "200g":0.2, "500g":0.5, "1kg":1, "Bar 5kg":5 };
 function calc_kg(bags, bag_size) { return (Number(bags)||0)*(BAG_SIZE_KG[bag_size]||Number(bag_size)||0); }
 function to_upper(s) { return (s||"").trim().toUpperCase(); }
@@ -120,34 +153,6 @@ function gen_id(prefix) {
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 const PALETTE = ["#1a1008","#c8a96e","#4a9e6b","#e05c2a","#4a7c4e","#e0a82a","#888","#5a3e1b"];
 function color_for(i) { return PALETTE[i%PALETTE.length]; }
-
-function get_coffee_map(coffee_name) {
-  const matching_fp = (state.fp_codes||[]).filter(f => f.coffee_name?.trim().toLowerCase()===coffee_name.trim().toLowerCase());
-  const fp_sizes = matching_fp.map(f => ({ code: f.fp_code, size: f.bag_size }));
-  const fp_codes = matching_fp.map(f => to_upper(f.fp_code)).filter(Boolean);
-  const keywords = coffee_name.toLowerCase().split(/\s+/).filter(w => w.length>3);
-  return { fp_sizes, fp_codes, keywords };
-}
-function order_matches_coffee(order, fp_codes, keywords) {
-  return order.items.some(item => fp_codes.length>0 ? fp_codes.includes(to_upper(item.code)) : keywords.some(kw => item.description.toLowerCase().includes(kw)));
-}
-function get_matched_items(order, fp_codes, keywords) {
-  return order.items.filter(item => fp_codes.length>0 ? fp_codes.includes(to_upper(item.code)) : keywords.some(kw => item.description.toLowerCase().includes(kw)));
-}
-function resolve_quantities(matched_items, fp_sizes) {
-  let bulk=0;
-  const retail = RETAIL_SIZES.map(s => ({ bag_size:s.val, bags:"0" }));
-  matched_items.forEach(item => {
-    const qty=Number(item.quantity)||0, desc=item.description.toLowerCase();
-    const fp=fp_sizes.find(s => to_upper(s.code)===to_upper(item.code));
-    if (fp) { const i=retail.findIndex(r=>r.bag_size===fp.size); if(i>=0) retail[i].bags=String(Number(retail[i].bags)+qty); return; }
-    if (desc.includes("bar")) { const i=retail.findIndex(r=>r.bag_size==="Bar 5kg"); if(i>=0) retail[i].bags=String(Number(retail[i].bags)+qty); return; }
-    const sv=desc.includes("100g")?"100g":desc.includes("200g")?"200g":desc.includes("500g")||desc.includes("500gr")?"500g":desc.includes("1kg")?"1kg":null;
-    if (sv) { const i=retail.findIndex(r=>r.bag_size===sv); if(i>=0) retail[i].bags=String(Number(retail[i].bags)+qty); }
-  });
-  return { bulk, retail };
-}
-
 async function load_pdf_js() {
   if (window.pdfjsLib) return window.pdfjsLib;
   await new Promise((res,rej) => { const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"; s.onload=res; s.onerror=()=>rej(new Error("Could not load PDF reader.")); document.head.appendChild(s); });
@@ -160,80 +165,6 @@ async function extract_pdf_text(file) {
   for (let p=1;p<=pdf.numPages;p++) { const page=await pdf.getPage(p), tc=await page.getTextContent(); const items=tc.items.slice().sort((a,b)=>{ const dy=Math.round(b.transform[5])-Math.round(a.transform[5]); return dy!==0?dy:a.transform[4]-b.transform[4]; }); full+=items.map(i=>i.str).join("\n")+"\n"; }
   return full;
 }
-// resolve_shop_name uses shop_mappings loaded from Supabase
-function resolve_shop_name(name) {
-  const match = (state.shop_mappings||[]).find(m => m.parsed_name.toLowerCase().trim() === name.toLowerCase().trim());
-  return match ? match.master_name : name;
-}
-
-// Parse a single PO page's lines into an order object
-function parse_bc_po_page(lines) {
-  const FP_RE   = /^FP\d{3,}$/i;
-  const NUM_RE  = /^\d{1,3}(,\d{3})*(\.\d+)?$/;
-  const UNIT_RE = /^(EACH|KGS)$/i;
-  const SKIP_RE = /^(Yes|No|ROW|ROI|EU|IE)$/i;
-
-  let shop_name="", po_number="", order_date="", order_total=0;
-
-  for (let i=0; i<lines.length; i++) {
-    const l = lines[i];
-    if (/^Purchaser$/i.test(l) && lines[i+1] && !shop_name)
-      shop_name = lines[i+1].trim();
-    if (/^Ship-to Address$/i.test(l) && lines[i+1] && !shop_name)
-      shop_name = lines[i+1].trim(); // fallback when Purchaser field is absent
-    if (/^PO\d{5,}$/i.test(l) && !po_number)
-      po_number = l.trim();
-    if (/^Document Date$/i.test(l) && lines[i+1])
-      order_date = lines[i+1].trim();
-    const tot = l.match(/^Total\s+EUR\s+([\d,]+\.?\d*)$/i);
-    if (tot) order_total = parseFloat(tot[1].replace(/,/g,""))||0;
-  }
-
-  const items = [];
-  let i = 0;
-  while (i < lines.length) {
-    if (/^Total\s+EUR/i.test(lines[i])) break;
-    if (FP_RE.test(lines[i])) {
-      const code = lines[i].toUpperCase(); i++;
-      const dp = [];
-      while (i < lines.length && !NUM_RE.test(lines[i]) && !UNIT_RE.test(lines[i])) {
-        if (!SKIP_RE.test(lines[i])) dp.push(lines[i]);
-        i++;
-      }
-      const description = dp.join(" ").trim();
-      let quantity=0, unit="EACH", unit_cost=0, total=0;
-      if (NUM_RE.test(lines[i]||"")) { quantity=parseFloat(lines[i].replace(/,/g,"")); i++; }
-      if (UNIT_RE.test(lines[i]||"")) { unit=lines[i].toUpperCase(); i++; }
-      if (NUM_RE.test(lines[i]||"")) { unit_cost=parseFloat(lines[i].replace(/,/g,"")); i++; }
-      while (i < lines.length && SKIP_RE.test(lines[i])) i++;
-      if (NUM_RE.test(lines[i]||"")) { total=parseFloat(lines[i].replace(/,/g,"")); i++; }
-      const fp_match = (state.fp_codes||[]).find(f => f.fp_code.toUpperCase() === code.toUpperCase());
-      if (fp_match && quantity > 0) {
-        const friendly_desc = `${fp_match.coffee_name} - ${fp_match.bag_size}`;
-        items.push({ code, description: friendly_desc, quantity, unit, unit_cost, total });
-      }
-    } else { i++; }
-  }
-  return { shop_name: resolve_shop_name(shop_name), po_number, order_date, order_total, items };
-}
-
-// Parse a full PDF — one PO per page, returns array of orders
-function parse_bc_purchase_order(raw) {
-  // Each page starts with the column header line
-  const pages = raw.split(/(?=No\.\s+Description\s+Quantity)/)
-    .map(p => p.trim()).filter(Boolean);
-
-  const orders = [];
-  for (const page_text of pages) {
-    const lines = page_text.split("\n").map(l => l.trim()).filter(Boolean);
-    const order = parse_bc_po_page(lines);
-    if (order.items.length > 0) orders.push(order);
-  }
-
-  if (!orders.length) throw new Error("No orders found — PDF layout may have changed.");
-  return orders;
-}
-
 async function render_qr(el, value, size=140) {
   if (!window.QRCode) { await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
   el.innerHTML="";
@@ -268,8 +199,7 @@ async function load_data() {
     }
   });
   state.containers = Object.values(container_map);
-  const { data: orders } = await supabaseClient.from("orders").select("*, order_items(*)").order("created_at",{ascending:false});
-  state.orders=(orders||[]).map(o=>({...o,items:o.order_items||[]}));
+
   const { data: dispatches } = await supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date",{ascending:false});
   state.dispatches=(dispatches||[]).map(d=>({...d,lines:d.dispatch_lines||[]}));
 
@@ -288,30 +218,15 @@ async function load_data() {
 
 
 
-async function save_order(order) {
-  state.saving=true; render();
-  const order_id=gen_id("ORD");
-  const { error } = await supabaseClient.from("orders").insert({id:order_id,shop_name:order.shop_name,po_number:order.po_number||null,order_date:order.order_date||null,order_total:order.order_total||0,status:"pending"});
-  if (error) { state.saving=false; return; }
-  await supabaseClient.from("order_items").insert(order.items.map((item,i)=>({id:`${order_id}-I${i+1}`,order_id,code:item.code||null,description:item.description,quantity:item.quantity,unit:item.unit||"EACH",unit_cost:item.unit_cost||0,total:item.total||0})));
-
-  state.saving=false; await load_data(); render();
-}
-
 async function update_order(order_id, shop_name, po_number, items) {
   state.saving=true; render();
   await supabaseClient.from("orders").update({shop_name,po_number}).eq("id",order_id);
   await supabaseClient.from("order_items").delete().eq("order_id",order_id);
   await supabaseClient.from("order_items").insert(items.map((item,i)=>({id:`${order_id}-I${i+1}-${Date.now()}`,order_id,code:item.code||null,description:item.description,quantity:item.quantity,unit:item.unit||"EACH",unit_cost:item.unit_cost||0,total:item.total||0})));
-  state.editing_order=null; state.saving=false; await load_data(); render();
+  state.saving=false; await load_data(); render();
 }
 
-async function update_order_status(order_id, status) {
-  await supabaseClient.from("orders").update({status}).eq("id",order_id);
-  await load_data(); render();
-}
-
-async function save_dispatch(container_id, fill_number, shop, lines, total_kg, order_id) {
+async function save_dispatch(container_id, shop, lines, total_kg) {
   state.saving=true; render();
   // Ensure the container row exists (FK requirement) — upsert is a no-op if it already does
   await supabaseClient.from("containers").upsert({ id: container_id }, { onConflict: "id" });
@@ -319,10 +234,11 @@ async function save_dispatch(container_id, fill_number, shop, lines, total_kg, o
   const container = state.containers.find(c => c.id === container_id);
   const fill_id = container?.fill_id || null;
   const dispatch_id=gen_id("DSP");
-  const { error: d_err } = await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,fill_id,date:today(),shop,total_kg,confirmed_at:null,order_id:order_id||null});
-  if (d_err) { state.saving=false; alert("Failed to save dispatch: "+d_err.message); return; }
+  const { error: d_err } = await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,fill_id,date:today(),shop,total_kg,confirmed_at:null});
+  if (d_err) { state.saving=false; alert("Failed to save dispatch: "+d_err.message); return null; }
   await supabaseClient.from("dispatch_lines").insert(lines.map((l,i)=>({id:`${dispatch_id}-L${i+1}`,dispatch_id,type:l.type,kg:l.kg,bags:l.bags||null,bag_size:l.bag_size||null})));
   state.saving=false; await load_data(); render();
+  return dispatch_id;
 }
 
 async function confirm_delivery(dispatch_id) {
@@ -349,10 +265,10 @@ function build_app() {
   if (state.scan_id) return build_scan_overlay();
   const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#c8a96e;margin-top:1px">Bear Roastery</div></div></div><button class="btn-logout" id="logout-btn">Log Out</button></div>`;
   if (state.loading) return header+`<div class="loading">Loading…</div>`;
-  const badges={Orders:state.orders.filter(o=>o.status==="pending").length,Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
+  const badges={Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
   return header+`
     <div class="tabs">${TABS.map((t,i)=>`<button class="tab-btn${state.tab===i?" active":""}" data-tab="${i}">${esc(t)}${badges[t]>0?`<span class="tag" style="background:#e05c2a;color:#fff;margin-left:6px">${badges[t]}</span>`:""}</button>`).join("")}</div>
-    <div class="content">${[build_containers_tab,build_orders_tab,build_deliveries_tab][state.tab]()}</div>`;
+    <div class="content">${[build_containers_tab,build_deliveries_tab][state.tab]()}</div>`;
 }
 
 function build_scan_overlay() {
@@ -457,74 +373,6 @@ function build_coffee_select(id, value) {
   return `<input id="${id}" value="${esc(value)}" placeholder="e.g. Ethiopia Yirgacheffe" />`;
 }
 
-function build_orders_tab() {
-  if (state.editing_order) return build_order_editor(state.editing_order);
-  if (state.review_queue.length) return build_order_review(state.review_queue[0]);
-  const {show_upload,upload_err,parsing}=state.ui;
-  const upload_panel=show_upload?`<div class="card mb-16" style="text-align:center;padding:32px"><div style="font-size:36px;margin-bottom:12px">📄</div><p class="hint" style="margin-bottom:16px">Upload one or more Purchase Order PDFs</p><input id="po-file" type="file" accept=".pdf" multiple style="display:none" /><div class="flex gap-10" style="justify-content:center;flex-wrap:wrap"><button class="btn btn-dark" id="choose-pdf" ${parsing?"disabled":""}>${parsing?"⏳ Reading...":"📂 Choose PDF(s)"}</button><button class="btn btn-grey" id="cancel-upload">Cancel</button></div>${upload_err?`<p class="err" style="margin-top:12px">${esc(upload_err)}</p>`:""}</div>`:"";
-  const pending=state.orders.filter(o=>o.status==="pending");
-  const confirmed=state.orders.filter(o=>o.status==="confirmed");
-  const packed=state.orders.filter(o=>o.status==="packed");
-  return `
-    <div class="flex-between mb-16"><h2 style="margin:0">Orders</h2>${state.user_role==="admin"?`<div class="flex gap-8"><button class="btn btn-grey" style="font-size:13px" id="show-manual-order">+ Manual</button><button class="btn btn-dark" id="toggle-upload">+ Upload PO</button></div>`:""}</div>
-    ${upload_panel}
-    ${state.orders.length===0&&!show_upload?`<div class="card empty"><div class="icon">📋</div>No orders yet. Upload a PO to get started.</div>`:""}
-    ${pending.length>0?`<h3 style="color:#e05c2a;margin-top:0">⏳ Awaiting Review (${pending.length})</h3>${pending.map(o=>build_order_card(o)).join("")}`:""}
-    ${confirmed.length>0?`<h3 style="color:#c8a96e;margin-top:${pending.length?24:0}px">✅ Ready to Pack (${confirmed.length})</h3>${confirmed.map(o=>build_order_card(o)).join("")}`:""}
-    ${packed.length>0?`<h3 style="color:#4a9e6b;margin-top:${confirmed.length||pending.length?24:0}px">📦 Packed (${packed.length})</h3>${packed.map(o=>build_order_card(o)).join("")}`:""}`;
-}
-
-function build_order_card(order) {
-  const cfg={pending:{color:"#e0a82a",bg:"#fff3e0",label:"⏳ Awaiting Review"},confirmed:{color:"#c8a96e",bg:"#fff8ee",label:"✅ Ready to Pack"},packed:{color:"#4a9e6b",bg:"#edf7f0",label:"📦 Packed"}}[order.status];
-  const expanded=state.ui.expanded_orders[order.id];
-  const items_table=expanded?`<div style="margin-top:8px;background:#f5f0eb;border-radius:8px;overflow:hidden"><div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:4px 12px;padding:8px 12px;background:#e8d5b0;font-size:12px;font-weight:600;color:#5a3e1b"><span>Code</span><span>Item</span><span style="text-align:right">Qty</span><span style="text-align:right">Total</span></div>${order.items.map(item=>`<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:4px 12px;padding:8px 12px;border-top:1px solid #e0d5c5;font-size:13px"><span class="mono" style="color:#888;font-size:12px">${esc(item.code)}</span><span>${esc(item.description)}</span><span style="text-align:right;color:#555">${item.quantity} ${item.unit}</span><span style="text-align:right;color:#555">€${Number(item.total).toFixed(2)}</span></div>`).join("")}${order.order_total>0?`<div style="padding:8px 12px;border-top:1px solid #e0d5c5;display:flex;justify-content:flex-end;font-size:13px;font-weight:700">Total: €${Number(order.order_total).toFixed(2)}</div>`:""}</div>`:"";
-  return `
-    <div class="card" style="border-left:4px solid ${cfg.color};margin-bottom:12px">
-      <div class="flex-between flex-wrap">
-        <div class="flex-wrap gap-10"><span style="font-weight:700;font-size:15px">${esc(order.shop_name)}</span><span class="tag" style="background:${cfg.bg};color:${cfg.color}">${cfg.label}</span></div>
-        <div class="flex-wrap gap-6">
-          ${order.status!=="packed"?`<button class="btn btn-grey btn-sm" data-edit-order="${esc(order.id)}">✏️ Edit</button>`:""}
-          ${order.status==="pending"?`<button class="btn btn-green btn-sm" data-confirm-order="${esc(order.id)}">✓ Confirm</button>`:""}
-          ${order.status==="confirmed"?`<button class="btn btn-dkgreen btn-sm" data-complete-order="${esc(order.id)}">✓ Mark Complete</button>`:""}
-        </div>
-      </div>
-      <div class="flex gap-10 mt-8" style="font-size:13px;color:#888;flex-wrap:wrap">
-        ${order.po_number?`<span>PO: <strong>${esc(order.po_number)}</strong></span>`:""}
-        ${order.order_date?`<span>Date: <strong>${esc(order.order_date)}</strong></span>`:""}
-        ${order.order_total>0?`<span>Total: <strong>€${Number(order.order_total).toFixed(2)}</strong></span>`:""}
-      </div>
-      <div style="margin-top:10px;padding-top:8px;border-top:1px solid #f0ebe4">
-        <button style="background:none;border:none;cursor:pointer;font-size:13px;color:#c8a96e;font-weight:600;padding:0;display:flex;align-items:center;gap:6px" data-toggle-order="${esc(order.id)}">
-          <span>${expanded?"▾":"▸"}</span>${expanded?"Hide":"Show"} ${order.items.length} line item${order.items.length!==1?"s":""}
-        </button>
-      </div>
-      ${items_table}
-    </div>`;
-}
-
-function build_order_review(parsed) {
-  const shop_name = parsed.shop_name || [parsed.company,parsed.location].filter(Boolean).join(" ").trim() || "Unknown";
-  const header = [shop_name, parsed.po_number].filter(Boolean).join("  ·  ");
-  const q=state.review_queue, open=state.ui.review_items_open;
-  const items_html=open?(parsed.items||[]).map((item,i)=>`<div style="background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#888">${esc(item.code)}</span><button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px" data-remove-review-item="${i}">✕</button></div><div class="grid-2"><div><label class="lbl">Description</label><input data-review-desc="${i}" value="${esc(item.description)}" /></div><div class="grid-2"><div><label class="lbl">Qty</label><input type="number" data-review-qty="${i}" value="${item.quantity}" /></div><div><label class="lbl">Unit</label><select data-review-unit="${i}"><option ${item.unit==="EACH"?"selected":""}>EACH</option><option ${item.unit==="KGS"?"selected":""}>KGS</option></select></div></div></div></div>`).join(""):"";
-  return `
-    <h2>Review Imported Order</h2>
-    ${q.length>1?`<div style="background:#f5f0eb;border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:13px;color:#555;display:flex;justify-content:space-between"><span>📄 Order <strong>1</strong> of <strong>${q.length}</strong>${q.length>1?" — "+q.slice(1).map(o=>esc(o.shop_name||"")).filter(Boolean).join(", ")+" up next":""}</span><span style="color:#888">Save each to continue</span></div>`:""}
-    <div class="card mb-16">
-      <div class="collapsible-header" id="toggle-review-items" style="margin-bottom:${open?14:0}px">
-        <div><span style="font-weight:700;color:#1a1008;font-size:15px">${esc(header||"Imported Order")}</span><span style="margin-left:8px;font-size:13px;color:#888">(${(parsed.items||[]).length})</span></div>
-        <span class="collapsible-arrow">${open?"▾":"▸"}</span>
-      </div>
-      ${items_html}
-    </div>
-    <p id="review-err" class="err" style="display:none;margin-bottom:12px"></p>
-    <div class="flex gap-10" style="flex-wrap:wrap">
-      <button class="btn btn-dark btn-lg" id="save-review-order" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Order"}</button>
-      ${q.length>1?`<button class="btn btn-amber btn-lg" id="skip-review">Skip →</button>`:""}
-      <button class="btn btn-grey btn-lg" id="cancel-review">Cancel All</button>
-    </div>`;
-}
-
 function build_order_editor(order) {
   const items_html=order.items.map((item,i)=>`<div style="background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#888">${esc(item.code)}</span><button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px" data-remove-edit-item="${i}">✕</button></div><div class="grid-2"><div><label class="lbl">Description</label><input data-edit-desc="${i}" value="${esc(item.description)}" /></div><div class="grid-2"><div><label class="lbl">Qty</label><input type="number" data-edit-qty="${i}" value="${item.quantity}" /></div><div><label class="lbl">Unit</label><select data-edit-unit="${i}"><option ${item.unit==="EACH"?"selected":""}>EACH</option><option ${item.unit==="KGS"?"selected":""}>KGS</option></select></div></div></div></div>`).join("");
   return `<h2>Edit Order</h2><div class="card mb-16"><div class="grid-2"><div><label class="lbl">Shop Name *</label><input id="edit-shop" value="${esc(order.shop_name)}" /></div><div><label class="lbl">PO Number</label><input id="edit-po" value="${esc(order.po_number||"")}" /></div></div></div><div class="card mb-16"><h3>Line Items</h3><div id="edit-items-list">${items_html}</div></div><div class="flex gap-10"><button class="btn btn-dark btn-lg" id="save-edit-order" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Changes"}</button><button class="btn btn-grey btn-lg" id="cancel-edit-order">Cancel</button></div>`;
@@ -549,7 +397,7 @@ function build_order_delivery_card(order, dispatches, get_ref) {
   const border_color=all_confirmed?"#4a9e6b":some_confirmed?"#c8a96e":"#e0a82a";
   const total_kg=dispatches.reduce((s,d)=>s+d.total_kg,0);
   const expanded=state.ui.expanded_deliveries["ord_"+order.id];
-  const breakdown_html=expanded?dispatches.map(d=>{ const{c,fill}=get_ref(d); const b_line=d.lines.find(l=>l.type==="bulk"); const r_lines=d.lines.filter(l=>l.type==="retail"); return `<div style="background:#f5f0eb;border-radius:8px;padding:12px"><div class="flex-between flex-wrap mb-8"><span style="font-weight:600;font-size:13px">${esc(fill?.coffee??"—")}</span>${d.confirmed_at?`<span class="tag" style="background:#edf7f0;color:#4a9e6b;font-size:11px">✓ Shop confirmed</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">⏳ Awaiting confirmation</span>`}</div><div style="font-size:12px;color:#888;margin-bottom:6px">${esc(c?.id??"")} (Fill #${d.fill_number}) · ${d.date}${d.confirmed_at?` · Confirmed ${new Date(d.confirmed_at).toLocaleDateString()}`:""}</div><div style="font-size:13px;color:#555">${b_line?`<span>⚖️ ${b_line.kg}kg bulk &nbsp;</span>`:""}${r_lines.map(l=>`<span>🛍️ ${l.bags} × ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label} &nbsp;</span>`).join("")}</div>${!d.confirmed_at?`<button class="btn btn-dark btn-sm mt-8" data-scan="${esc(d.container_id)}">📱 Simulate Shop Scan</button>`:""}</div>`; }).join(""):"";
+  const breakdown_html=expanded?dispatches.map(d=>{ const{c,fill}=get_ref(d); const b_line=d.lines.find(l=>l.type==="bulk"); const r_lines=d.lines.filter(l=>l.type==="retail"); return `<div style="background:#f5f0eb;border-radius:8px;padding:12px"><div class="flex-between flex-wrap mb-8"><span style="font-weight:600;font-size:13px">${esc(fill?.coffee??"—")}</span>${d.confirmed_at?`<span class="tag" style="background:#edf7f0;color:#4a9e6b;font-size:11px">✓ Shop confirmed</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">⏳ Awaiting confirmation</span>`}</div><div style="font-size:12px;color:#888;margin-bottom:6px">${esc(c?.id??"")}${d.fill_id?` <span class="mono" style="background:#f0ebe4;color:#888;padding:1px 6px;border-radius:3px;font-size:10px">${esc(d.fill_id)}</span>`:""} · ${d.date}${d.confirmed_at?` · Confirmed ${new Date(d.confirmed_at).toLocaleDateString()}`:""}</div><div style="font-size:13px;color:#555">${b_line?`<span>⚖️ ${b_line.kg}kg bulk &nbsp;</span>`:""}${r_lines.map(l=>`<span>🛍️ ${l.bags} × ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label} &nbsp;</span>`).join("")}</div>${!d.confirmed_at?`<button class="btn btn-dark btn-sm mt-8" data-scan="${esc(d.container_id)}">📱 Simulate Shop Scan</button>`:""}</div>`; }).join(""):"";
   return `
     <div class="card" style="border-left:4px solid ${border_color};margin-bottom:12px">
       <div class="flex-between flex-wrap mb-8">
@@ -576,7 +424,7 @@ function build_dispatch_card(d, c, fill, confirmed, show_scan=true) {
     <div class="card" style="border-left:4px solid ${confirmed?"#4a9e6b":"#e0a82a"};margin-bottom:12px">
       <div class="flex-between flex-wrap mb-10"><span style="font-weight:700;font-size:15px">${esc(d.shop)}</span>${confirmed?`<span class="tag" style="background:#edf7f0;color:#4a9e6b">✓ Delivered</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a">⏳ In Transit</span>`}</div>
       <div class="grid-2 mb-10" style="font-size:13px">
-        ${info_row("Coffee",fill?.coffee)}${info_row("Container",`${d.container_id} (Fill #${d.fill_number})`)}
+        ${info_row("Coffee",fill?.coffee)}${info_row("Container",d.fill_id||d.container_id)}
         ${info_row("Roast Date",fill?.date)}${info_row("Dispatch Date",d.date)}
         ${info_row("Total",`${d.total_kg}kg`)}${confirmed?info_row("Confirmed",new Date(d.confirmed_at).toLocaleString()):""}
       </div>
@@ -593,27 +441,206 @@ function info_row(label, value) {
   return `<div><span style="color:#888;font-size:12px">${esc(label)}</span><br/><span style="font-weight:500">${esc(value??"—")}</span></div>`;
 }
 
-const packing_state = { step:"select", selected_order_id:null, shop:"", retail_lines:RETAIL_SIZES.map(s=>({bag_size:s.val,bags:"0"})), err:"" };
-// retail_lines uses val from RETAIL_SIZES e.g. "100g","200g","500g","1kg","Bar 5kg"
+// Scan-to-pack state
+// step: "shop" -> "scan" -> "review" -> "done"
+const packing_state = {
+  step: "shop",
+  shop: "",
+  scanned_items: {},   // { fp_code: count }  e.g. { FP0028: 5, FP0030: 2 }
+  scanned_buckets: [], // [bucket_id, ...]
+  err: "",
+  scanner_active: false,
+  scanner_msg: "",     // last scan feedback
+  scanner_msg_type: "info", // info | success | error
+};
 
+function reset_packing_state() {
+  packing_state.step = "shop";
+  packing_state.shop = "";
+  packing_state.scanned_items = {};
+  packing_state.scanned_buckets = [];
+  packing_state.err = "";
+  packing_state.scanner_msg = "";
+}
+
+// Compute totals from scanned items + buckets
+function packing_total_kg() {
+  let total = 0;
+  for (const [code, count] of Object.entries(packing_state.scanned_items)) {
+    const fp = state.fp_codes.find(f => f.fp_code === code);
+    if (fp) total += count * (BAG_SIZE_KG[fp.bag_size] || 0);
+  }
+  total += packing_state.scanned_buckets.length * 5;
+  return total;
+}
+
+// Process a scanned QR value
+function process_scan(raw_value) {
+  const value = (raw_value || "").trim().toUpperCase();
+  if (!value) return;
+
+  // Bucket QR?
+  if (value.startsWith("BKT-")) {
+    if (packing_state.scanned_buckets.includes(value)) {
+      flash_scan(`${value} already scanned`, "error");
+      return;
+    }
+    packing_state.scanned_buckets.push(value);
+    flash_scan(`✓ ${value}`, "success");
+    render();
+    return;
+  }
+
+  // FP code?
+  if (/^FP\d+$/.test(value)) {
+    const fp = state.fp_codes.find(f => f.fp_code === value);
+    if (!fp) {
+      flash_scan(`${value} not found in settings`, "error");
+      return;
+    }
+    packing_state.scanned_items[value] = (packing_state.scanned_items[value] || 0) + 1;
+    flash_scan(`✓ ${fp.coffee_name} ${fp.bag_size}`, "success");
+    render();
+    return;
+  }
+
+  flash_scan(`Unknown QR: ${value}`, "error");
+}
+
+let _flash_timer = null;
+function flash_scan(msg, type) {
+  packing_state.scanner_msg = msg;
+  packing_state.scanner_msg_type = type;
+  if (_flash_timer) clearTimeout(_flash_timer);
+  _flash_timer = setTimeout(() => {
+    packing_state.scanner_msg = "";
+    render();
+  }, 2000);
+}
 
 function build_packing_page(container, fill) {
-  const ps=packing_state;
-  const {fp_sizes,fp_codes,keywords}=get_coffee_map(fill.coffee);
-  const matching_orders=state.orders.filter(o=>(o.status==="confirmed"||o.status==="pending")&&order_matches_coffee(o,fp_codes,keywords));
-  if (ps.step==="done") {
-    const total_kg=ps.retail_lines.reduce((s,l)=>s+calc_kg(l.bags,l.bag_size),0);
-    return `<div class="overlay"><div class="modal" style="text-align:center"><div style="font-size:64px">✅</div><h2 style="margin:12px 0 8px">All done!</h2><p style="color:#555;font-size:15px"><strong>${total_kg}kg</strong> packed for <strong>${esc(ps.shop)}</strong></p>${ps.retail_lines.filter(l=>Number(l.bags)>0).map(l=>`<p style="color:#888;font-size:13px;margin:4px 0">${l.bag_size==="Bar 5kg"?"🪣":"🛍️"} ${l.bags} × ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label}</p>`).join("")}<button class="btn btn-dark mt-16" style="padding:12px 32px" id="packing-done">Done</button></div></div>`;
+  const ps = packing_state;
+
+  if (ps.step === "done") {
+    const total_kg = packing_total_kg();
+    const item_count = Object.values(ps.scanned_items).reduce((s,n)=>s+n, 0);
+    return `<div class="overlay"><div class="modal" style="text-align:center">
+      <div style="font-size:64px">✅</div>
+      <h2 style="margin:12px 0 8px">All done!</h2>
+      <p style="color:#555;font-size:15px"><strong>${total_kg.toFixed(1)}kg</strong> packed for <strong>${esc(ps.shop)}</strong></p>
+      <p style="color:#888;font-size:13px;margin-top:8px">${item_count} bag${item_count!==1?"s":""}${ps.scanned_buckets.length?` · ${ps.scanned_buckets.length} bucket${ps.scanned_buckets.length!==1?"s":""}`:""}</p>
+      <button class="btn btn-dark mt-16" style="padding:12px 32px" id="packing-done">Done</button>
+    </div></div>`;
   }
-  if (ps.step==="review") {
-    const total_kg=ps.retail_lines.reduce((s,l)=>s+calc_kg(l.bags,l.bag_size),0);
-    return `<div class="overlay"><div class="modal"><div style="text-align:center;margin-bottom:20px"><div style="font-size:36px">🔍</div><h2 style="margin:8px 0 4px">Check your entry</h2><p style="color:#888;font-size:14px">Make sure everything looks right</p></div><div style="background:#f5f0eb;border-radius:12px;padding:16px;margin-bottom:16px"><div class="grid-2 mb-12">${info_row("Shop",ps.shop)} ${info_row("Container",container.id)}${info_row("Coffee",fill.coffee)} ${info_row("Total",`${total_kg}kg`)}</div><div style="background:#fff;border-radius:8px;padding:12px"><div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600">BREAKDOWN</div>${ps.retail_lines.filter(l=>Number(l.bags)>0).map(l=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>${l.bag_size==="Bar 5kg"?"🪣":"🛍️"} ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label}</span><span style="font-weight:600">${l.bags} ${l.bag_size==="Bar 5kg"?"":"bags "}(${calc_kg(l.bags,l.bag_size)}kg)</span></div>`).join("")}</div></div><div class="grid-2"><button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="packing-back-edit">✏️ Edit</button><button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="packing-confirm" ${state.saving?"disabled":""}>${state.saving?"Saving…":"✓ Confirm"}</button></div></div></div>`;
+
+  if (ps.step === "review") {
+    const total_kg = packing_total_kg();
+    const item_rows = Object.entries(ps.scanned_items).map(([code, count]) => {
+      const fp = state.fp_codes.find(f => f.fp_code === code);
+      const label = fp ? `${fp.coffee_name} — ${fp.bag_size}` : code;
+      const kg = fp ? count * (BAG_SIZE_KG[fp.bag_size]||0) : 0;
+      return `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>🛍️ ${esc(label)}</span><span style="font-weight:600">× ${count} (${kg.toFixed(1)}kg)</span></div>`;
+    }).join("");
+    const bucket_rows = ps.scanned_buckets.length ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;padding-top:6px;border-top:1px solid #eee"><span>🪣 Buckets (5kg each)</span><span style="font-weight:600">× ${ps.scanned_buckets.length} (${(ps.scanned_buckets.length*5).toFixed(1)}kg)</span></div><div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${ps.scanned_buckets.map(esc).join(" · ")}</div>` : "";
+
+    return `<div class="overlay"><div class="modal">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:36px">🔍</div>
+        <h2 style="margin:8px 0 4px">Check your entry</h2>
+        <p style="color:#888;font-size:14px">Make sure everything looks right</p>
+      </div>
+      <div style="background:#f5f0eb;border-radius:12px;padding:16px;margin-bottom:16px">
+        <div class="grid-2 mb-12">
+          ${info_row("Shop", ps.shop)} ${info_row("Container", container.id)}
+          ${info_row("Coffee", fill.coffee)} ${info_row("Total", `${total_kg.toFixed(1)}kg`)}
+        </div>
+        <div style="background:#fff;border-radius:8px;padding:12px">
+          <div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600">BREAKDOWN</div>
+          ${item_rows || '<p class="hint" style="font-size:13px;color:#888">No bags scanned</p>'}
+          ${bucket_rows}
+        </div>
+      </div>
+      <div class="grid-2">
+        <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="packing-back-edit">✏️ Edit</button>
+        <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="packing-confirm" ${state.saving?"disabled":""}>${state.saving?"Saving…":"✓ Confirm"}</button>
+      </div>
+    </div></div>`;
   }
-  if (ps.step==="entry") {
-    const total_kg=ps.retail_lines.reduce((s,l)=>s+calc_kg(l.bags,l.bag_size),0), over_stock=total_kg>fill.remaining;
-    return `<div class="overlay"><div class="modal"><div style="text-align:center;margin-bottom:20px"><div style="font-size:40px">📦</div><h2 style="margin:8px 0 2px">${esc(fill.coffee)}</h2><div class="mono" style="color:#c8a96e;font-size:15px;font-weight:700">${esc(container.id)}</div><div style="color:#4a9e6b;font-size:14px;margin-top:4px">${fill.remaining}kg available</div></div><div style="margin-bottom:16px"><label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Shop</label><input id="pack-shop" value="${esc(ps.shop)}" placeholder="e.g. Bearmarket Stillorgan" style="font-size:16px;padding:12px 14px" /></div><div style="background:#f5f0eb;border-radius:12px;padding:16px;margin-bottom:16px"><label class="lbl" style="font-size:15px;color:#333;margin-bottom:12px">📦 Quantities</label>${ps.retail_lines.map((line,i)=>{ const kg=calc_kg(line.bags,line.bag_size); return `<div style="background:#fff;border-radius:8px;padding:12px;margin-bottom:${i<ps.retail_lines.length-1?10:0}px;display:flex;align-items:center;gap:12px"><div style="background:#1a1008;color:#e8d5b0;border-radius:6px;padding:8px 12px;font-weight:700;font-size:14px;min-width:52px;text-align:center">${RETAIL_SIZES.find(s=>s.val===line.bag_size)?.label}</div><input inputmode="numeric" value="${line.bags}" data-retail-idx="${i}" style="font-size:22px;padding:10px;text-align:center;font-weight:700;flex:1" /><div style="font-size:12px;color:${kg>0?"#4a9e6b":"#ccc"};font-weight:600;min-width:40px;text-align:right">${kg>0?`${kg}kg`:"—"}</div></div>`; }).join("")}</div>${total_kg>0?`<div style="background:${over_stock?"#fff0ee":"#edf7f0"};border:1px solid ${over_stock?"#e05c2a":"#4a9e6b"};border-radius:8px;padding:12px;margin-bottom:16px"><div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:6px">Total: ${total_kg}kg</div>${ps.retail_lines.filter(l=>Number(l.bags)>0).map(l=>`<div style="font-size:13px;color:#666;margin-top:2px">${l.bag_size==="Bar 5kg"?"🪣":"🛍️"} ${l.bags} × ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label} = ${calc_kg(l.bags,l.bag_size)}kg</div>`).join("")}${over_stock?`<div style="color:#e05c2a;font-size:13px;margin-top:6px;font-weight:600">⚠️ Exceeds available stock</div>`:""}</div>`:""} ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}<button class="btn btn-dark" style="width:100%;padding:16px;font-size:17px;border-radius:10px" id="pack-review">Review →</button><button class="btn btn-muted btn-full mt-10" id="pack-back-select">← Back to shops</button></div></div>`;
+
+  if (ps.step === "scan") {
+    const total_kg = packing_total_kg();
+    const item_count = Object.values(ps.scanned_items).reduce((s,n)=>s+n, 0);
+    const has_items = item_count > 0 || ps.scanned_buckets.length > 0;
+
+    const item_list = Object.entries(ps.scanned_items).map(([code, count]) => {
+      const fp = state.fp_codes.find(f => f.fp_code === code);
+      const label = fp ? `${fp.coffee_name} — ${fp.bag_size}` : code;
+      return `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🛍️ ${esc(label)}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(code)}</div></div>
+        <div style="font-weight:700;font-size:18px;color:#1a1008;margin:0 12px">× ${count}</div>
+        <button data-remove-item="${esc(code)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">−</button>
+      </div>`;
+    }).join("");
+    const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+      <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bucket (5kg)</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b)}</div></div>
+      <button data-remove-bucket="${esc(b)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
+    </div>`).join("");
+
+    const flash = ps.scanner_msg ? `<div style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:${ps.scanner_msg_type==="success"?"#4a9e6b":ps.scanner_msg_type==="error"?"#e05c2a":"#1a1008"};color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10">${esc(ps.scanner_msg)}</div>` : "";
+
+    return `<div class="overlay"><div class="modal" style="max-width:480px">
+      <div style="text-align:center;margin-bottom:14px">
+        <div style="font-weight:600;font-size:13px;color:#888">Packing for</div>
+        <h2 style="margin:2px 0 0">${esc(ps.shop)}</h2>
+        <div class="hint" style="font-size:12px;margin-top:4px">${esc(container.id)} · ${esc(fill.coffee)} · ${fill.remaining.toFixed(1)}kg avail</div>
+      </div>
+
+      <div style="position:relative;background:#1a1008;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
+        ${flash}
+        <div id="qr-scanner" style="width:100%;min-height:240px"></div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input id="manual-scan-input" placeholder="Or type ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
+        <button class="btn btn-dark btn-sm" id="manual-scan-btn">Add</button>
+      </div>
+
+      <div style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-weight:700;font-size:13px">SCANNED</div>
+          <div style="font-size:13px;color:#1a1008;font-weight:700">Total: ${total_kg.toFixed(1)}kg</div>
+        </div>
+        ${has_items ? item_list + bucket_list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>'}
+      </div>
+
+      ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
+
+      <div class="grid-2">
+        <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="pack-back-shop">← Shop</button>
+        <button class="btn btn-dark" style="padding:14px;font-size:15px;border-radius:10px" id="pack-review" ${!has_items?"disabled":""}>Review →</button>
+      </div>
+    </div></div>`;
   }
-  return `<div class="overlay"><div class="modal"><div style="text-align:center;margin-bottom:24px"><div style="font-size:40px">📦</div><h2 style="margin:8px 0 2px">${esc(fill.coffee)}</h2><div class="mono" style="color:#c8a96e;font-size:15px;font-weight:700">${esc(container.id)} — Fill #${fill.fill_number}</div><div style="color:#4a9e6b;font-size:14px;margin-top:4px">${fill.remaining}kg available</div></div><h3 style="font-size:16px;margin-bottom:12px">Who are you packing for?</h3>${matching_orders.length>0?`<div style="display:grid;gap:10px;margin-bottom:16px">${matching_orders.map(o=>{ const matched=get_matched_items(o,fp_codes,keywords); const{bulk,retail}=resolve_quantities(matched,fp_sizes); const total_exp=bulk+retail.reduce((s,r)=>s+calc_kg(r.bags,r.bag_size),0); return `<button data-select-order="${esc(o.id)}" style="background:#f5f0eb;border:2px solid #e0d5c5;border-radius:10px;padding:14px 16px;cursor:pointer;text-align:left;width:100%"><div style="font-weight:700;font-size:15px;margin-bottom:4px">${esc(o.shop_name)}</div><div style="font-size:13px;color:#888">${matched.length} line item${matched.length>1?"s":""}${o.po_number?` · PO ${esc(o.po_number)}`:""}${total_exp>0?` · ${total_exp}kg expected`:""}<span class="tag" style="margin-left:8px;background:${o.status==="confirmed"?"#fff8ee":"#fff3e0"};color:${o.status==="confirmed"?"#c8a96e":"#e0a82a"}">${o.status==="confirmed"?"✅ Ready":"⏳ Pending"}</span></div></button>`; }).join("")}</div>`:`<div style="background:#fff8ee;border:1px solid #c8a96e;border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:#888">No open orders found for <strong>${esc(fill.coffee)}</strong>. You can still pack manually below.</div>`}<button class="btn btn-grey btn-full" id="pack-manual">Pack without an order</button><button class="btn btn-muted btn-full mt-10" id="close-scan">Cancel</button></div></div>`;
+
+  // step "shop" — pick or type the shop
+  const shops = state.shop_mappings.map(m => m.master_name).filter((v,i,a) => a.indexOf(v)===i).sort();
+  return `<div class="overlay"><div class="modal">
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:40px">📦</div>
+      <h2 style="margin:8px 0 2px">${esc(fill.coffee)}</h2>
+      <div class="mono" style="color:#c8a96e;font-size:15px;font-weight:700">${esc(container.id)}</div>
+      <div style="color:#4a9e6b;font-size:14px;margin-top:4px">${fill.remaining.toFixed(1)}kg available</div>
+    </div>
+    <h3 style="font-size:16px;margin-bottom:12px">Which shop is this for?</h3>
+    ${shops.length ? `<div style="display:grid;gap:8px;margin-bottom:14px">${shops.map(s => `<button data-pick-shop="${esc(s)}" style="background:#f5f0eb;border:2px solid #e0d5c5;border-radius:10px;padding:14px 16px;cursor:pointer;text-align:left;width:100%;font-weight:700;font-size:15px">${esc(s)}</button>`).join("")}</div>` : ""}
+    <div style="background:#fff8ee;border-radius:8px;padding:12px;margin-bottom:14px">
+      <label class="lbl" style="font-size:13px">Or type shop name</label>
+      <input id="pack-shop-custom" placeholder="e.g. Stillorgan" style="font-size:15px;padding:10px 12px" />
+      <button class="btn btn-dark btn-sm mt-8" id="pack-shop-custom-go" style="width:100%">Use this shop →</button>
+    </div>
+    ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
+    <button class="btn btn-muted btn-full" id="close-scan">Cancel</button>
+  </div></div>`;
 }
 
 function build_shop_confirm_page(container, fill, dispatch) {
@@ -628,116 +655,110 @@ function attach_listeners() {
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
   app.querySelectorAll("[data-toggle-qr]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_qr=state.ui.expanded_qr===btn.dataset.toggleQr?null:btn.dataset.toggleQr; render(); }));
   app.querySelectorAll("[data-scan]").forEach(btn => btn.addEventListener("click", () => {
-    packing_state.step="select"; packing_state.shop=""; packing_state.err="";
-    packing_state.retail_lines=RETAIL_SIZES.map(s=>({bag_size:s.val,bags:"0"})); packing_state.selected_order_id=null;
-    state.scan_id=btn.dataset.scan; render();
+    reset_packing_state();
+    state.scan_id = btn.dataset.scan;
+    render();
   }));
-  app.querySelector("#toggle-upload")?.addEventListener("click", () => { state.ui.show_upload=!state.ui.show_upload; state.ui.upload_err=""; render(); });
-  app.querySelector("#cancel-upload")?.addEventListener("click", () => { state.ui.show_upload=false; state.ui.upload_err=""; render(); });
-  const choose_pdf=app.querySelector("#choose-pdf"), po_file=app.querySelector("#po-file");
-  if (choose_pdf&&po_file) {
-    choose_pdf.addEventListener("click", () => po_file.click());
-    po_file.addEventListener("change", async e => {
-      const files=e.target.files; if(!files?.length) return;
-      state.ui.parsing=true; state.ui.upload_err=""; render();
-      const results=[],errors=[];
-      for (const file of Array.from(files)) {
-        try {
-          const orders = parse_bc_purchase_order(await extract_pdf_text(file));
-          orders.forEach(o => results.push(o));
-        } catch(err) { errors.push(`${file.name}: ${err.message}`); }
-      }
-      state.ui.parsing=false;
-      if (results.length) {
-        state.review_queue = results.map(r => ({...r, items: r.items.map(i=>({...i}))}));
-        state.ui.show_upload=false; state.ui.review_items_open=false;
-      }
-      if (errors.length) state.ui.upload_err=`Failed: ${errors.join(" · ")}`;
-      e.target.value=""; render();
-    });
-  }
-  app.querySelector("#show-manual-order")?.addEventListener("click", () => { document.querySelector(".content").innerHTML=build_manual_order_entry(); attach_manual_order_listeners(); });
-  app.querySelector("#toggle-review-items")?.addEventListener("click", () => { state.ui.review_items_open=!state.ui.review_items_open; render(); });
-  app.querySelectorAll("[data-remove-review-item]").forEach(btn => btn.addEventListener("click", () => { state.review_queue[0].items.splice(Number(btn.dataset.removeReviewItem),1); render(); }));
-  app.querySelectorAll("[data-review-desc]").forEach(inp => inp.addEventListener("input", e => { state.review_queue[0].items[Number(inp.dataset.reviewDesc)].description=e.target.value; }));
-  app.querySelectorAll("[data-review-qty]").forEach(inp => inp.addEventListener("input", e => { state.review_queue[0].items[Number(inp.dataset.reviewQty)].quantity=Number(e.target.value)||0; }));
-  app.querySelectorAll("[data-review-unit]").forEach(sel => sel.addEventListener("change", e => { state.review_queue[0].items[Number(sel.dataset.reviewUnit)].unit=e.target.value; }));
-  app.querySelector("#save-review-order")?.addEventListener("click", async () => {
-    const parsed=state.review_queue[0];
-    if (!parsed.items.length) { document.getElementById("review-err").textContent="Please include at least one item."; document.getElementById("review-err").style.display="block"; return; }
-    await save_order({shop_name: parsed.shop_name || [parsed.company,parsed.location].filter(Boolean).join(" ").trim() || "Unknown", po_number:parsed.po_number||"",order_date:parsed.order_date||"",items:parsed.items,order_total:parsed.order_total||0});
-    state.review_queue.shift(); render();
-  });
-  app.querySelector("#skip-review")?.addEventListener("click", () => { state.review_queue.shift(); render(); });
-  app.querySelector("#cancel-review")?.addEventListener("click", () => { state.review_queue=[]; render(); });
-  app.querySelectorAll("[data-toggle-order]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_orders[btn.dataset.toggleOrder]=!state.ui.expanded_orders[btn.dataset.toggleOrder]; render(); }));
-  app.querySelectorAll("[data-edit-order]").forEach(btn => btn.addEventListener("click", () => { state.editing_order=JSON.parse(JSON.stringify(state.orders.find(o=>o.id===btn.dataset.editOrder))); render(); }));
-  app.querySelectorAll("[data-confirm-order]").forEach(btn => btn.addEventListener("click", () => update_order_status(btn.dataset.confirmOrder,"confirmed")));
-  app.querySelectorAll("[data-complete-order]").forEach(btn => btn.addEventListener("click", () => { if(!confirm("Mark this PO as complete?")) return; update_order_status(btn.dataset.completeOrder,"packed"); }));
-  app.querySelector("#save-edit-order")?.addEventListener("click", async () => {
-    const shop_name=document.getElementById("edit-shop")?.value.trim(), po_number=document.getElementById("edit-po")?.value.trim();
-    if (!shop_name) return;
-    const items=state.editing_order.items.map((item,i)=>({...item,description:document.querySelector(`[data-edit-desc="${i}"]`)?.value??item.description,quantity:Number(document.querySelector(`[data-edit-qty="${i}"]`)?.value)||0,unit:document.querySelector(`[data-edit-unit="${i}"]`)?.value??item.unit}));
-    await update_order(state.editing_order.id,shop_name,po_number,items);
-  });
-  app.querySelectorAll("[data-remove-edit-item]").forEach(btn => btn.addEventListener("click", () => { state.editing_order.items.splice(Number(btn.dataset.removeEditItem),1); render(); }));
-  app.querySelector("#cancel-edit-order")?.addEventListener("click", () => { state.editing_order=null; render(); });
   app.querySelectorAll("[data-toggle-delivery]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_deliveries[btn.dataset.toggleDelivery]=!state.ui.expanded_deliveries[btn.dataset.toggleDelivery]; render(); }));
   app.querySelector("#close-scan")?.addEventListener("click", () => { state.scan_id=null; const url=new URL(window.location); url.searchParams.delete("scan"); window.history.replaceState({},"",url); render(); });
-  app.querySelector("#pack-manual")?.addEventListener("click", () => { packing_state.step="entry"; packing_state.selected_order_id="manual"; packing_state.shop=""; render(); });
-  app.querySelectorAll("[data-select-order]").forEach(btn => btn.addEventListener("click", () => {
-    const order=state.orders.find(o=>o.id===btn.dataset.selectOrder), container=state.containers.find(c=>c.id===state.scan_id), fill=active_fill(container);
-    const {fp_sizes,fp_codes,keywords}=get_coffee_map(fill.coffee), matched=get_matched_items(order,fp_codes,keywords), {bulk,retail}=resolve_quantities(matched,fp_sizes);
-    packing_state.selected_order_id=order.id; packing_state.shop=order.shop_name; packing_state.retail_lines=retail; packing_state.step="entry"; packing_state.err=""; render();
+  
+  // ── Scan-to-pack flow listeners ──
+  // Shop step: pick a shop or type custom
+  app.querySelectorAll("[data-pick-shop]").forEach(btn => btn.addEventListener("click", () => {
+    packing_state.shop = btn.dataset.pickShop;
+    packing_state.err = "";
+    packing_state.step = "scan";
+    render();
   }));
-  app.querySelector("#pack-back-select")?.addEventListener("click", () => { packing_state.step="select"; render(); });
-  app.querySelector("#pack-shop")?.addEventListener("input", e => { packing_state.shop=e.target.value; });
-  app.querySelectorAll("[data-retail-idx]").forEach(inp => inp.addEventListener("input", e => { packing_state.retail_lines[Number(inp.dataset.retailIdx)].bags=e.target.value.replace(/[^0-9]/g,""); }));
+  app.querySelector("#pack-shop-custom-go")?.addEventListener("click", () => {
+    const v = document.getElementById("pack-shop-custom")?.value.trim();
+    if (!v) { packing_state.err = "Please enter or pick a shop."; render(); return; }
+    packing_state.shop = v;
+    packing_state.err = "";
+    packing_state.step = "scan";
+    render();
+  });
+  app.querySelector("#pack-shop-custom")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); app.querySelector("#pack-shop-custom-go")?.click(); }
+  });
+
+  // Scan step: back to shop, manual scan input, remove items
+  app.querySelector("#pack-back-shop")?.addEventListener("click", () => {
+    if (Object.keys(packing_state.scanned_items).length || packing_state.scanned_buckets.length) {
+      if (!confirm("Going back will keep what you've scanned. Continue?")) return;
+    }
+    stop_qr_scanner();
+    packing_state.step = "shop";
+    render();
+  });
+  app.querySelector("#manual-scan-btn")?.addEventListener("click", () => {
+    const v = document.getElementById("manual-scan-input")?.value.trim();
+    if (!v) return;
+    process_scan(v);
+    document.getElementById("manual-scan-input").value = "";
+  });
+  app.querySelector("#manual-scan-input")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); app.querySelector("#manual-scan-btn")?.click(); }
+  });
+  app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
+    const code = btn.dataset.removeItem;
+    if (packing_state.scanned_items[code] > 1) packing_state.scanned_items[code]--;
+    else delete packing_state.scanned_items[code];
+    render();
+  }));
+  app.querySelectorAll("[data-remove-bucket]").forEach(btn => btn.addEventListener("click", () => {
+    packing_state.scanned_buckets = packing_state.scanned_buckets.filter(b => b !== btn.dataset.removeBucket);
+    render();
+  }));
+
+  // Start QR scanner if we're on the scan step
+  if (packing_state.step === "scan" && state.scan_id && !packing_state.scanner_active) {
+    setTimeout(start_qr_scanner, 100);
+  }
+  // Stop scanner when leaving scan step or closing overlay
+  if (packing_state.step !== "scan" && packing_state.scanner_active) {
+    stop_qr_scanner();
+  }
+
   app.querySelector("#pack-review")?.addEventListener("click", () => {
-    packing_state.shop=document.getElementById("pack-shop")?.value.trim()||packing_state.shop;
-    document.querySelectorAll("[data-retail-idx]").forEach(inp => { packing_state.retail_lines[Number(inp.dataset.retailIdx)].bags=inp.value.replace(/[^0-9]/g,""); });
-    const total_kg=packing_state.retail_lines.reduce((s,l)=>s+calc_kg(l.bags,l.bag_size),0);
-    const container=state.containers.find(c=>c.id===state.scan_id), fill=active_fill(container);
-    if (!packing_state.shop) { packing_state.err="Please enter the shop name."; render(); return; }
-    if (total_kg<=0) { packing_state.err="Please enter at least one quantity."; render(); return; }
-    if (total_kg>fill.remaining) { packing_state.err=`Only ${fill.remaining}kg available.`; render(); return; }
-    packing_state.err=""; packing_state.step="review"; render();
+    const total_kg = packing_total_kg();
+    const fill = active_fill(state.containers.find(c=>c.id===state.scan_id));
+    if (total_kg <= 0) { packing_state.err = "Please scan at least one item."; render(); return; }
+    if (total_kg > fill.remaining) { packing_state.err = `Only ${fill.remaining.toFixed(1)}kg available — you've scanned ${total_kg.toFixed(1)}kg.`; render(); return; }
+    packing_state.err = ""; packing_state.step = "review"; render();
   });
-  app.querySelector("#packing-back-edit")?.addEventListener("click", () => { packing_state.step="entry"; render(); });
+  app.querySelector("#packing-back-edit")?.addEventListener("click", () => { packing_state.step="scan"; render(); });
   app.querySelector("#packing-confirm")?.addEventListener("click", async () => {
-    const lines=[];
-    packing_state.retail_lines.forEach(l=>{ const kg=calc_kg(l.bags,l.bag_size); if(kg>0) lines.push({type:"retail",kg,bags:Number(l.bags),bag_size:l.bag_size}); });
-    const total_kg=lines.reduce((s,l)=>s+l.kg,0), container=state.containers.find(c=>c.id===state.scan_id), fill=active_fill(container);
-    const order_id=packing_state.selected_order_id!=="manual"?packing_state.selected_order_id:null;
-    await save_dispatch(state.scan_id,fill.fill_number,packing_state.shop,lines,total_kg,order_id);
-    packing_state.step="done"; render();
+    const lines = [];
+    for (const [code, count] of Object.entries(packing_state.scanned_items)) {
+      const fp = state.fp_codes.find(f => f.fp_code === code);
+      if (!fp) continue;
+      const kg = count * (BAG_SIZE_KG[fp.bag_size]||0);
+      lines.push({ type:"retail", kg, bags: count, bag_size: fp.bag_size });
+    }
+    if (packing_state.scanned_buckets.length > 0) {
+      lines.push({ type:"retail", kg: packing_state.scanned_buckets.length*5, bags: packing_state.scanned_buckets.length, bag_size: "Bar 5kg" });
+    }
+    const total_kg = packing_total_kg();
+    const dispatch_id = await save_dispatch(state.scan_id, packing_state.shop, lines, total_kg);
+    if (dispatch_id && packing_state.scanned_buckets.length > 0) {
+      await supabaseClient.from("dispatch_buckets").insert(
+        packing_state.scanned_buckets.map(b => ({ dispatch_id, bucket_id: b }))
+      );
+    }
+    packing_state.step = "done";
+    render();
   });
-  app.querySelector("#packing-done")?.addEventListener("click", () => { state.scan_id=null; packing_state.step="select"; packing_state.shop=""; packing_state.selected_order_id=null; packing_state.retail_lines=RETAIL_SIZES.map(s=>({bag_size:s.val,bags:"0"})); render(); });
+  app.querySelector("#packing-done")?.addEventListener("click", () => {
+    state.scan_id = null;
+    reset_packing_state();
+    render();
+  });
   app.querySelector("#confirm-delivery")?.addEventListener("click", async () => {
     const d=state.dispatches.find(x=>x.container_id===state.scan_id&&!x.confirmed_at);
     if (d) await confirm_delivery(d.id);
     state.scan_id=null; const url=new URL(window.location); url.searchParams.delete("scan"); window.history.replaceState({},"",url); render();
   });
-}
-
-function attach_manual_order_listeners() {
-  document.getElementById("add-mo-item")?.addEventListener("click", () => {
-    const list=document.getElementById("mo-items"), count=list.querySelectorAll(".mo-item").length+1;
-    const div=document.createElement("div"); div.className="mo-item"; div.style.cssText="background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px";
-    div.innerHTML=`<div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#888">Item ${count}</span><button class="remove-mo-item" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px">✕</button></div><div class="grid-2"><div><label class="lbl">Description *</label><input class="mo-desc" placeholder="e.g. House Roast 1kg" /></div><div><label class="lbl">Product Code</label><input class="mo-code" placeholder="e.g. FP0030" /></div><div><label class="lbl">Quantity *</label><input type="number" class="mo-qty" placeholder="0" /></div><div><label class="lbl">Unit</label><select class="mo-unit"><option>EACH</option><option>KGS</option></select></div></div>`;
-    div.querySelector(".remove-mo-item").addEventListener("click", () => div.remove());
-    list.appendChild(div);
-  });
-  document.querySelectorAll(".remove-mo-item").forEach(btn => btn.addEventListener("click", () => btn.closest(".mo-item").remove()));
-  document.getElementById("save-manual-order")?.addEventListener("click", async () => {
-    const shop_name=document.getElementById("mo-shop")?.value.trim(), po_number=document.getElementById("mo-po")?.value.trim(), order_date=document.getElementById("mo-date")?.value.trim(), err_el=document.getElementById("mo-err");
-    if (!shop_name) { err_el.textContent="Please enter a shop name."; err_el.style.display="block"; return; }
-    const items=[];
-    document.querySelectorAll(".mo-item").forEach(row=>{ const desc=row.querySelector(".mo-desc")?.value.trim(),qty=Number(row.querySelector(".mo-qty")?.value)||0,code=row.querySelector(".mo-code")?.value.trim(),unit=row.querySelector(".mo-unit")?.value; if(desc&&qty>0) items.push({code,description:desc,quantity:qty,unit,unit_cost:0,total:0}); });
-    if (!items.length) { err_el.textContent="Add at least one item with a description and quantity."; err_el.style.display="block"; return; }
-    await save_order({shop_name,po_number,order_date,items,order_total:0});
-  });
-  document.getElementById("cancel-manual-order")?.addEventListener("click", () => render());
 }
 </script>
 </body>
