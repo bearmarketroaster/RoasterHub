@@ -73,7 +73,7 @@
   </div>
 
   <div class="picker" id="picker"></div>
-  <div class="sheet"><p style="text-align:center;color:#888;font-size:13px;margin-bottom:14px">💡 Click any QR to print just that one · Or use "Print All" for the whole sheet</p><div id="grid" class="qr-grid"></div></div>
+  <div class="sheet"><p style="text-align:center;color:#888;font-size:13px;margin-bottom:14px">💡 Click a QR to print it · Right-click → "Save image as..." to download as PNG · Or "Print All" for the whole sheet</p><div id="grid" class="qr-grid"></div></div>
 
   <script>
     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -123,7 +123,7 @@
         supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code"),
       ]);
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
-      state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"" }));
+      state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
 
       // If specific IDs were passed in the URL and they all match a bucket, auto-select them
       // Otherwise default to all of the chosen type
@@ -202,13 +202,15 @@
       }
 
       grid.innerHTML = items.map(it => {
-        const tooltip = it.label.replace(/\\n/g, " — ");
-        return `<div class="qr-tile" title="${tooltip.replace(/"/g,'&quot;')}"><div class="qr-canvas" data-value="${it.value}"></div></div>`;
+        // Build a verbose tooltip: code + coffee + size (or just bucket id)
+        const tip = state.type === "bucket"
+          ? it.id
+          : `${it.id} · ${it.coffee_name || ""} ${it.bag_size || ""}`.trim();
+        return `<div class="qr-tile" title="${tip.replace(/"/g,'&quot;')}" data-tip="${tip.replace(/"/g,'&quot;')}"><div class="qr-canvas" data-value="${it.value}"></div></div>`;
       }).join("");
 
       grid.querySelectorAll(".qr-canvas").forEach(el => {
         el.innerHTML = "";
-        // Generate the QR at high pixel resolution; CSS scales it to the requested mm size
         const canvas_px = Math.max(80, Math.round(state.size_mm * 6));
         new window.QRCode(el, {
           text: el.dataset.value,
@@ -218,9 +220,22 @@
           colorLight: "#ffffff",
           correctLevel: window.QRCode.CorrectLevel.H,
         });
+        // qrcodejs renders both a <canvas> and <img>. Hide the canvas so right-click "Save image as"
+        // pops up cleanly on the img — and tag the img with a sensible filename.
+        setTimeout(() => {
+          const canvas = el.querySelector("canvas");
+          const img = el.querySelector("img");
+          if (canvas) canvas.style.display = "none";
+          if (img) {
+            img.alt = el.dataset.value;
+            img.setAttribute("download", el.dataset.value + ".png");
+          }
+        }, 0);
       });
-      // Click-to-print: clicking a tile prints just that one QR
-      grid.querySelectorAll(".qr-tile").forEach(tile => tile.addEventListener("click", () => {
+      // Click-to-print: left-click prints just that one QR
+      // Right-click stays as default browser behaviour (Save image as / Copy image)
+      grid.querySelectorAll(".qr-tile").forEach(tile => tile.addEventListener("click", e => {
+        if (e.button !== 0) return;  // Only act on left-click
         document.body.classList.add("print-single");
         tile.classList.add("printing-only");
         const cleanup = () => {
