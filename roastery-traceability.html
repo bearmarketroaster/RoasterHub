@@ -499,7 +499,7 @@ function process_scan(raw_value) {
     }
     packing_state.scanned_buckets.push(value);
     flash_scan(`✓ ${value}`, "success");
-    render();
+    update_scan_panel();
     return;
   }
 
@@ -512,21 +512,90 @@ function process_scan(raw_value) {
     }
     packing_state.scanned_items[value] = (packing_state.scanned_items[value] || 0) + 1;
     flash_scan(`✓ ${fp.coffee_name} ${fp.bag_size}`, "success");
-    render();
+    update_scan_panel();
     return;
   }
 
   flash_scan(`Unknown QR: ${value}`, "error");
 }
 
+// In-place update of the scanned items panel without re-rendering the camera div
+function update_scan_panel() {
+  const panel = document.getElementById("scan-panel");
+  const flash = document.getElementById("scan-flash");
+  const reviewBtn = document.getElementById("pack-review");
+  if (!panel) { render(); return; }  // Fallback: full render if panel missing
+
+  const ps = packing_state;
+  const total_kg = packing_total_kg();
+  const item_count = Object.values(ps.scanned_items).reduce((s,n)=>s+n, 0);
+  const has_items = item_count > 0 || ps.scanned_buckets.length > 0;
+
+  const item_list = Object.entries(ps.scanned_items).map(([code, count]) => {
+    const fp = state.fp_codes.find(f => f.fp_code === code);
+    const label = fp ? `${fp.coffee_name} — ${fp.bag_size}` : code;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+      <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🛍️ ${esc(label)}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(code)}</div></div>
+      <div style="font-weight:700;font-size:18px;color:#1a1008;margin:0 12px">× ${count}</div>
+      <button data-remove-item="${esc(code)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">−</button>
+    </div>`;
+  }).join("");
+  const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bucket (5kg)</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b)}</div></div>
+    <button data-remove-bucket="${esc(b)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
+  </div>`).join("");
+
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-weight:700;font-size:13px">SCANNED</div>
+      <div style="font-size:13px;color:#1a1008;font-weight:700">Total: ${total_kg.toFixed(1)}kg</div>
+    </div>
+    ${has_items ? item_list + bucket_list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>'}
+  `;
+
+  // Re-attach the remove buttons (they're in the new HTML)
+  panel.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
+    const code = btn.dataset.removeItem;
+    if (packing_state.scanned_items[code] > 1) packing_state.scanned_items[code]--;
+    else delete packing_state.scanned_items[code];
+    update_scan_panel();
+  }));
+  panel.querySelectorAll("[data-remove-bucket]").forEach(btn => btn.addEventListener("click", () => {
+    packing_state.scanned_buckets = packing_state.scanned_buckets.filter(b => b !== btn.dataset.removeBucket);
+    update_scan_panel();
+  }));
+
+  // Update review button enabled state
+  if (reviewBtn) reviewBtn.disabled = !has_items;
+
+  // Update flash message
+  if (flash) {
+    if (ps.scanner_msg) {
+      flash.style.display = "block";
+      flash.style.background = ps.scanner_msg_type === "success" ? "#4a9e6b" : ps.scanner_msg_type === "error" ? "#e05c2a" : "#1a1008";
+      flash.textContent = ps.scanner_msg;
+    } else {
+      flash.style.display = "none";
+    }
+  }
+}
+
 let _flash_timer = null;
 function flash_scan(msg, type) {
   packing_state.scanner_msg = msg;
   packing_state.scanner_msg_type = type;
+  // Update flash element in place
+  const flash = document.getElementById("scan-flash");
+  if (flash) {
+    flash.style.display = "block";
+    flash.style.background = type === "success" ? "#4a9e6b" : type === "error" ? "#e05c2a" : "#1a1008";
+    flash.textContent = msg;
+  }
   if (_flash_timer) clearTimeout(_flash_timer);
   _flash_timer = setTimeout(() => {
     packing_state.scanner_msg = "";
-    render();
+    const f = document.getElementById("scan-flash");
+    if (f) f.style.display = "none";
   }, 2000);
 }
 
@@ -598,7 +667,8 @@ function build_packing_page(container, fill) {
       <button data-remove-bucket="${esc(b)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
     </div>`).join("");
 
-    const flash = ps.scanner_msg ? `<div style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:${ps.scanner_msg_type==="success"?"#4a9e6b":ps.scanner_msg_type==="error"?"#e05c2a":"#1a1008"};color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10">${esc(ps.scanner_msg)}</div>` : "";
+    const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${ps.scanner_msg ? `background:${ps.scanner_msg_type==="success"?"#4a9e6b":ps.scanner_msg_type==="error"?"#e05c2a":"#1a1008"}` : "display:none"}`;
+    const flash = `<div id="scan-flash" style="${flash_style}">${esc(ps.scanner_msg||"")}</div>`;
 
     return `<div class="overlay"><div class="modal" style="max-width:480px">
       <div style="text-align:center;margin-bottom:14px">
@@ -617,7 +687,7 @@ function build_packing_page(container, fill) {
         <button class="btn btn-dark btn-sm" id="manual-scan-btn">Add</button>
       </div>
 
-      <div style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
+      <div id="scan-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <div style="font-weight:700;font-size:13px">SCANNED</div>
           <div style="font-size:13px;color:#1a1008;font-weight:700">Total: ${total_kg.toFixed(1)}kg</div>
