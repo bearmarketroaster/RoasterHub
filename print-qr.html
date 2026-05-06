@@ -73,7 +73,7 @@
   </div>
 
   <div class="picker" id="picker"></div>
-  <div class="sheet"><p style="text-align:center;color:#888;font-size:13px;margin-bottom:14px">💡 Click a QR to print it · Right-click → "Save image as..." to download as PNG · Or "Print All" for the whole sheet</p><div id="grid" class="qr-grid"></div></div>
+  <div class="sheet"><p style="text-align:center;color:#888;font-size:13px;margin-bottom:14px">💡 Click any QR to download as PNG · Or "Print All" for the whole sheet</p><div id="grid" class="qr-grid"></div></div>
 
   <script>
     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -220,32 +220,34 @@
           colorLight: "#ffffff",
           correctLevel: window.QRCode.CorrectLevel.H,
         });
-        // qrcodejs renders both a <canvas> and <img>. Hide the canvas so right-click "Save image as"
-        // pops up cleanly on the img — and tag the img with a sensible filename.
+        // qrcodejs renders both a <canvas> and <img>.
+        // Show the img (prettier scaling) but keep canvas in DOM so we can use toBlob for download.
         setTimeout(() => {
           const canvas = el.querySelector("canvas");
           const img = el.querySelector("img");
-          if (canvas) canvas.style.display = "none";
-          if (img) {
-            img.alt = el.dataset.value;
-            img.setAttribute("download", el.dataset.value + ".png");
-          }
+          if (canvas) { canvas.style.position = "absolute"; canvas.style.opacity = "0"; canvas.style.pointerEvents = "none"; }
+          if (img) img.alt = el.dataset.value;
         }, 0);
       });
-      // Click-to-print: left-click prints just that one QR
-      // Right-click stays as default browser behaviour (Save image as / Copy image)
+      // Click-to-download: left-click downloads the QR as a PNG with a friendly filename
+      // (right-click still works for browser-native Save/Copy as a fallback)
       grid.querySelectorAll(".qr-tile").forEach(tile => tile.addEventListener("click", e => {
-        if (e.button !== 0) return;  // Only act on left-click
-        document.body.classList.add("print-single");
-        tile.classList.add("printing-only");
-        const cleanup = () => {
-          document.body.classList.remove("print-single");
-          tile.classList.remove("printing-only");
-          window.removeEventListener("afterprint", cleanup);
-        };
-        window.addEventListener("afterprint", cleanup);
-        window.print();
-        setTimeout(cleanup, 1500);
+        if (e.button !== 0) return;
+        const canvas = tile.querySelector("canvas");
+        if (!canvas) return;
+        // Build filename from the tooltip data — sanitise for filesystem safety
+        const tip = tile.dataset.tip || tile.querySelector(".qr-canvas")?.dataset.value || "qrcode";
+        const filename = tip.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_\-.]/g, "") + ".png";
+        canvas.toBlob(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, "image/png");
       }));
     }
   </script>
