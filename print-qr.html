@@ -29,10 +29,10 @@
     .pick-item.selected { background: #1a1008; color: #e8d5b0; border-color: #1a1008; }
     .sheet { padding: 20px; max-width: 1100px; margin: 0 auto; }
     .qr-grid { display: grid; gap: var(--gap, 10px); grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 140px), max-content)); justify-content: center; }
-    .qr-tile { background: #fff; border: 1px dashed #ddd; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; }
+    .qr-tile { background: #fff; border: 1px dashed #ddd; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; transition: border-color 0.15s; }
+    .qr-tile:hover { border-color: #c8a96e; border-style: solid; }
     .qr-tile .qr-canvas { width: var(--qr-size, 140px); height: var(--qr-size, 140px); margin: 0 auto; }
     .qr-tile .qr-canvas img, .qr-tile .qr-canvas canvas { width: 100% !important; height: 100% !important; }
-    .qr-tile .qr-label { font-family: monospace; font-size: var(--qr-label-size, 11px); font-weight: 600; color: #1a1008; margin-top: 6px; word-break: break-all; }
     .empty { text-align: center; padding: 60px 20px; color: #888; }
     @media print {
       .toolbar, .picker { display: none !important; }
@@ -64,12 +64,7 @@
         <button class="size-preset" data-size="60">60</button>
         <button class="size-preset" data-size="80">80</button>
       </div>
-      <label>Show ID</label>
-      <select id="label-select">
-        <option value="show" selected>Show</option>
-        <option value="hide">Hide</option>
-      </select>
-      <button class="btn-print" id="print-btn">🖨️ Print</button>
+<button class="btn-print" id="print-btn">🖨️ Print</button>
     </div>
   </div>
 
@@ -90,7 +85,6 @@
     const state = {
       type: init_type,
       size_mm: 40,
-      show_label: true,
       buckets: [],
       fp_codes: [],
       selected_ids: new Set(init_ids || []),
@@ -116,10 +110,7 @@
         sizeInput.value = v;
         render_grid();
       }));
-      document.getElementById("label-select").addEventListener("change", e => {
-        state.show_label = e.target.value === "show";
-        render_grid();
-      });
+
 
       const [{ data: buckets }, { data: fp_codes }] = await Promise.all([
         supabaseClient.from("buckets").select("id, retired_at").order("created_at", { ascending: false }),
@@ -192,11 +183,10 @@
         return;
       }
 
-      grid.innerHTML = items.map(it => `
-        <div class="qr-tile">
-          <div class="qr-canvas" data-value="${it.value}"></div>
-          ${state.show_label ? `<div class="qr-label">${it.label.replace(/\\n/g,"<br>")}</div>` : ""}
-        </div>`).join("");
+      grid.innerHTML = items.map(it => {
+        const tooltip = it.label.replace(/\\n/g, " — ");
+        return `<div class="qr-tile" title="${tooltip.replace(/"/g,'&quot;')}"><div class="qr-canvas" data-value="${it.value}"></div></div>`;
+      }).join("");
 
       grid.querySelectorAll(".qr-canvas").forEach(el => {
         el.innerHTML = "";
