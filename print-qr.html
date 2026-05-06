@@ -29,12 +29,16 @@
     .pick-item.selected { background: #1a1008; color: #e8d5b0; border-color: #1a1008; }
     .sheet { padding: 20px; max-width: 1100px; margin: 0 auto; }
     .qr-grid { display: grid; gap: var(--gap, 10px); grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 140px), max-content)); justify-content: center; }
-    .qr-tile { background: #fff; border: 1px dashed #ddd; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; transition: border-color 0.15s; }
-    .qr-tile:hover { border-color: #c8a96e; border-style: solid; }
+    .qr-tile { background: #fff; border: 1px dashed #ddd; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; transition: border-color 0.15s, transform 0.1s; cursor: pointer; }
+    .qr-tile:hover { border-color: #c8a96e; border-style: solid; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .qr-tile.printing-only { /* added during single-tile print */ }
+    body.print-single .qr-tile:not(.printing-only) { display: none !important; }
     .qr-tile .qr-canvas { width: var(--qr-size, 140px); height: var(--qr-size, 140px); margin: 0 auto; }
     .qr-tile .qr-canvas img, .qr-tile .qr-canvas canvas { width: 100% !important; height: 100% !important; }
     .empty { text-align: center; padding: 60px 20px; color: #888; }
     @media print {
+      p { display: none !important; }
+      
       .toolbar, .picker { display: none !important; }
       body { background: #fff; }
       .sheet { padding: 0; max-width: none; }
@@ -64,12 +68,12 @@
         <button class="size-preset" data-size="60">60</button>
         <button class="size-preset" data-size="80">80</button>
       </div>
-<button class="btn-print" id="print-btn">🖨️ Print</button>
+<button class="btn-print" id="print-btn">🖨️ Print All</button>
     </div>
   </div>
 
   <div class="picker" id="picker"></div>
-  <div class="sheet"><div id="grid" class="qr-grid"></div></div>
+  <div class="sheet"><p style="text-align:center;color:#888;font-size:13px;margin-bottom:14px">💡 Click any QR to print just that one · Or use "Print All" for the whole sheet</p><div id="grid" class="qr-grid"></div></div>
 
   <script>
     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -215,6 +219,19 @@
           correctLevel: window.QRCode.CorrectLevel.H,
         });
       });
+      // Click-to-print: clicking a tile prints just that one QR
+      grid.querySelectorAll(".qr-tile").forEach(tile => tile.addEventListener("click", () => {
+        document.body.classList.add("print-single");
+        tile.classList.add("printing-only");
+        const cleanup = () => {
+          document.body.classList.remove("print-single");
+          tile.classList.remove("printing-only");
+          window.removeEventListener("afterprint", cleanup);
+        };
+        window.addEventListener("afterprint", cleanup);
+        window.print();
+        setTimeout(cleanup, 1500);
+      }));
     }
   </script>
 </body>
