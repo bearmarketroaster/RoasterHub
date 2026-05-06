@@ -21,6 +21,8 @@
     .toolbar select option { background: #1a1008; color: #e8d5b0; }
     .btn-print { background: #c8a96e; color: #1a1008; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
     .btn-print:hover { background: #d4b88a; }
+    .size-preset { background: #2d1e0f; color: #c8a96e; border: 1px solid #5a3e1b; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+    .size-preset:hover { background: #c8a96e; color: #1a1008; }
     .picker { background: #fff; padding: 16px 24px; border-bottom: 1px solid #e0d5c5; }
     .picker h3 { font-size: 14px; margin-bottom: 10px; }
     .pick-item { display: inline-flex; align-items: center; gap: 6px; background: #f5f0eb; border-radius: 4px; padding: 4px 10px; margin: 2px; cursor: pointer; font-size: 12px; user-select: none; border: 1px solid #e0d5c5; }
@@ -53,14 +55,15 @@
         <option value="bucket">Buckets</option>
         <option value="fp">Bag Labels (FP codes)</option>
       </select>
-      <label>Size</label>
-      <select id="size-select">
-        <option value="60">XS · 20mm (label)</option>
-        <option value="100">S · 30mm</option>
-        <option value="140" selected>M · 40mm</option>
-        <option value="200">L · 60mm</option>
-        <option value="280">XL · 80mm</option>
-      </select>
+      <label>Size (mm)</label>
+      <input type="number" id="size-input" value="40" min="10" max="120" step="1" style="width:64px" />
+      <div class="flex gap-6" style="display:flex;gap:4px">
+        <button class="size-preset" data-size="20">20</button>
+        <button class="size-preset" data-size="30">30</button>
+        <button class="size-preset" data-size="40">40</button>
+        <button class="size-preset" data-size="60">60</button>
+        <button class="size-preset" data-size="80">80</button>
+      </div>
       <label>Show ID</label>
       <select id="label-select">
         <option value="show" selected>Show</option>
@@ -86,7 +89,7 @@
 
     const state = {
       type: init_type,
-      size: 140,
+      size_mm: 40,
       show_label: true,
       buckets: [],
       fp_codes: [],
@@ -102,10 +105,17 @@
         state.selected_ids = new Set();
         render_picker(); render_grid();
       });
-      document.getElementById("size-select").addEventListener("change", e => {
-        state.size = Number(e.target.value);
-        render_grid();
+      const sizeInput = document.getElementById("size-input");
+      sizeInput.addEventListener("input", e => {
+        const v = Number(e.target.value);
+        if (v >= 10 && v <= 120) { state.size_mm = v; render_grid(); }
       });
+      document.querySelectorAll(".size-preset").forEach(btn => btn.addEventListener("click", () => {
+        const v = Number(btn.dataset.size);
+        state.size_mm = v;
+        sizeInput.value = v;
+        render_grid();
+      }));
       document.getElementById("label-select").addEventListener("change", e => {
         state.show_label = e.target.value === "show";
         render_grid();
@@ -168,9 +178,14 @@
         ? state.buckets.filter(b => state.selected_ids.has(b.id)).map(b => ({ id: b.id, value: b.id, label: b.id }))
         : state.fp_codes.filter(f => state.selected_ids.has(f.id)).map(f => ({ id: f.id, value: f.id, label: `${f.id}\n${f.label}` }));
 
-      grid.style.setProperty("--qr-size", state.size + "px");
-      grid.style.setProperty("--qr-label-size", Math.max(9, Math.round(state.size / 14)) + "px");
-      grid.style.setProperty("--gap", Math.max(6, Math.round(state.size / 14)) + "px");
+      // Use mm for physical print sizing — browsers translate to pixels accurately
+      grid.style.setProperty("--qr-size", state.size_mm + "mm");
+      // QR canvas pixel size — make it generous so it stays sharp at any print size
+      // Roughly 5 pixels per mm gives 200dpi-quality output
+      const px = Math.max(80, Math.round(state.size_mm * 6));
+      grid.style.setProperty("--qr-canvas-px", px);
+      grid.style.setProperty("--qr-label-size", Math.max(7, Math.round(state.size_mm / 4)) + "pt");
+      grid.style.setProperty("--gap", Math.max(2, Math.round(state.size_mm / 8)) + "mm");
 
       if (items.length === 0) {
         grid.innerHTML = `<div class="empty">Nothing selected. Pick items above.</div>`;
@@ -185,13 +200,15 @@
 
       grid.querySelectorAll(".qr-canvas").forEach(el => {
         el.innerHTML = "";
+        // Generate the QR at high pixel resolution; CSS scales it to the requested mm size
+        const canvas_px = Math.max(80, Math.round(state.size_mm * 6));
         new window.QRCode(el, {
           text: el.dataset.value,
-          width: state.size,
-          height: state.size,
+          width: canvas_px,
+          height: canvas_px,
           colorDark: "#1a1008",
           colorLight: "#ffffff",
-          correctLevel: window.QRCode.CorrectLevel.H,  // High error correction so they survive smudging
+          correctLevel: window.QRCode.CorrectLevel.H,
         });
       });
     }
