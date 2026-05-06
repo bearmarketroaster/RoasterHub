@@ -85,6 +85,7 @@
     const state = {
       type: init_type,
       size_mm: 40,
+      coffee_filter: "all",
       buckets: [],
       fp_codes: [],
       selected_ids: new Set(init_ids || []),
@@ -97,6 +98,7 @@
       document.getElementById("type-select").addEventListener("change", e => {
         state.type = e.target.value;
         state.selected_ids = new Set();
+        state.coffee_filter = "all";
         render_picker(); render_grid();
       });
       const sizeInput = document.getElementById("size-input");
@@ -117,7 +119,7 @@
         supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code"),
       ]);
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
-      state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}` }));
+      state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"" }));
 
       // If specific IDs were passed in the URL and they all match a bucket, auto-select them
       // Otherwise default to all of the chosen type
@@ -134,25 +136,57 @@
 
     function render_picker() {
       const el = document.getElementById("picker");
-      const items = state.type === "bucket"
+      const all_items = state.type === "bucket"
         ? state.buckets.map(b => ({ id: b.id, label: b.id }))
         : state.fp_codes;
-      if (items.length === 0) {
+      if (all_items.length === 0) {
         el.innerHTML = `<p style="color:#888;font-size:13px;font-style:italic">No ${state.type === "bucket" ? "buckets" : "FP codes"} available.</p>`;
         return;
       }
-      const all_selected = items.every(i => state.selected_ids.has(i.id));
+
+      // Build coffee filter (FP mode only) — list of unique coffee names
+      let coffee_filter_html = "";
+      if (state.type === "fp") {
+        const coffees = [...new Set(state.fp_codes.map(f => f.coffee_name).filter(Boolean))].sort();
+        if (coffees.length > 1) {
+          coffee_filter_html = `
+            <div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+              <span style="font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-right:4px">Filter:</span>
+              <button class="pick-item ${state.coffee_filter==="all"?"selected":""}" data-coffee="all">All (${state.fp_codes.length})</button>
+              ${coffees.map(c => {
+                const count = state.fp_codes.filter(f => f.coffee_name === c).length;
+                return `<button class="pick-item ${state.coffee_filter===c?"selected":""}" data-coffee="${c.replace(/"/g,'&quot;')}">${c} (${count})</button>`;
+              }).join("")}
+            </div>`;
+        }
+      }
+
+      // Apply coffee filter
+      const items = state.type === "fp" && state.coffee_filter !== "all"
+        ? all_items.filter(i => i.coffee_name === state.coffee_filter)
+        : all_items;
+
+      const all_selected = items.length > 0 && items.every(i => state.selected_ids.has(i.id));
       el.innerHTML = `
         <h3>Pick ${state.type === "bucket" ? "buckets" : "FP codes"} to print</h3>
+        ${coffee_filter_html}
         <div style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="pick-item" id="select-all" style="font-weight:600">${all_selected ? "Deselect all" : "Select all"}</button>
+          <button class="pick-item" id="select-all" style="font-weight:600">${all_selected ? "Deselect visible" : "Select visible"}</button>
           <span style="font-size:12px;color:#888;align-self:center">${state.selected_ids.size} selected</span>
         </div>
         <div>${items.map(i => `<span class="pick-item ${state.selected_ids.has(i.id)?"selected":""}" data-id="${i.id}">${i.label}</span>`).join("")}</div>`;
 
+      el.querySelectorAll("[data-coffee]").forEach(btn => btn.addEventListener("click", () => {
+        state.coffee_filter = btn.dataset.coffee;
+        render_picker(); render_grid();
+      }));
       el.querySelector("#select-all").addEventListener("click", () => {
-        if (all_selected) state.selected_ids = new Set();
-        else state.selected_ids = new Set(items.map(i => i.id));
+        if (all_selected) {
+          // Deselect only the visible items
+          items.forEach(i => state.selected_ids.delete(i.id));
+        } else {
+          items.forEach(i => state.selected_ids.add(i.id));
+        }
         render_picker(); render_grid();
       });
       el.querySelectorAll(".pick-item[data-id]").forEach(btn => btn.addEventListener("click", () => {
