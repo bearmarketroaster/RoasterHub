@@ -201,15 +201,11 @@
         return;
       }
 
-      grid.innerHTML = items.map(it => {
-        // Tooltip shows everything for identification; filename uses just coffee + size
+      grid.innerHTML = items.map((it, idx) => {
         const tip = state.type === "bucket"
           ? it.id
           : `${it.id} · ${it.coffee_name || ""} ${it.bag_size || ""}`.trim();
-        const fname = state.type === "bucket"
-          ? it.id
-          : `${it.coffee_name || ""} ${it.bag_size || ""}`.trim();
-        return `<div class="qr-tile" title="${tip.replace(/"/g,'&quot;')}" data-fname="${fname.replace(/"/g,'&quot;')}"><div class="qr-canvas" data-value="${it.value}"></div></div>`;
+        return `<div class="qr-tile" title="${tip.replace(/"/g,'&quot;')}" data-idx="${idx}"><div class="qr-canvas" data-value="${it.value}"></div></div>`;
       }).join("");
 
       grid.querySelectorAll(".qr-canvas").forEach(el => {
@@ -233,14 +229,17 @@
         }, 0);
       });
       // Click-to-download: left-click downloads the QR as a PNG with a friendly filename
-      // (right-click still works for browser-native Save/Copy as a fallback)
       grid.querySelectorAll(".qr-tile").forEach(tile => tile.addEventListener("click", e => {
         if (e.button !== 0) return;
         const canvas = tile.querySelector("canvas");
         if (!canvas) return;
-        // Build filename from the tooltip data — sanitise for filesystem safety
-        const fname = tile.dataset.fname || tile.querySelector(".qr-canvas")?.dataset.value || "qrcode";
-        const filename = fname.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_\-.]/g, "") + ".png";
+        const idx = Number(tile.dataset.idx);
+        const it = items[idx];
+        // Build filename: "Holy Roast 200g 25mm.png" or "BKT-A3F2C918 25mm.png"
+        const base = state.type === "bucket"
+          ? it.id
+          : `${it.coffee_name || ""} ${it.bag_size || ""}`.trim();
+        const filename = `${base} ${state.size_mm}mm`.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_\-.]/g, "") + ".png";
         canvas.toBlob(blob => {
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
