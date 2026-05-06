@@ -476,14 +476,19 @@ function packing_total_kg() {
 
 // Process a scanned QR value
 let _last_scan = { value: null, at: 0 };
-const SCAN_DEBOUNCE_MS = 1500;
+const SCAN_DEBOUNCE_MS = 3000;
 
 function process_scan(raw_value) {
   const value = (raw_value || "").trim().toUpperCase();
   if (!value) return;
   // Ignore the same QR if scanned again within the debounce window
   const now = Date.now();
-  if (_last_scan.value === value && (now - _last_scan.at) < SCAN_DEBOUNCE_MS) return;
+  const dt = now - _last_scan.at;
+  if (_last_scan.value === value && dt < SCAN_DEBOUNCE_MS) {
+    console.log(`[scan] debounced ${value} (${dt}ms < ${SCAN_DEBOUNCE_MS}ms)`);
+    return;
+  }
+  console.log(`[scan] processing ${value}`);
   _last_scan = { value, at: now };
 
   // Bucket QR?
