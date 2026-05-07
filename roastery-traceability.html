@@ -536,8 +536,12 @@ function update_scan_panel() {
     const label = fp ? `${fp.coffee_name} — ${fp.bag_size}` : code;
     return `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
       <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🛍️ ${esc(label)}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(code)}</div></div>
-      <div style="font-weight:700;font-size:18px;color:#1a1008;margin:0 12px">× ${count}</div>
-      <button data-remove-item="${esc(code)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">−</button>
+      <div style="display:flex;align-items:center;gap:4px">
+        <button data-decrement-item="${esc(code)}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">−</button>
+        <input type="number" min="1" inputmode="numeric" data-set-item="${esc(code)}" value="${count}" style="font-weight:700;font-size:16px;color:#1a1008;width:54px;text-align:center;padding:6px 4px;border:1px solid #e0d5c5;border-radius:6px;background:#fff" />
+        <button data-increment-item="${esc(code)}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">+</button>
+        <button data-remove-item="${esc(code)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px;margin-left:4px" title="Remove">✕</button>
+      </div>
     </div>`;
   }).join("");
   const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
@@ -554,10 +558,30 @@ function update_scan_panel() {
   `;
 
   // Re-attach the remove buttons (they're in the new HTML)
-  panel.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
-    const code = btn.dataset.removeItem;
+  panel.querySelectorAll("[data-decrement-item]").forEach(btn => btn.addEventListener("click", () => {
+    const code = btn.dataset.decrementItem;
     if (packing_state.scanned_items[code] > 1) packing_state.scanned_items[code]--;
     else delete packing_state.scanned_items[code];
+    update_scan_panel();
+  }));
+  panel.querySelectorAll("[data-increment-item]").forEach(btn => btn.addEventListener("click", () => {
+    const code = btn.dataset.incrementItem;
+    packing_state.scanned_items[code] = (packing_state.scanned_items[code] || 0) + 1;
+    update_scan_panel();
+  }));
+  panel.querySelectorAll("[data-set-item]").forEach(inp => {
+    inp.addEventListener("change", e => {
+      const code = inp.dataset.setItem;
+      const v = Math.max(1, Math.floor(Number(e.target.value)) || 1);
+      packing_state.scanned_items[code] = v;
+      update_scan_panel();
+    });
+    // Stop the camera scanner from "scanning" through the input — just select all on focus
+    inp.addEventListener("focus", e => e.target.select());
+  });
+  panel.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
+    const code = btn.dataset.removeItem;
+    delete packing_state.scanned_items[code];
     update_scan_panel();
   }));
   panel.querySelectorAll("[data-remove-bucket]").forEach(btn => btn.addEventListener("click", () => {
@@ -658,8 +682,12 @@ function build_packing_page(container, fill) {
       const label = fp ? `${fp.coffee_name} — ${fp.bag_size}` : code;
       return `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
         <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🛍️ ${esc(label)}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(code)}</div></div>
-        <div style="font-weight:700;font-size:18px;color:#1a1008;margin:0 12px">× ${count}</div>
-        <button data-remove-item="${esc(code)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">−</button>
+        <div style="display:flex;align-items:center;gap:4px">
+          <button data-decrement-item="${esc(code)}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">−</button>
+          <input type="number" min="1" inputmode="numeric" data-set-item="${esc(code)}" value="${count}" style="font-weight:700;font-size:16px;color:#1a1008;width:54px;text-align:center;padding:6px 4px;border:1px solid #e0d5c5;border-radius:6px;background:#fff" />
+          <button data-increment-item="${esc(code)}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">+</button>
+          <button data-remove-item="${esc(code)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px;margin-left:4px" title="Remove">✕</button>
+        </div>
       </div>`;
     }).join("");
     const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
@@ -782,11 +810,30 @@ function attach_listeners() {
   app.querySelector("#manual-scan-input")?.addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); app.querySelector("#manual-scan-btn")?.click(); }
   });
-  app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
-    const code = btn.dataset.removeItem;
+  app.querySelectorAll("[data-decrement-item]").forEach(btn => btn.addEventListener("click", () => {
+    const code = btn.dataset.decrementItem;
     if (packing_state.scanned_items[code] > 1) packing_state.scanned_items[code]--;
     else delete packing_state.scanned_items[code];
-    render();
+    update_scan_panel();
+  }));
+  app.querySelectorAll("[data-increment-item]").forEach(btn => btn.addEventListener("click", () => {
+    const code = btn.dataset.incrementItem;
+    packing_state.scanned_items[code] = (packing_state.scanned_items[code] || 0) + 1;
+    update_scan_panel();
+  }));
+  app.querySelectorAll("[data-set-item]").forEach(inp => {
+    inp.addEventListener("change", e => {
+      const code = inp.dataset.setItem;
+      const v = Math.max(1, Math.floor(Number(e.target.value)) || 1);
+      packing_state.scanned_items[code] = v;
+      update_scan_panel();
+    });
+    inp.addEventListener("focus", e => e.target.select());
+  });
+  app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
+    const code = btn.dataset.removeItem;
+    delete packing_state.scanned_items[code];
+    update_scan_panel();
   }));
   app.querySelectorAll("[data-remove-bucket]").forEach(btn => btn.addEventListener("click", () => {
     packing_state.scanned_buckets = packing_state.scanned_buckets.filter(b => b !== btn.dataset.removeBucket);
