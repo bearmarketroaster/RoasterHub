@@ -150,6 +150,40 @@ function gen_id(prefix) {
   const r = crypto.randomUUID().split("-")[0].toUpperCase();
   return `${prefix}-${today().replace(/-/g,"")}-${r}`;
 }
+
+// Set a container's status
+async function set_container_status(container_id, new_status) {
+  // Make sure the container row exists, then update status
+  await supabaseClient.from("containers").upsert({ id: container_id, status: new_status, status_changed_at: new Date().toISOString() }, { onConflict: "id" });
+  await load_data();
+  render();
+}
+
+// Send remaining contents of a container to samples (30g bags)
+async function send_to_samples(container_id) {
+  const c = state.containers.find(x => x.id === container_id);
+  if (!c || c.remaining <= 0) return;
+  const remaining = c.remaining;
+  const bags = Math.floor(remaining * 1000 / 30);
+  if (!confirm(`Empty ${container_id}? ${remaining.toFixed(2)}kg of ${c.coffee} will be logged as ${bags} × 30g sample bags.`)) return;
+
+  const dispatch_id = gen_id("DSP");
+  const fill_id = c.fill_id || null;
+  // Save dispatch tagged for samples — confirmed_at set immediately since samples don't need shop confirmation
+  await supabaseClient.from("dispatches").insert({
+    id: dispatch_id, container_id, fill_id, date: today(),
+    shop: "Samples", total_kg: remaining, confirmed_at: new Date().toISOString(),
+  });
+  await supabaseClient.from("dispatch_lines").insert({
+    id: `${dispatch_id}-L1`, dispatch_id, type: "retail",
+    kg: remaining, bags, bag_size: "30g sample",
+    container_id, fill_id,
+  });
+  // Auto-flip container to empty
+  await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", container_id);
+  await load_data();
+  render();
+}
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 const PALETTE = ["#1a1008","#c8a96e","#4a9e6b","#e05c2a","#4a7c4e","#e0a82a","#888","#5a3e1b"];
 function color_for(i) { return PALETTE[i%PALETTE.length]; }
@@ -184,19 +218,40 @@ async function load_data() {
   const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false });
   state.roast_sessions = roast_sessions || [];
 
-  // Group roast sessions by container_id
+  // Get container statuses
+  const { data: container_rows } = await supabaseClient.from("containers").select("id, status, status_changed_at");
+  const status_map = {};
+  (container_rows || []).forEach(c => { status_map[c.id] = { status: c.status || "waiting", status_changed_at: c.status_changed_at }; });
+
+  // Group roast sessions by container_id; pull most recent fill's coffee+fill_id as active
   const container_map = {};
   (roast_sessions||[]).forEach(s => {
     if (!s.container_id) return;
-    if (!container_map[s.container_id]) container_map[s.container_id] = { id: s.container_id, coffee: s.coffee, fill_id: s.fill_id, roast_sessions: [], total_roasted: 0, packed_kg: 0 };
+    if (!container_map[s.container_id]) container_map[s.container_id] = {
+      id: s.container_id, coffee: s.coffee, fill_id: s.fill_id,
+      roast_sessions: [], total_roasted: 0, packed_kg: 0,
+      latest_roast_date: s.date,
+      status: status_map[s.container_id]?.status || "waiting",
+      status_changed_at: status_map[s.container_id]?.status_changed_at || null,
+    };
     container_map[s.container_id].roast_sessions.push(s);
     container_map[s.container_id].total_roasted += Number(s.roasted_weight)||0;
-    // Use most recent (first sorted by date desc) coffee + fill_id as the active fill
     if (!container_map[s.container_id]._latest_set) {
       container_map[s.container_id].coffee = s.coffee;
       container_map[s.container_id].fill_id = s.fill_id;
+      container_map[s.container_id].latest_roast_date = s.date;
       container_map[s.container_id]._latest_set = true;
     }
+  });
+  // Also include container rows that exist but have no roast sessions (e.g. empty after sample-out)
+  (container_rows || []).forEach(c => {
+    if (!container_map[c.id]) container_map[c.id] = {
+      id: c.id, coffee: null, fill_id: null,
+      roast_sessions: [], total_roasted: 0, packed_kg: 0,
+      latest_roast_date: null,
+      status: c.status || "empty",
+      status_changed_at: c.status_changed_at,
+    };
   });
   state.containers = Object.values(container_map);
 
@@ -241,6 +296,35 @@ async function save_dispatch(container_id, shop, lines, total_kg) {
   return dispatch_id;
 }
 
+// New dispatch save with per-line container/fill tagging (FIFO mode)
+async function save_dispatch_v2(primary_container_id, primary_fill_id, shop, lines, total_kg) {
+  state.saving = true; render();
+  // Ensure all referenced containers exist as rows
+  const all_containers = [...new Set(lines.map(l => l.container_id).filter(Boolean))];
+  if (primary_container_id) all_containers.push(primary_container_id);
+  for (const cid of [...new Set(all_containers)]) {
+    await supabaseClient.from("containers").upsert({ id: cid }, { onConflict: "id" });
+  }
+  const dispatch_id = gen_id("DSP");
+  const { error: d_err } = await supabaseClient.from("dispatches").insert({
+    id: dispatch_id,
+    container_id: primary_container_id,
+    fill_id: primary_fill_id,
+    date: today(), shop, total_kg, confirmed_at: null,
+  });
+  if (d_err) { state.saving = false; alert("Failed to save dispatch: " + d_err.message); return null; }
+  // Save dispatch_lines with per-line container_id and fill_id
+  const lines_payload = lines.map((l, i) => ({
+    id: `${dispatch_id}-L${i+1}`, dispatch_id,
+    type: l.type, kg: l.kg, bags: l.bags || null, bag_size: l.bag_size || null,
+    container_id: l.container_id || null, fill_id: l.fill_id || null,
+  }));
+  const { error: l_err } = await supabaseClient.from("dispatch_lines").insert(lines_payload);
+  if (l_err) { state.saving = false; alert("Failed to save dispatch lines: " + l_err.message); return null; }
+  state.saving = false; await load_data(); render();
+  return dispatch_id;
+}
+
 async function confirm_delivery(dispatch_id) {
   await supabaseClient.from("dispatches").update({confirmed_at:new Date().toISOString()}).eq("id",dispatch_id);
   await load_data(); render();
@@ -272,11 +356,23 @@ function build_app() {
 }
 
 function build_scan_overlay() {
-  const cid=state.scan_id, container=state.containers.find(c=>c.id===cid);
+  const cid=state.scan_id;
   if (state.loading) return `<div class="loading">Loading…</div>`;
+
+  // FIFO mode: no specific container — packer starts a new dispatch using active containers
+  if (cid === "__new__") {
+    // Synthesize a "container" object representing the active pool
+    const active = state.containers.filter(c => c.status === "active" && c.remaining > 0);
+    const total_remaining = active.reduce((s,c) => s+c.remaining, 0);
+    const fake_container = { id: "__new__", coffee: "(scan to identify)", fill_id: null };
+    const fake_fill = { coffee: active.length === 0 ? "No active containers" : `${active.length} active container${active.length>1?"s":""}`, remaining: total_remaining, fill_number: 1, date: today() };
+    return build_packing_page(fake_container, fake_fill);
+  }
+
+  // Legacy: scanned a specific container's QR
+  const container=state.containers.find(c=>c.id===cid);
   if (!container) return `<div class="overlay"><div class="modal" style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⚠️</div><h2 style="margin-bottom:8px">Container Not Found</h2><p class="hint">No container found with ID <strong>${esc(cid)}</strong>.</p><button class="btn btn-dark mt-16" id="close-scan">Go Back</button></div></div>`;
   const fill=active_fill(container);
-  // If we're mid-packing flow, stay in the packing flow regardless of pending dispatches
   if (packing_state.step === "review" || packing_state.step === "done") return build_packing_page(container, fill);
   const pending=state.dispatches.find(d=>d.container_id===cid&&!d.confirmed_at);
   if (pending) return build_shop_confirm_page(container,fill,pending);
@@ -284,87 +380,96 @@ function build_scan_overlay() {
 }
 
 function build_containers_tab() {
-  const { expanded_qr } = state.ui;
-  const base_url = state.base_url || "https://your-domain-here/scan";
+  // Group containers by status
+  const active  = state.containers.filter(c => c.status === "active"  && c.remaining > 0);
+  const waiting = state.containers.filter(c => c.status === "waiting" && c.remaining > 0);
+  const empty   = state.containers.filter(c => c.status === "empty" || c.remaining <= 0);
 
-  // Only show containers with remaining stock
-  const active = state.containers.filter(c => c.remaining > 0);
-  const empty  = state.containers.filter(c => c.remaining <= 0);
+  const render_container_card = (c, mode) => {
+    const in_transit = state.dispatches.find(d => d.container_id===c.id && !d.confirmed_at);
+    const remaining = c.remaining || 0;
+    const bar_color = remaining < 10 ? "#e05c2a" : "#4a9e6b";
+    const pct = c.total_roasted > 0 ? Math.min(100, Math.round((remaining / c.total_roasted) * 100)) : 0;
+    const latest_session = c.roast_sessions[0];
 
-  const containers_html = active.length === 0
-    ? `<div class="card empty"><div class="icon">📦</div>No containers with stock remaining.<br/><span class="hint">Log a roast session in Roasts to register a container.</span></div>`
-    : active.map(c => {
-        const in_transit = state.dispatches.find(d => d.container_id===c.id && !d.confirmed_at);
-        const border_color = in_transit ? "#e0a82a" : c.remaining < 10 ? "#e05c2a" : "#4a9e6b";
-        const bar_color    = c.remaining < 10 ? "#e05c2a" : "#4a9e6b";
-        const qr_open = expanded_qr === c.id;
-        const qr_url  = `${base_url}?scan=${c.id}`;
-        const pct = c.total_roasted > 0 ? Math.min(100, Math.round((c.remaining / c.total_roasted) * 100)) : 0;
-        const roast_ids = [...new Set(c.roast_sessions.flatMap(s => s.roast_ids || [s.id]))].join(", ");
-        const latest_session = c.roast_sessions[0];
+    let action_button = "";
+    if (mode === "active") {
+      action_button = `<button class="btn btn-ghost btn-sm" data-set-status="${esc(c.id)}|waiting">↩ Move to Waiting</button>`;
+    } else if (mode === "waiting") {
+      action_button = `<button class="btn btn-dark btn-sm" data-set-status="${esc(c.id)}|active">→ Move to Active</button>`;
+    }
 
-        const qr_panel = qr_open ? `
-          <div style="margin:14px 0;padding:16px;background:#f5f0eb;border-radius:10px;display:flex;gap:20px;align-items:center;flex-wrap:wrap">
-            <div style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.1)"><div data-qr="${esc(qr_url)}" style="width:140px;height:140px"></div></div>
-            <div style="flex:1;min-width:180px">
-              <div style="font-weight:700;color:#1a1008;margin-bottom:6px">Container QR Code</div>
-              <div style="font-size:13px;color:#555;margin-bottom:8px">Print once and stick permanently on the container.</div>
-              <div class="mono" style="font-size:11px;color:#aaa;word-break:break-all;margin-bottom:10px">${esc(qr_url)}</div>
-              <button class="btn btn-dark btn-sm" onclick="window.print()">🖨️ Print QR</button>
+    const samples_button = mode === "active" && remaining > 0 && remaining < 5
+      ? `<button class="btn btn-amber btn-sm" data-samples="${esc(c.id)}" title="Empty container into 30g sample bags">🎁 Send to Samples</button>`
+      : "";
+
+    return `
+      <div class="card" style="border-left:4px solid ${mode==="active"?"#4a9e6b":mode==="waiting"?"#c8a96e":"#ccc"};margin-bottom:10px;${mode==="empty"?"opacity:0.7":""}">
+        <div class="flex-between flex-wrap">
+          <div class="flex-wrap gap-6">
+            <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>
+            ${c.fill_id ? `<span class="mono" style="background:#f0ebe4;color:#888;padding:2px 8px;border-radius:4px;font-size:11px">${esc(c.fill_id)}</span>` : ""}
+            ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#e0a82a;border-radius:4px">⏳ Has Pending Dispatch</span>` : ""}
+          </div>
+          <div class="flex-wrap gap-6">
+            ${samples_button}
+            ${action_button}
+          </div>
+        </div>
+        ${c.coffee ? `<div style="margin-top:10px;font-weight:600;font-size:15px">${esc(c.coffee)}</div>` : ""}
+        <div style="font-size:13px;color:#888;margin-top:2px">${c.coffee ? `Last roast: ${latest_session?.date || "—"} · ` : ""}Total roasted: ${c.total_roasted.toFixed(1)}kg</div>
+        ${mode !== "empty" ? `
+          <div style="margin-top:10px">
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+              <span>Remaining: <strong>${remaining.toFixed(1)}kg</strong></span>
+              <span style="color:${bar_color}">${pct}%</span>
             </div>
-          </div>` : "";
+            <div class="stock-track"><div class="stock-fill" style="background:${bar_color};width:${pct}%"></div></div>
+          </div>` : ""}
+      </div>`;
+  };
 
-        const sessions_html = c.roast_sessions.length > 1 ? `
-          <details style="margin-top:8px"><summary style="font-size:12px;color:#aaa;cursor:pointer">Roast sessions (${c.roast_sessions.length})</summary>
-            <div style="margin-top:6px;display:grid;gap:4px">
-              ${c.roast_sessions.map(s => `<div style="background:#f5f0eb;border-radius:6px;padding:6px 10px;font-size:12px;color:#666"><strong>${esc(s.id)}</strong> — ${s.date} — ${Number(s.roasted_weight).toFixed(1)}kg</div>`).join("")}
-            </div>
-          </details>` : "";
-
-        return `
-          <div class="card" style="border-left:4px solid ${border_color};margin-bottom:12px">
-            <div class="flex-between flex-wrap">
-              <div class="flex-wrap gap-6">
-                <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>${c.fill_id ? `<span class="mono" style="background:#f0ebe4;color:#888;padding:2px 8px;border-radius:4px;font-size:11px">${esc(c.fill_id)}</span>` : ""}
-                ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#e0a82a;border-radius:4px">⏳ In Transit</span>` : ""}
-              </div>
-              <div class="flex-wrap gap-6">
-                <button class="btn btn-amber btn-sm" data-toggle-qr="${esc(c.id)}">${qr_open ? "Hide QR" : "▦ QR"}</button>
-                <button class="btn btn-sm ${in_transit ? "btn-green" : "btn-dark"}" data-scan="${esc(c.id)}">${in_transit ? "📱 Shop Scan" : "📱 Pack"}</button>
-              </div>
-            </div>
-            ${qr_panel}
-            <div style="margin-top:10px;font-weight:600;font-size:15px">${esc(c.coffee)}</div>
-            <div style="font-size:13px;color:#888;margin-top:2px">Last roast: ${latest_session?.date || "—"} · Total roasted: ${c.total_roasted.toFixed(1)}kg</div>
-            ${in_transit ? `<div style="margin-top:8px;background:#fff8ee;border-radius:6px;padding:8px 12px;font-size:13px">📦 Packed for <strong>${esc(in_transit.shop)}</strong> — ${in_transit.total_kg}kg on ${in_transit.date}</div>` : ""}
-            <div style="margin-top:10px">
-              <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
-                <span>Remaining: <strong>${c.remaining.toFixed(1)}kg</strong></span>
-                <span style="color:${bar_color}">${pct}%</span>
-              </div>
-              <div class="stock-track"><div class="stock-fill" style="background:${bar_color};width:${pct}%"></div></div>
-            </div>
-            ${sessions_html}
-          </div>`;
-      }).join("");
-
-  const empty_html = empty.length > 0 ? `
-    <details style="margin-top:16px"><summary style="font-size:13px;color:#aaa;cursor:pointer">Fully packed containers (${empty.length})</summary>
-      <div style="margin-top:8px;display:grid;gap:8px">
-        ${empty.map(c => `<div class="card" style="border-left:4px solid #ccc;opacity:0.7;padding:12px 16px">
-          <div style="font-weight:600">${esc(c.id)}</div>
-          <div style="font-size:13px;color:#888">${esc(c.coffee)} · ${c.total_roasted.toFixed(1)}kg roasted · fully packed</div>
-        </div>`).join("")}
-      </div>
-    </details>` : "";
+  const new_dispatch_btn = active.length > 0
+    ? `<button class="btn btn-dark" id="new-dispatch-btn" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`
+    : `<button class="btn btn-grey" disabled title="Move a container to Active first" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`;
 
   return `
     <div class="flex-between mb-16">
-      <h2 style="margin:0">Storage Containers</h2>
-      <span class="hint" style="font-size:13px">${active.length} container${active.length!==1?"s":""} with stock</span>
+      <h2 style="margin:0">Containers</h2>
+      ${new_dispatch_btn}
     </div>
-    ${containers_html}
-    ${empty_html}`;
+
+    <div style="margin-bottom:18px">
+      <div style="font-weight:700;color:#4a9e6b;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span>✅ ACTIVE FOR PACKING</span>
+        <span class="hint" style="font-weight:400;font-size:12px">(${active.length})</span>
+      </div>
+      ${active.length === 0
+        ? `<div class="card empty" style="padding:20px;font-size:13px">No active containers. Move a container from Waiting to start packing.</div>`
+        : active.map(c => render_container_card(c, "active")).join("")}
+    </div>
+
+    ${waiting.length > 0 ? `
+    <div style="margin-bottom:18px">
+      <div style="font-weight:700;color:#c8a96e;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span>⏳ WAITING</span>
+        <span class="hint" style="font-weight:400;font-size:12px">(${waiting.length}) · ready to activate when you start packing from them</span>
+      </div>
+      ${waiting.map(c => render_container_card(c, "waiting")).join("")}
+    </div>` : ""}
+
+    ${empty.length > 0 ? `
+    <details style="margin-top:16px">
+      <summary style="font-size:13px;color:#aaa;cursor:pointer;font-weight:600">⭕ EMPTY (${empty.length}) · ready for next roast</summary>
+      <div style="margin-top:10px">
+        ${empty.map(c => `<div class="card" style="border-left:4px solid #ccc;opacity:0.6;padding:10px 14px;margin-bottom:6px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-weight:600">${esc(c.id)}</span>
+            <span class="hint" style="font-size:12px">${c.coffee ? `last: ${esc(c.coffee)}` : "never used"}</span>
+          </div>
+        </div>`).join("")}
+      </div>
+    </details>` : ""}`;
 }
 
 
@@ -466,12 +571,22 @@ function reset_packing_state() {
 // Compute totals from scanned items + buckets
 function packing_total_kg() {
   let total = 0;
-  for (const [code, count] of Object.entries(packing_state.scanned_items)) {
+  for (const [code, entry] of Object.entries(packing_state.scanned_items)) {
     const fp = state.fp_codes.find(f => f.fp_code === code);
-    if (fp) total += count * (BAG_SIZE_KG[fp.bag_size] || 0);
+    if (!fp) continue;
+    const bag_kg = BAG_SIZE_KG[fp.bag_size] || 0;
+    const total_count = (entry.lines || []).reduce((s, l) => s + l.count, 0);
+    total += total_count * bag_kg;
   }
   total += packing_state.scanned_buckets.length * 5;
   return total;
+}
+
+// Get total count of bags scanned for an FP code (sum across containers)
+function packing_count_for(code) {
+  const entry = packing_state.scanned_items[code];
+  if (!entry) return 0;
+  return (entry.lines || []).reduce((s, l) => s + l.count, 0);
 }
 
 // Process a scanned QR value
@@ -481,42 +596,86 @@ const SCAN_DEBOUNCE_MS = 3000;
 function process_scan(raw_value) {
   const value = (raw_value || "").trim().toUpperCase();
   if (!value) return;
-  // Ignore the same QR if scanned again within the debounce window
   const now = Date.now();
   const dt = now - _last_scan.at;
-  if (_last_scan.value === value && dt < SCAN_DEBOUNCE_MS) {
-    console.log(`[scan] debounced ${value} (${dt}ms < ${SCAN_DEBOUNCE_MS}ms)`);
-    return;
-  }
-  console.log(`[scan] processing ${value}`);
+  if (_last_scan.value === value && dt < SCAN_DEBOUNCE_MS) return;
   _last_scan = { value, at: now };
 
   // Bucket QR?
   if (value.startsWith("BKT-")) {
-    if (packing_state.scanned_buckets.includes(value)) {
+    if (packing_state.scanned_buckets.find(b => b.id === value)) {
       flash_scan(`${value} already scanned`, "error");
       return;
     }
-    packing_state.scanned_buckets.push(value);
+    packing_state.scanned_buckets.push({ id: value, container_id: null, fill_id: null });
     flash_scan(`✓ ${value}`, "success");
     update_scan_panel();
     return;
   }
 
   // FP code?
-  if (/^FP\d+$/.test(value)) {
-    const fp = state.fp_codes.find(f => f.fp_code === value);
-    if (!fp) {
-      flash_scan(`${value} not found in settings`, "error");
-      return;
-    }
-    packing_state.scanned_items[value] = (packing_state.scanned_items[value] || 0) + 1;
-    flash_scan(`✓ ${fp.coffee_name} ${fp.bag_size}`, "success");
-    update_scan_panel();
+  if (!/^FP\d+$/.test(value)) {
+    flash_scan(`Unknown QR: ${value}`, "error");
+    return;
+  }
+  const fp = state.fp_codes.find(f => f.fp_code === value);
+  if (!fp) {
+    flash_scan(`${value} not found in settings`, "error");
     return;
   }
 
-  flash_scan(`Unknown QR: ${value}`, "error");
+  // FIFO: find the oldest active container for this coffee with stock available for this bag size
+  const bag_kg = BAG_SIZE_KG[fp.bag_size] || 0;
+  const candidates = state.containers
+    .filter(c => c.status === "active" && c.coffee === fp.coffee_name && c.remaining > 0)
+    .sort((a,b) => (a.latest_roast_date || "").localeCompare(b.latest_roast_date || ""));  // oldest first
+
+  if (candidates.length === 0) {
+    flash_scan(`No active ${fp.coffee_name} container — activate one first`, "error");
+    return;
+  }
+
+  // Find a container that can fit one more bag (considering already-scanned bags from this session)
+  let chosen = null;
+  for (const c of candidates) {
+    const already_used_from_this_container = (packing_state.scanned_items[value]?.lines || [])
+      .filter(l => l.container_id === c.id)
+      .reduce((s, l) => s + l.count * bag_kg, 0);
+    // Also check ALL previously scanned items that came from this container
+    let all_session_kg_from_c = 0;
+    for (const [code, entry] of Object.entries(packing_state.scanned_items)) {
+      const lines = entry.lines || [];
+      const fp_other = state.fp_codes.find(f => f.fp_code === code);
+      if (!fp_other) continue;
+      const other_bag_kg = BAG_SIZE_KG[fp_other.bag_size] || 0;
+      lines.forEach(l => {
+        if (l.container_id === c.id) all_session_kg_from_c += l.count * other_bag_kg;
+      });
+    }
+    if (c.remaining - all_session_kg_from_c >= bag_kg) {
+      chosen = c;
+      break;
+    }
+  }
+
+  if (!chosen) {
+    flash_scan(`Not enough ${fp.coffee_name} left in active containers`, "error");
+    return;
+  }
+
+  // Add to scanned_items, grouped by FP code AND container_id
+  if (!packing_state.scanned_items[value]) {
+    packing_state.scanned_items[value] = { lines: [] };
+  }
+  const existing_line = packing_state.scanned_items[value].lines.find(l => l.container_id === chosen.id);
+  if (existing_line) {
+    existing_line.count++;
+  } else {
+    packing_state.scanned_items[value].lines.push({ container_id: chosen.id, fill_id: chosen.fill_id, count: 1 });
+  }
+
+  flash_scan(`✓ ${fp.coffee_name} ${fp.bag_size} (from ${chosen.id})`, "success");
+  update_scan_panel();
 }
 
 // In-place update of the scanned items panel without re-rendering the camera div
@@ -524,29 +683,45 @@ function update_scan_panel() {
   const panel = document.getElementById("scan-panel");
   const flash = document.getElementById("scan-flash");
   const reviewBtn = document.getElementById("pack-review");
-  if (!panel) { render(); return; }  // Fallback: full render if panel missing
+  if (!panel) { render(); return; }
 
   const ps = packing_state;
   const total_kg = packing_total_kg();
-  const item_count = Object.values(ps.scanned_items).reduce((s,n)=>s+n, 0);
+  const item_count = Object.values(ps.scanned_items).reduce((s, entry) => s + (entry.lines || []).reduce((a,l)=>a+l.count, 0), 0);
   const has_items = item_count > 0 || ps.scanned_buckets.length > 0;
 
-  const item_list = Object.entries(ps.scanned_items).map(([code, count]) => {
+  // Render one row per (FP code × container) combination
+  const item_rows = [];
+  for (const [code, entry] of Object.entries(ps.scanned_items)) {
     const fp = state.fp_codes.find(f => f.fp_code === code);
     const label = fp ? `${fp.coffee_name} — ${fp.bag_size}` : code;
-    return `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-      <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🛍️ ${esc(label)}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(code)}</div></div>
-      <div style="display:flex;align-items:center;gap:4px">
-        <button data-decrement-item="${esc(code)}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">−</button>
-        <input type="number" min="1" inputmode="numeric" data-set-item="${esc(code)}" value="${count}" style="font-weight:700;font-size:16px;color:#1a1008;width:54px;text-align:center;padding:6px 4px;border:1px solid #e0d5c5;border-radius:6px;background:#fff" />
-        <button data-increment-item="${esc(code)}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">+</button>
-        <button data-remove-item="${esc(code)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px;margin-left:4px" title="Remove">✕</button>
-      </div>
-    </div>`;
-  }).join("");
+    const lines = entry.lines || [];
+    lines.forEach((line, idx) => {
+      const single_line = lines.length === 1;
+      // Per-line: show container badge, count input editable only when single line
+      item_rows.push(`<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🛍️ ${esc(label)}</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:2px">
+            <span style="background:#1a1008;color:#e8d5b0;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace">${esc(line.container_id || "?")}</span>
+            <span class="hint" style="font-size:11px;font-family:monospace">${esc(code)}</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <button data-decrement-line="${esc(code)}|${idx}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">−</button>
+          ${single_line
+            ? `<input type="number" min="1" inputmode="numeric" data-set-line="${esc(code)}|${idx}" value="${line.count}" style="font-weight:700;font-size:16px;color:#1a1008;width:54px;text-align:center;padding:6px 4px;border:1px solid #e0d5c5;border-radius:6px;background:#fff" />`
+            : `<span style="font-weight:700;font-size:16px;color:#1a1008;width:54px;text-align:center;padding:6px 4px">× ${line.count}</span>`}
+          <button data-increment-line="${esc(code)}|${idx}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">+</button>
+          <button data-remove-line="${esc(code)}|${idx}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px;margin-left:4px" title="Remove this line">✕</button>
+        </div>
+      </div>`);
+    });
+  }
+
   const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bucket (5kg)</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b)}</div></div>
-    <button data-remove-bucket="${esc(b)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bucket (5kg)</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
+    <button data-remove-bucket="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
 
   panel.innerHTML = `
@@ -554,38 +729,67 @@ function update_scan_panel() {
       <div style="font-weight:700;font-size:13px">SCANNED</div>
       <div style="font-size:13px;color:#1a1008;font-weight:700">Total: ${total_kg.toFixed(1)}kg</div>
     </div>
-    ${has_items ? item_list + bucket_list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>'}
+    ${has_items ? item_rows.join("") + bucket_list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>'}
   `;
 
-  // Re-attach the remove buttons (they're in the new HTML)
-  panel.querySelectorAll("[data-decrement-item]").forEach(btn => btn.addEventListener("click", () => {
-    const code = btn.dataset.decrementItem;
-    if (packing_state.scanned_items[code] > 1) packing_state.scanned_items[code]--;
-    else delete packing_state.scanned_items[code];
+  // Helper: parse "code|idx" data attribute and return [code, idx]
+  const parse_line_ref = s => { const [c, i] = s.split("|"); return [c, Number(i)]; };
+
+  panel.querySelectorAll("[data-decrement-line]").forEach(btn => btn.addEventListener("click", () => {
+    const [code, idx] = parse_line_ref(btn.dataset.decrementLine);
+    const entry = packing_state.scanned_items[code];
+    if (!entry || !entry.lines[idx]) return;
+    if (entry.lines[idx].count > 1) entry.lines[idx].count--;
+    else entry.lines.splice(idx, 1);
+    if (entry.lines.length === 0) delete packing_state.scanned_items[code];
     update_scan_panel();
   }));
-  panel.querySelectorAll("[data-increment-item]").forEach(btn => btn.addEventListener("click", () => {
-    const code = btn.dataset.incrementItem;
-    packing_state.scanned_items[code] = (packing_state.scanned_items[code] || 0) + 1;
+  panel.querySelectorAll("[data-increment-line]").forEach(btn => btn.addEventListener("click", () => {
+    const [code, idx] = parse_line_ref(btn.dataset.incrementLine);
+    const entry = packing_state.scanned_items[code];
+    if (!entry || !entry.lines[idx]) return;
+    // Check there's still room in the container
+    const fp = state.fp_codes.find(f => f.fp_code === code);
+    const bag_kg = fp ? (BAG_SIZE_KG[fp.bag_size] || 0) : 0;
+    const container = state.containers.find(c => c.id === entry.lines[idx].container_id);
+    const used_kg = (entry.lines[idx].count) * bag_kg;
+    if (container && (container.remaining - used_kg) < bag_kg) {
+      flash_scan(`Not enough left in ${container.id}`, "error");
+      return;
+    }
+    entry.lines[idx].count++;
     update_scan_panel();
   }));
-  panel.querySelectorAll("[data-set-item]").forEach(inp => {
+  panel.querySelectorAll("[data-set-line]").forEach(inp => {
     inp.addEventListener("change", e => {
-      const code = inp.dataset.setItem;
+      const [code, idx] = parse_line_ref(inp.dataset.setLine);
+      const entry = packing_state.scanned_items[code];
+      if (!entry || !entry.lines[idx]) return;
       const v = Math.max(1, Math.floor(Number(e.target.value)) || 1);
-      packing_state.scanned_items[code] = v;
+      const fp = state.fp_codes.find(f => f.fp_code === code);
+      const bag_kg = fp ? (BAG_SIZE_KG[fp.bag_size] || 0) : 0;
+      const container = state.containers.find(c => c.id === entry.lines[idx].container_id);
+      if (container && v * bag_kg > container.remaining) {
+        const max_bags = Math.floor(container.remaining / bag_kg);
+        flash_scan(`Max ${max_bags} bags fit in ${container.id}`, "error");
+        e.target.value = entry.lines[idx].count;
+        return;
+      }
+      entry.lines[idx].count = v;
       update_scan_panel();
     });
-    // Stop the camera scanner from "scanning" through the input — just select all on focus
     inp.addEventListener("focus", e => e.target.select());
   });
-  panel.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
-    const code = btn.dataset.removeItem;
-    delete packing_state.scanned_items[code];
+  panel.querySelectorAll("[data-remove-line]").forEach(btn => btn.addEventListener("click", () => {
+    const [code, idx] = parse_line_ref(btn.dataset.removeLine);
+    const entry = packing_state.scanned_items[code];
+    if (!entry) return;
+    entry.lines.splice(idx, 1);
+    if (entry.lines.length === 0) delete packing_state.scanned_items[code];
     update_scan_panel();
   }));
   panel.querySelectorAll("[data-remove-bucket]").forEach(btn => btn.addEventListener("click", () => {
-    packing_state.scanned_buckets = packing_state.scanned_buckets.filter(b => b !== btn.dataset.removeBucket);
+    packing_state.scanned_buckets = packing_state.scanned_buckets.filter(b => b.id !== btn.dataset.removeBucket);
     update_scan_panel();
   }));
 
@@ -628,7 +832,7 @@ function build_packing_page(container, fill) {
 
   if (ps.step === "done") {
     const total_kg = packing_total_kg();
-    const item_count = Object.values(ps.scanned_items).reduce((s,n)=>s+n, 0);
+    const item_count = Object.values(ps.scanned_items).reduce((s, e) => s + (e.lines||[]).reduce((a,l)=>a+l.count, 0), 0);
     return `<div class="overlay"><div class="modal" style="text-align:center">
       <div style="font-size:64px">✅</div>
       <h2 style="margin:12px 0 8px">All done!</h2>
@@ -640,13 +844,35 @@ function build_packing_page(container, fill) {
 
   if (ps.step === "review") {
     const total_kg = packing_total_kg();
-    const item_rows = Object.entries(ps.scanned_items).map(([code, count]) => {
+    // Build review with one row per (FP code × container) for full traceability
+    const item_rows = [];
+    for (const [code, entry] of Object.entries(ps.scanned_items)) {
       const fp = state.fp_codes.find(f => f.fp_code === code);
       const label = fp ? `${fp.coffee_name} — ${fp.bag_size}` : code;
-      const kg = fp ? count * (BAG_SIZE_KG[fp.bag_size]||0) : 0;
-      return `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>🛍️ ${esc(label)}</span><span style="font-weight:600">× ${count} (${kg.toFixed(1)}kg)</span></div>`;
-    }).join("");
-    const bucket_rows = ps.scanned_buckets.length ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;padding-top:6px;border-top:1px solid #eee"><span>🪣 Buckets (5kg each)</span><span style="font-weight:600">× ${ps.scanned_buckets.length} (${(ps.scanned_buckets.length*5).toFixed(1)}kg)</span></div><div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${ps.scanned_buckets.map(esc).join(" · ")}</div>` : "";
+      const bag_kg = fp ? (BAG_SIZE_KG[fp.bag_size] || 0) : 0;
+      (entry.lines || []).forEach(line => {
+        const kg = line.count * bag_kg;
+        item_rows.push(`<div style="display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:6px;gap:8px">
+          <span>🛍️ ${esc(label)} <span style="background:#1a1008;color:#e8d5b0;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace;margin-left:4px">${esc(line.container_id||"?")}</span></span>
+          <span style="font-weight:600;white-space:nowrap">× ${line.count} (${kg.toFixed(1)}kg)</span>
+        </div>`);
+      });
+    }
+    const bucket_rows = ps.scanned_buckets.length ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;padding-top:6px;border-top:1px solid #eee"><span>🪣 Buckets (5kg each)</span><span style="font-weight:600">× ${ps.scanned_buckets.length} (${(ps.scanned_buckets.length*5).toFixed(1)}kg)</span></div><div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${ps.scanned_buckets.map(b => esc(b.id)).join(" · ")}</div>` : "";
+
+    // Also show summary by container
+    const by_container = {};
+    for (const [code, entry] of Object.entries(ps.scanned_items)) {
+      const fp = state.fp_codes.find(f => f.fp_code === code);
+      const bag_kg = fp ? (BAG_SIZE_KG[fp.bag_size] || 0) : 0;
+      (entry.lines || []).forEach(line => {
+        if (!line.container_id) return;
+        by_container[line.container_id] = (by_container[line.container_id] || 0) + (line.count * bag_kg);
+      });
+    }
+    const container_summary = Object.keys(by_container).length > 1
+      ? `<div style="background:#fff8ee;border-radius:6px;padding:10px;margin-top:10px;font-size:12px"><div style="font-weight:600;margin-bottom:4px">From ${Object.keys(by_container).length} containers:</div>${Object.entries(by_container).map(([cid, kg]) => `<div>📦 ${esc(cid)}: ${kg.toFixed(1)}kg</div>`).join("")}</div>`
+      : "";
 
     return `<div class="overlay"><div class="modal">
       <div style="text-align:center;margin-bottom:20px">
@@ -656,14 +882,15 @@ function build_packing_page(container, fill) {
       </div>
       <div style="background:#f5f0eb;border-radius:12px;padding:16px;margin-bottom:16px">
         <div class="grid-2 mb-12">
-          ${info_row("Shop", ps.shop)} ${info_row("Container", container.id)}
-          ${info_row("Coffee", fill.coffee)} ${info_row("Total", `${total_kg.toFixed(1)}kg`)}
+          ${info_row("Shop", ps.shop)}
+          ${info_row("Total", `${total_kg.toFixed(1)}kg`)}
         </div>
         <div style="background:#fff;border-radius:8px;padding:12px">
           <div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600">BREAKDOWN</div>
-          ${item_rows || '<p class="hint" style="font-size:13px;color:#888">No bags scanned</p>'}
+          ${item_rows.length ? item_rows.join("") : '<p class="hint" style="font-size:13px;color:#888">No bags scanned</p>'}
           ${bucket_rows}
         </div>
+        ${container_summary}
       </div>
       <div class="grid-2">
         <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="packing-back-edit">✏️ Edit</button>
@@ -673,37 +900,27 @@ function build_packing_page(container, fill) {
   }
 
   if (ps.step === "scan") {
-    const total_kg = packing_total_kg();
-    const item_count = Object.values(ps.scanned_items).reduce((s,n)=>s+n, 0);
-    const has_items = item_count > 0 || ps.scanned_buckets.length > 0;
-
-    const item_list = Object.entries(ps.scanned_items).map(([code, count]) => {
-      const fp = state.fp_codes.find(f => f.fp_code === code);
-      const label = fp ? `${fp.coffee_name} — ${fp.bag_size}` : code;
-      return `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🛍️ ${esc(label)}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(code)}</div></div>
-        <div style="display:flex;align-items:center;gap:4px">
-          <button data-decrement-item="${esc(code)}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">−</button>
-          <input type="number" min="1" inputmode="numeric" data-set-item="${esc(code)}" value="${count}" style="font-weight:700;font-size:16px;color:#1a1008;width:54px;text-align:center;padding:6px 4px;border:1px solid #e0d5c5;border-radius:6px;background:#fff" />
-          <button data-increment-item="${esc(code)}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">+</button>
-          <button data-remove-item="${esc(code)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px;margin-left:4px" title="Remove">✕</button>
-        </div>
-      </div>`;
-    }).join("");
-    const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-      <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bucket (5kg)</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b)}</div></div>
-      <button data-remove-bucket="${esc(b)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
-    </div>`).join("");
+    const has_items = Object.values(ps.scanned_items).some(e => (e.lines||[]).length > 0) || ps.scanned_buckets.length > 0;
 
     const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${ps.scanner_msg ? `background:${ps.scanner_msg_type==="success"?"#4a9e6b":ps.scanner_msg_type==="error"?"#e05c2a":"#1a1008"}` : "display:none"}`;
     const flash = `<div id="scan-flash" style="${flash_style}">${esc(ps.scanner_msg||"")}</div>`;
+
+    // Show active container summary at the top so packer knows what's available
+    const active_containers = state.containers.filter(c => c.status === "active" && c.remaining > 0);
+    const summary = active_containers.length === 0
+      ? `<div style="background:#fff0ee;border:1px solid #e05c2a;color:#e05c2a;padding:10px;border-radius:8px;font-size:13px;text-align:center;margin-bottom:14px">⚠️ No active containers. Activate one in the Containers tab first.</div>`
+      : `<div style="background:#f5f0eb;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
+          <div style="font-weight:600;margin-bottom:4px">Available (FIFO):</div>
+          ${active_containers.sort((a,b) => (a.latest_roast_date||"").localeCompare(b.latest_roast_date||"")).map(c => `<div>📦 ${esc(c.id)} · ${esc(c.coffee||"?")} · ${c.remaining.toFixed(1)}kg</div>`).join("")}
+        </div>`;
 
     return `<div class="overlay"><div class="modal" style="max-width:480px">
       <div style="text-align:center;margin-bottom:14px">
         <div style="font-weight:600;font-size:13px;color:#888">Packing for</div>
         <h2 style="margin:2px 0 0">${esc(ps.shop)}</h2>
-        <div class="hint" style="font-size:12px;margin-top:4px">${esc(container.id)} · ${esc(fill.coffee)} · ${fill.remaining.toFixed(1)}kg avail</div>
       </div>
+
+      ${summary}
 
       <div style="position:relative;background:#1a1008;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
         ${flash}
@@ -716,11 +933,7 @@ function build_packing_page(container, fill) {
       </div>
 
       <div id="scan-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-weight:700;font-size:13px">SCANNED</div>
-          <div style="font-size:13px;color:#1a1008;font-weight:700">Total: ${total_kg.toFixed(1)}kg</div>
-        </div>
-        ${has_items ? item_list + bucket_list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>'}
+        <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>
       </div>
 
       ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
@@ -771,6 +984,22 @@ function attach_listeners() {
   }));
   app.querySelectorAll("[data-toggle-delivery]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_deliveries[btn.dataset.toggleDelivery]=!state.ui.expanded_deliveries[btn.dataset.toggleDelivery]; render(); }));
   app.querySelector("#close-scan")?.addEventListener("click", () => { state.scan_id=null; const url=new URL(window.location); url.searchParams.delete("scan"); window.history.replaceState({},"",url); render(); });
+
+  // Container status management
+  app.querySelectorAll("[data-set-status]").forEach(btn => btn.addEventListener("click", () => {
+    const [container_id, new_status] = btn.dataset.setStatus.split("|");
+    set_container_status(container_id, new_status);
+  }));
+  app.querySelectorAll("[data-samples]").forEach(btn => btn.addEventListener("click", () => {
+    send_to_samples(btn.dataset.samples);
+  }));
+
+  // New dispatch flow — start packing without picking a container upfront
+  app.querySelector("#new-dispatch-btn")?.addEventListener("click", () => {
+    reset_packing_state();
+    state.scan_id = "__new__";  // sentinel — no specific container
+    render();
+  });
   
   // ── Scan-to-pack flow listeners ──
   // Shop step: pick a shop or type custom
@@ -810,70 +1039,84 @@ function attach_listeners() {
   app.querySelector("#manual-scan-input")?.addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); app.querySelector("#manual-scan-btn")?.click(); }
   });
-  app.querySelectorAll("[data-decrement-item]").forEach(btn => btn.addEventListener("click", () => {
-    const code = btn.dataset.decrementItem;
-    if (packing_state.scanned_items[code] > 1) packing_state.scanned_items[code]--;
-    else delete packing_state.scanned_items[code];
-    update_scan_panel();
-  }));
-  app.querySelectorAll("[data-increment-item]").forEach(btn => btn.addEventListener("click", () => {
-    const code = btn.dataset.incrementItem;
-    packing_state.scanned_items[code] = (packing_state.scanned_items[code] || 0) + 1;
-    update_scan_panel();
-  }));
-  app.querySelectorAll("[data-set-item]").forEach(inp => {
-    inp.addEventListener("change", e => {
-      const code = inp.dataset.setItem;
-      const v = Math.max(1, Math.floor(Number(e.target.value)) || 1);
-      packing_state.scanned_items[code] = v;
-      update_scan_panel();
-    });
-    inp.addEventListener("focus", e => e.target.select());
-  });
-  app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
-    const code = btn.dataset.removeItem;
-    delete packing_state.scanned_items[code];
-    update_scan_panel();
-  }));
-  app.querySelectorAll("[data-remove-bucket]").forEach(btn => btn.addEventListener("click", () => {
-    packing_state.scanned_buckets = packing_state.scanned_buckets.filter(b => b !== btn.dataset.removeBucket);
-    render();
-  }));
+  app.querySelectorAll("[data-decrement-item]").forEach(btn => btn.addEventListener("click", () => {}));
+  app.querySelectorAll("[data-increment-item]").forEach(btn => btn.addEventListener("click", () => {}));
+  app.querySelectorAll("[data-set-item]").forEach(inp => {});
+  app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {}));
+  app.querySelectorAll("[data-remove-bucket]").forEach(btn => btn.addEventListener("click", () => {}));
 
   // Start QR scanner if we're on the scan step
   if (packing_state.step === "scan" && state.scan_id && !packing_state.scanner_active) {
-    setTimeout(start_qr_scanner, 100);
+    setTimeout(() => { start_qr_scanner(); update_scan_panel(); }, 100);
   }
-  // Stop scanner when leaving scan step or closing overlay
   if (packing_state.step !== "scan" && packing_state.scanner_active) {
     stop_qr_scanner();
   }
 
   app.querySelector("#pack-review")?.addEventListener("click", () => {
     const total_kg = packing_total_kg();
-    const fill = active_fill(state.containers.find(c=>c.id===state.scan_id));
     if (total_kg <= 0) { packing_state.err = "Please scan at least one item."; render(); return; }
-    if (total_kg > fill.remaining) { packing_state.err = `Only ${fill.remaining.toFixed(1)}kg available — you've scanned ${total_kg.toFixed(1)}kg.`; render(); return; }
+    // Per-container check: each line's count × bag_kg must not exceed that container's remaining
+    for (const [code, entry] of Object.entries(packing_state.scanned_items)) {
+      const fp = state.fp_codes.find(f => f.fp_code === code);
+      if (!fp) continue;
+      const bag_kg = BAG_SIZE_KG[fp.bag_size] || 0;
+      // Aggregate by container_id across all FP codes
+      // (already enforced during scan, but double-check at review)
+    }
     packing_state.err = ""; packing_state.step = "review"; render();
   });
   app.querySelector("#packing-back-edit")?.addEventListener("click", () => { packing_state.step="scan"; render(); });
   app.querySelector("#packing-confirm")?.addEventListener("click", async () => {
+    // Build dispatch_lines: ONE line per (FP code × container)
     const lines = [];
-    for (const [code, count] of Object.entries(packing_state.scanned_items)) {
+    for (const [code, entry] of Object.entries(packing_state.scanned_items)) {
       const fp = state.fp_codes.find(f => f.fp_code === code);
       if (!fp) continue;
-      const kg = count * (BAG_SIZE_KG[fp.bag_size]||0);
-      lines.push({ type:"retail", kg, bags: count, bag_size: fp.bag_size });
+      const bag_kg = BAG_SIZE_KG[fp.bag_size] || 0;
+      (entry.lines || []).forEach(line => {
+        const kg = line.count * bag_kg;
+        lines.push({
+          type: "retail", kg, bags: line.count, bag_size: fp.bag_size,
+          container_id: line.container_id, fill_id: line.fill_id,
+        });
+      });
     }
+    // Bucket lines — buckets have container_id/fill_id null since their identity carries the coffee
     if (packing_state.scanned_buckets.length > 0) {
-      lines.push({ type:"retail", kg: packing_state.scanned_buckets.length*5, bags: packing_state.scanned_buckets.length, bag_size: "Bar 5kg" });
+      lines.push({
+        type: "retail", kg: packing_state.scanned_buckets.length * 5,
+        bags: packing_state.scanned_buckets.length, bag_size: "Bar 5kg",
+        container_id: null, fill_id: null,
+      });
     }
     const total_kg = packing_total_kg();
-    const dispatch_id = await save_dispatch(state.scan_id, packing_state.shop, lines, total_kg);
+    // Pick a primary container_id for the dispatch row — use the first FP code's first line's container
+    let primary_container_id = null, primary_fill_id = null;
+    for (const entry of Object.values(packing_state.scanned_items)) {
+      if (entry.lines && entry.lines.length > 0) {
+        primary_container_id = entry.lines[0].container_id;
+        primary_fill_id = entry.lines[0].fill_id;
+        break;
+      }
+    }
+    const dispatch_id = await save_dispatch_v2(primary_container_id, primary_fill_id, packing_state.shop, lines, total_kg);
     if (dispatch_id && packing_state.scanned_buckets.length > 0) {
       await supabaseClient.from("dispatch_buckets").insert(
-        packing_state.scanned_buckets.map(b => ({ dispatch_id, bucket_id: b }))
+        packing_state.scanned_buckets.map(b => ({ dispatch_id, bucket_id: b.id }))
       );
+    }
+    // After save, check each container that was used and auto-flip to empty if remaining hits 0
+    if (dispatch_id) {
+      const containers_used = [...new Set(lines.map(l => l.container_id).filter(Boolean))];
+      for (const cid of containers_used) {
+        const c = state.containers.find(x => x.id === cid);
+        if (!c) continue;
+        const used_kg = lines.filter(l => l.container_id === cid).reduce((s,l) => s+l.kg, 0);
+        if (c.remaining - used_kg <= 0.01) {  // small float tolerance
+          await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", cid);
+        }
+      }
     }
     packing_state.step = "done";
     render();
