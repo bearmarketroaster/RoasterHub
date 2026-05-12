@@ -927,9 +927,12 @@ function build_packing_page(container, fill) {
         <div id="qr-scanner" style="width:100%;min-height:240px"></div>
       </div>
 
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <input id="manual-scan-input" placeholder="Or type ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
-        <button class="btn btn-dark btn-sm" id="manual-scan-btn">Add</button>
+      <div style="position:relative;margin-bottom:14px">
+        <div style="display:flex;gap:8px">
+          <input id="manual-scan-input" placeholder="Search by name or type FP/BKT ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
+          <button class="btn btn-dark btn-sm" id="manual-scan-btn">Add</button>
+        </div>
+        <div id="manual-scan-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e0d5c5;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
       </div>
 
       <div id="scan-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
@@ -1035,9 +1038,63 @@ function attach_listeners() {
     if (!v) return;
     process_scan(v);
     document.getElementById("manual-scan-input").value = "";
+    const sug = document.getElementById("manual-scan-suggestions");
+    if (sug) sug.style.display = "none";
   });
   app.querySelector("#manual-scan-input")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") { e.preventDefault(); app.querySelector("#manual-scan-btn")?.click(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const sug = document.getElementById("manual-scan-suggestions");
+      const first = sug?.querySelector("[data-suggest-code]");
+      if (first && sug.style.display !== "none") {
+        process_scan(first.dataset.suggestCode);
+        document.getElementById("manual-scan-input").value = "";
+        sug.style.display = "none";
+      } else {
+        app.querySelector("#manual-scan-btn")?.click();
+      }
+    } else if (e.key === "Escape") {
+      const sug = document.getElementById("manual-scan-suggestions");
+      if (sug) sug.style.display = "none";
+    }
+  });
+  // Live autocomplete on the manual scan input
+  app.querySelector("#manual-scan-input")?.addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    const sug = document.getElementById("manual-scan-suggestions");
+    if (!sug) return;
+    if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
+    // Match against FP codes by code, coffee name, or bag size
+    const matches = state.fp_codes.filter(f => {
+      const hay = `${f.fp_code} ${f.coffee_name} ${f.bag_size}`.toLowerCase();
+      return hay.includes(q);
+    }).slice(0, 8);
+    if (matches.length === 0) {
+      sug.innerHTML = `<div style="padding:10px 14px;color:#888;font-size:13px;font-style:italic">No matches</div>`;
+    } else {
+      sug.innerHTML = matches.map(f => `<div data-suggest-code="${esc(f.fp_code)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px">
+        <div style="font-weight:600">${esc(f.coffee_name)} <span style="color:#888;font-weight:400">— ${esc(f.bag_size)}</span></div>
+        <div style="font-size:11px;color:#aaa;font-family:monospace">${esc(f.fp_code)}</div>
+      </div>`).join("");
+    }
+    sug.style.display = "block";
+  });
+  // Click a suggestion → add it as a scan
+  app.querySelectorAll("[data-suggest-code]").forEach(el => el.addEventListener("click", () => {}));  // placeholder; real binding via delegation below
+  app.querySelector("#manual-scan-suggestions")?.addEventListener("click", e => {
+    const row = e.target.closest("[data-suggest-code]");
+    if (!row) return;
+    process_scan(row.dataset.suggestCode);
+    document.getElementById("manual-scan-input").value = "";
+    const sug = document.getElementById("manual-scan-suggestions");
+    if (sug) { sug.style.display = "none"; sug.innerHTML = ""; }
+  });
+  // Hide suggestions on outside click
+  app.querySelector("#manual-scan-input")?.addEventListener("blur", () => {
+    setTimeout(() => {
+      const sug = document.getElementById("manual-scan-suggestions");
+      if (sug) sug.style.display = "none";
+    }, 200);
   });
   app.querySelectorAll("[data-decrement-item]").forEach(btn => btn.addEventListener("click", () => {}));
   app.querySelectorAll("[data-increment-item]").forEach(btn => btn.addEventListener("click", () => {}));
