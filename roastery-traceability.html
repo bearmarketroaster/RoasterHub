@@ -306,11 +306,14 @@ async function save_dispatch_v2(primary_container_id, primary_fill_id, shop, lin
     await supabaseClient.from("containers").upsert({ id: cid }, { onConflict: "id" });
   }
   const dispatch_id = gen_id("DSP");
+  // Auto-confirm Online (and Samples) dispatches — they leave immediately, never sit "in transit"
+  const auto_confirm_shops = ["Online", "Samples"];
+  const confirmed_at = auto_confirm_shops.includes(shop) ? new Date().toISOString() : null;
   const { error: d_err } = await supabaseClient.from("dispatches").insert({
     id: dispatch_id,
     container_id: primary_container_id,
     fill_id: primary_fill_id,
-    date: today(), shop, total_kg, confirmed_at: null,
+    date: today(), shop, total_kg, confirmed_at,
   });
   if (d_err) { state.saving = false; alert("Failed to save dispatch: " + d_err.message); return null; }
   // Save dispatch_lines with per-line container_id and fill_id
