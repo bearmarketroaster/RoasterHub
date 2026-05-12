@@ -97,12 +97,15 @@ const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },
 
 const state = {
   tab: 0, containers: [], roast_sessions: [], dispatches: [],
-  coffees: [], fp_codes: [], shop_mappings: [], base_url: "",
+  coffees: [], fp_codes: [], shop_mappings: [], buckets: [], base_url: "",
   user_role: null,
   loading: true, saving: false, scan_id: null,
   ui: {
     expanded_qr: null,
     expanded_deliveries: {},
+    fill_bucket_container: null,  // Container ID currently being filled with buckets
+    bucket_return_open: false,
+    bucket_return_condition: "clean",
   },
 };
 
@@ -214,6 +217,10 @@ async function load_data() {
   state.fp_codes = (fp_codes_data||[]).map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
   const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id");
   state.shop_mappings = shop_mappings_data || [];
+
+  // Load buckets with their lifecycle state
+  const { data: buckets_data } = await supabaseClient.from("buckets").select("*").order("created_at", { ascending: false });
+  state.buckets = buckets_data || [];
   // Build containers from roast_sessions — group by container_id
   const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false });
   state.roast_sessions = roast_sessions || [];
@@ -350,6 +357,8 @@ function render() {
 
 function build_app() {
   if (state.scan_id) return build_scan_overlay();
+  if (state.ui.fill_bucket_container) return build_fill_buckets_overlay();
+  if (state.ui.bucket_return_open) return build_bucket_return_overlay();
   const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#c8a96e;margin-top:1px">Bear Roastery</div></div></div><button class="btn-logout" id="logout-btn">Log Out</button></div>`;
   if (state.loading) return header+`<div class="loading">Loading…</div>`;
   const badges={Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
@@ -455,6 +464,357 @@ function build_shop_deliveries_page(shop_qr_id) {
   </div></div>`;
 }
 
+// ── BUCKET FILL WORKFLOW ─────────────────────────────────────────────────────
+// State tracking buckets currently being filled from a container
+const fill_state = {
+  filled: [],          // [{ id, container_id, fill_id, coffee }]
+  err: "",
+  scanner_msg: "",
+  scanner_msg_type: "info",
+};
+
+function reset_fill_state() {
+  fill_state.filled = [];
+  fill_state.err = "";
+  fill_state.scanner_msg = "";
+}
+
+function process_fill_scan(raw_value) {
+  const value = (raw_value || "").trim().toUpperCase();
+  if (!value) return;
+  const now = Date.now();
+  if (_last_scan.value === value && (now - _last_scan.at) < SCAN_DEBOUNCE_MS) return;
+  _last_scan = { value, at: now };
+
+  if (!value.startsWith("BKT-")) {
+    flash_fill_scan(`${value} is not a bucket QR`, "error");
+    return;
+  }
+  if (fill_state.filled.find(b => b.id === value)) {
+    flash_fill_scan(`${value} already scanned in this session`, "error");
+    return;
+  }
+  const bucket = state.buckets.find(b => b.id === value);
+  if (!bucket) {
+    flash_fill_scan(`Bucket ${value} not registered`, "error");
+    return;
+  }
+  if (bucket.retired_at) {
+    flash_fill_scan(`Bucket ${value} is retired`, "error");
+    return;
+  }
+  if (bucket.status === "filled") {
+    flash_fill_scan(`${value} is already filled (${bucket.coffee||"?"})`, "error");
+    return;
+  }
+  const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
+  if (!container) {
+    flash_fill_scan(`Container not found`, "error");
+    return;
+  }
+  // Check there's enough left in the container for another 5kg bucket
+  const already_session_kg = fill_state.filled.length * 5;
+  if ((container.remaining - already_session_kg) < 5) {
+    flash_fill_scan(`Not enough left in ${container.id} (${(container.remaining - already_session_kg).toFixed(1)}kg)`, "error");
+    return;
+  }
+  fill_state.filled.push({
+    id: value,
+    container_id: container.id,
+    fill_id: container.fill_id,
+    coffee: container.coffee,
+  });
+  flash_fill_scan(`✓ ${value} filled with ${container.coffee||"?"}`, "success");
+  update_fill_panel();
+}
+
+let _flash_fill_timer = null;
+function flash_fill_scan(msg, type) {
+  fill_state.scanner_msg = msg;
+  fill_state.scanner_msg_type = type;
+  const flash = document.getElementById("fill-flash");
+  if (flash) {
+    flash.style.display = "block";
+    flash.style.background = type === "success" ? "#4a9e6b" : type === "error" ? "#e05c2a" : "#1a1008";
+    flash.textContent = msg;
+  }
+  if (_flash_fill_timer) clearTimeout(_flash_fill_timer);
+  _flash_fill_timer = setTimeout(() => {
+    fill_state.scanner_msg = "";
+    const f = document.getElementById("fill-flash");
+    if (f) f.style.display = "none";
+  }, 2000);
+}
+
+function update_fill_panel() {
+  const panel = document.getElementById("fill-panel");
+  if (!panel) { render(); return; }
+  const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
+  const session_kg = fill_state.filled.length * 5;
+  const remaining_after = container ? (container.remaining - session_kg).toFixed(1) : "?";
+  const list = fill_state.filled.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+    <div><div style="font-weight:600;font-size:14px">🪣 5kg ${esc(b.coffee||"?")}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
+    <button data-unfill="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
+  </div>`).join("");
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-weight:700;font-size:13px">FILLING (${fill_state.filled.length})</div>
+      <div style="font-size:13px;color:#1a1008;font-weight:700">${session_kg}kg used · ${remaining_after}kg left</div>
+    </div>
+    ${fill_state.filled.length ? list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets filled yet — scan empty bucket QRs</p>'}
+  `;
+  panel.querySelectorAll("[data-unfill]").forEach(btn => btn.addEventListener("click", () => {
+    fill_state.filled = fill_state.filled.filter(b => b.id !== btn.dataset.unfill);
+    update_fill_panel();
+  }));
+  const confirmBtn = document.getElementById("fill-confirm-btn");
+  if (confirmBtn) confirmBtn.disabled = fill_state.filled.length === 0;
+}
+
+function build_fill_buckets_overlay() {
+  const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
+  if (!container) {
+    state.ui.fill_bucket_container = null;
+    return `<div class="overlay"><div class="modal" style="text-align:center"><p>Container not found.</p><button class="btn btn-dark mt-16" id="fill-cancel">Close</button></div></div>`;
+  }
+  const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${fill_state.scanner_msg ? `background:${fill_state.scanner_msg_type==="success"?"#4a9e6b":fill_state.scanner_msg_type==="error"?"#e05c2a":"#1a1008"}` : "display:none"}`;
+  return `<div class="overlay"><div class="modal" style="max-width:480px">
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:40px">🪣</div>
+      <h2 style="margin:8px 0 2px">Fill Buckets</h2>
+      <div class="hint" style="font-size:13px;margin-top:4px">From ${esc(container.id)} · ${esc(container.coffee||"?")} · ${container.remaining.toFixed(1)}kg available</div>
+    </div>
+
+    <div style="position:relative;background:#1a1008;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
+      <div id="fill-flash" style="${flash_style}">${esc(fill_state.scanner_msg||"")}</div>
+      <div id="fill-qr-scanner" style="width:100%;min-height:240px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <input id="fill-manual-input" placeholder="Or type bucket ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
+      <button class="btn btn-dark btn-sm" id="fill-manual-btn">Add</button>
+    </div>
+
+    <div id="fill-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
+      <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets filled yet — scan empty bucket QRs</p>
+    </div>
+
+    ${fill_state.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(fill_state.err)}</p>`:""}
+
+    <div class="grid-2">
+      <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="fill-cancel">← Cancel</button>
+      <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="fill-confirm-btn" disabled>✓ Save</button>
+    </div>
+  </div></div>`;
+}
+
+async function save_filled_buckets() {
+  const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
+  if (!container || fill_state.filled.length === 0) return;
+  state.saving = true; render();
+  const now = new Date().toISOString();
+  // Update all scanned buckets: set status=filled, container, fill_id, coffee
+  for (const b of fill_state.filled) {
+    await supabaseClient.from("buckets").update({
+      status: "filled",
+      container_id: container.id,
+      fill_id: container.fill_id,
+      coffee: container.coffee,
+      filled_at: now,
+      condition: "clean",
+      returned_at: null,
+    }).eq("id", b.id);
+  }
+  // Auto-flip container to "empty" if remaining hits 0
+  const session_kg = fill_state.filled.length * 5;
+  if (container.remaining - session_kg <= 0.01) {
+    await supabaseClient.from("containers").update({ status: "empty", status_changed_at: now }).eq("id", container.id);
+  }
+  state.saving = false;
+  state.ui.fill_bucket_container = null;
+  reset_fill_state();
+  await load_data();
+  render();
+}
+
+// ── BUCKET RETURN WORKFLOW ───────────────────────────────────────────────────
+const return_state = {
+  returned: [],   // [{ id, prev_status, prev_coffee }]
+  err: "",
+  scanner_msg: "",
+  scanner_msg_type: "info",
+};
+
+function reset_return_state() {
+  return_state.returned = [];
+  return_state.err = "";
+  return_state.scanner_msg = "";
+}
+
+function process_return_scan(raw_value) {
+  const value = (raw_value || "").trim().toUpperCase();
+  if (!value) return;
+  const now = Date.now();
+  if (_last_scan.value === value && (now - _last_scan.at) < SCAN_DEBOUNCE_MS) return;
+  _last_scan = { value, at: now };
+
+  if (!value.startsWith("BKT-")) {
+    flash_return_scan(`${value} is not a bucket QR`, "error");
+    return;
+  }
+  if (return_state.returned.find(b => b.id === value)) {
+    flash_return_scan(`${value} already scanned`, "error");
+    return;
+  }
+  const bucket = state.buckets.find(b => b.id === value);
+  if (!bucket) {
+    flash_return_scan(`Bucket ${value} not registered`, "error");
+    return;
+  }
+  return_state.returned.push({ id: value, prev_status: bucket.status, prev_coffee: bucket.coffee });
+  flash_return_scan(`✓ ${value} marked returned`, "success");
+  update_return_panel();
+}
+
+let _flash_return_timer = null;
+function flash_return_scan(msg, type) {
+  return_state.scanner_msg = msg;
+  return_state.scanner_msg_type = type;
+  const flash = document.getElementById("return-flash");
+  if (flash) {
+    flash.style.display = "block";
+    flash.style.background = type === "success" ? "#4a9e6b" : type === "error" ? "#e05c2a" : "#1a1008";
+    flash.textContent = msg;
+  }
+  if (_flash_return_timer) clearTimeout(_flash_return_timer);
+  _flash_return_timer = setTimeout(() => {
+    return_state.scanner_msg = "";
+    const f = document.getElementById("return-flash");
+    if (f) f.style.display = "none";
+  }, 2000);
+}
+
+function update_return_panel() {
+  const panel = document.getElementById("return-panel");
+  if (!panel) { render(); return; }
+  const list = return_state.returned.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+    <div><div style="font-weight:600;font-size:14px">🪣 ${esc(b.id)}</div><div class="hint" style="font-size:11px">Previously: ${esc(b.prev_status||"?")}${b.prev_coffee?` · ${esc(b.prev_coffee)}`:""}</div></div>
+    <button data-unreturn="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
+  </div>`).join("");
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-weight:700;font-size:13px">RETURNED (${return_state.returned.length})</div>
+    </div>
+    ${return_state.returned.length ? list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets scanned — scan returning bucket QRs</p>'}
+  `;
+  panel.querySelectorAll("[data-unreturn]").forEach(btn => btn.addEventListener("click", () => {
+    return_state.returned = return_state.returned.filter(b => b.id !== btn.dataset.unreturn);
+    update_return_panel();
+  }));
+  const confirmBtn = document.getElementById("return-confirm-btn");
+  if (confirmBtn) confirmBtn.disabled = return_state.returned.length === 0;
+}
+
+function build_bucket_return_overlay() {
+  const condition = state.ui.bucket_return_condition || "clean";
+  const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${return_state.scanner_msg ? `background:${return_state.scanner_msg_type==="success"?"#4a9e6b":return_state.scanner_msg_type==="error"?"#e05c2a":"#1a1008"}` : "display:none"}`;
+  return `<div class="overlay"><div class="modal" style="max-width:480px">
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:40px">↩️</div>
+      <h2 style="margin:8px 0 2px">Mark Buckets Returned</h2>
+      <div class="hint" style="font-size:13px;margin-top:4px">Scan each bucket coming back from a shop</div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <label class="lbl" style="font-size:13px;margin-bottom:6px;display:block">Condition for these buckets</label>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+        ${["clean","dirty","damaged","lost"].map(c => `<button class="btn ${condition===c?"btn-dark":"btn-ghost"} btn-sm" data-set-condition="${c}" style="${condition===c?"color:#e8d5b0":""};text-transform:capitalize">${c}</button>`).join("")}
+      </div>
+    </div>
+
+    <div style="position:relative;background:#1a1008;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
+      <div id="return-flash" style="${flash_style}">${esc(return_state.scanner_msg||"")}</div>
+      <div id="return-qr-scanner" style="width:100%;min-height:240px"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <input id="return-manual-input" placeholder="Or type bucket ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
+      <button class="btn btn-dark btn-sm" id="return-manual-btn">Add</button>
+    </div>
+
+    <div id="return-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
+      <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets scanned — scan returning bucket QRs</p>
+    </div>
+
+    <div class="grid-2">
+      <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="return-cancel">← Cancel</button>
+      <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="return-confirm-btn" disabled>✓ Mark ${return_state.returned.length} Returned</button>
+    </div>
+  </div></div>`;
+}
+
+async function save_returned_buckets() {
+  if (return_state.returned.length === 0) return;
+  state.saving = true; render();
+  const condition = state.ui.bucket_return_condition || "clean";
+  const now = new Date().toISOString();
+  const ids = return_state.returned.map(b => b.id);
+  // Mark returned: status → empty (ready for refill), condition, returned_at
+  // Clear contents (container_id, fill_id, coffee) since bucket is now empty
+  await supabaseClient.from("buckets").update({
+    status: "empty",
+    condition,
+    returned_at: now,
+    container_id: null,
+    fill_id: null,
+    coffee: null,
+  }).in("id", ids);
+  state.saving = false;
+  state.ui.bucket_return_open = false;
+  reset_return_state();
+  await load_data();
+  render();
+}
+
+// Scanner control for fill & return overlays (uses html5-qrcode just like packing)
+let _fill_html5_qr = null;
+function start_fill_scanner() {
+  if (!window.Html5Qrcode) return;
+  const el = document.getElementById("fill-qr-scanner");
+  if (!el) return;
+  if (_fill_html5_qr) return;
+  _fill_html5_qr = new window.Html5Qrcode("fill-qr-scanner", { verbose: false });
+  _fill_html5_qr.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 220, height: 220 } },
+    decoded => process_fill_scan(decoded),
+    () => {}
+  ).catch(() => { _fill_html5_qr = null; });
+}
+function stop_fill_scanner() {
+  if (!_fill_html5_qr) return;
+  _fill_html5_qr.stop().then(() => _fill_html5_qr.clear()).catch(()=>{}).finally(() => { _fill_html5_qr = null; });
+}
+
+let _return_html5_qr = null;
+function start_return_scanner() {
+  if (!window.Html5Qrcode) return;
+  const el = document.getElementById("return-qr-scanner");
+  if (!el) return;
+  if (_return_html5_qr) return;
+  _return_html5_qr = new window.Html5Qrcode("return-qr-scanner", { verbose: false });
+  _return_html5_qr.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 220, height: 220 } },
+    decoded => process_return_scan(decoded),
+    () => {}
+  ).catch(() => { _return_html5_qr = null; });
+}
+function stop_return_scanner() {
+  if (!_return_html5_qr) return;
+  _return_html5_qr.stop().then(() => _return_html5_qr.clear()).catch(()=>{}).finally(() => { _return_html5_qr = null; });
+}
+
 function build_containers_tab() {
   // Group containers by status
   const active  = state.containers.filter(c => c.status === "active"  && c.remaining > 0);
@@ -479,6 +839,11 @@ function build_containers_tab() {
       ? `<button class="btn btn-amber btn-sm" data-samples="${esc(c.id)}" title="Empty container into 30g sample bags">🎁 Send to Samples</button>`
       : "";
 
+    // Fill Buckets button — only meaningful when container has coffee and ≥5kg available
+    const fill_buckets_button = (mode === "active" || mode === "waiting") && remaining >= 5
+      ? `<button class="btn btn-green btn-sm" data-fill-buckets="${esc(c.id)}" title="Fill empty 5kg buckets from this container">🪣 Fill Buckets</button>`
+      : "";
+
     return `
       <div class="card" style="border-left:4px solid ${mode==="active"?"#4a9e6b":mode==="waiting"?"#c8a96e":"#ccc"};margin-bottom:10px;${mode==="empty"?"opacity:0.7":""}">
         <div class="flex-between flex-wrap">
@@ -488,6 +853,7 @@ function build_containers_tab() {
             ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#e0a82a;border-radius:4px">⏳ Has Pending Dispatch</span>` : ""}
           </div>
           <div class="flex-wrap gap-6">
+            ${fill_buckets_button}
             ${samples_button}
             ${action_button}
           </div>
@@ -509,11 +875,24 @@ function build_containers_tab() {
     ? `<button class="btn btn-dark" id="new-dispatch-btn" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`
     : `<button class="btn btn-grey" disabled title="Move a container to Active first" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`;
 
+  // Bucket fleet summary
+  const buckets_filled  = state.buckets.filter(b => b.status === "filled"  && !b.retired_at).length;
+  const buckets_empty   = state.buckets.filter(b => b.status === "empty"   && !b.retired_at).length;
+  const buckets_out     = state.buckets.filter(b => b.status === "dispatched" && !b.retired_at).length;
+
   return `
     <div class="flex-between mb-16">
       <h2 style="margin:0">Containers</h2>
-      ${new_dispatch_btn}
+      <div class="flex gap-8">
+        <button class="btn btn-ghost btn-sm" id="bucket-returns-btn" style="padding:8px 14px;font-size:13px">↩️ Bucket Returns${buckets_out > 0 ? ` (${buckets_out} out)` : ""}</button>
+        ${new_dispatch_btn}
+      </div>
     </div>
+
+    ${(buckets_filled + buckets_empty + buckets_out) > 0 ? `
+      <div style="background:#fff8ee;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#666">
+        🪣 <strong>Buckets:</strong> ${buckets_filled} filled · ${buckets_empty} empty · ${buckets_out} out at shops
+      </div>` : ""}
 
     <div style="margin-bottom:18px">
       <div style="font-weight:700;color:#4a9e6b;margin-bottom:8px;display:flex;align-items:center;gap:6px">
@@ -683,8 +1062,28 @@ function process_scan(raw_value) {
       flash_scan(`${value} already scanned`, "error");
       return;
     }
-    packing_state.scanned_buckets.push({ id: value, container_id: null, fill_id: null });
-    flash_scan(`✓ ${value}`, "success");
+    // Look up the bucket in state
+    const bucket = state.buckets.find(b => b.id === value);
+    if (!bucket) {
+      flash_scan(`Bucket ${value} not found`, "error");
+      return;
+    }
+    if (bucket.retired_at) {
+      flash_scan(`Bucket ${value} is retired`, "error");
+      return;
+    }
+    if (bucket.status !== "filled") {
+      flash_scan(`${value} is not filled — fill it from a container first`, "error");
+      return;
+    }
+    // Filled bucket carries its own coffee/container/fill provenance
+    packing_state.scanned_buckets.push({
+      id: value,
+      container_id: bucket.container_id,
+      fill_id: bucket.fill_id,
+      coffee: bucket.coffee,
+    });
+    flash_scan(`✓ ${value} — ${bucket.coffee||"?"}`, "success");
     update_scan_panel();
     return;
   }
@@ -796,7 +1195,7 @@ function update_scan_panel() {
   }
 
   const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bucket (5kg)</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bar 5kg${b.coffee?` — ${esc(b.coffee)}`:""}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
     <button data-remove-bucket="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
 
@@ -1079,7 +1478,78 @@ function attach_listeners() {
     state.scan_id = "__new__";  // sentinel — no specific container
     render();
   });
-  
+
+  // ── Fill Buckets listeners ──
+  app.querySelectorAll("[data-fill-buckets]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.fill_bucket_container = btn.dataset.fillBuckets;
+    reset_fill_state();
+    render();
+  }));
+  app.querySelector("#fill-cancel")?.addEventListener("click", () => {
+    if (fill_state.filled.length > 0 && !confirm("Discard scanned buckets?")) return;
+    stop_fill_scanner();
+    state.ui.fill_bucket_container = null;
+    reset_fill_state();
+    render();
+  });
+  app.querySelector("#fill-manual-btn")?.addEventListener("click", () => {
+    const v = document.getElementById("fill-manual-input")?.value.trim();
+    if (!v) return;
+    process_fill_scan(v);
+    document.getElementById("fill-manual-input").value = "";
+  });
+  app.querySelector("#fill-manual-input")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); app.querySelector("#fill-manual-btn")?.click(); }
+  });
+  app.querySelector("#fill-confirm-btn")?.addEventListener("click", () => {
+    stop_fill_scanner();
+    save_filled_buckets();
+  });
+  // Start fill scanner when overlay is shown
+  if (state.ui.fill_bucket_container) {
+    setTimeout(() => { start_fill_scanner(); update_fill_panel(); }, 100);
+  } else {
+    stop_fill_scanner();
+  }
+
+  // ── Bucket Returns listeners ──
+  app.querySelector("#bucket-returns-btn")?.addEventListener("click", () => {
+    state.ui.bucket_return_open = true;
+    state.ui.bucket_return_condition = "clean";
+    reset_return_state();
+    render();
+  });
+  app.querySelector("#return-cancel")?.addEventListener("click", () => {
+    if (return_state.returned.length > 0 && !confirm("Discard scanned buckets?")) return;
+    stop_return_scanner();
+    state.ui.bucket_return_open = false;
+    reset_return_state();
+    render();
+  });
+  app.querySelector("#return-manual-btn")?.addEventListener("click", () => {
+    const v = document.getElementById("return-manual-input")?.value.trim();
+    if (!v) return;
+    process_return_scan(v);
+    document.getElementById("return-manual-input").value = "";
+  });
+  app.querySelector("#return-manual-input")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); app.querySelector("#return-manual-btn")?.click(); }
+  });
+  app.querySelectorAll("[data-set-condition]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.bucket_return_condition = btn.dataset.setCondition;
+    render();
+  }));
+  app.querySelector("#return-confirm-btn")?.addEventListener("click", () => {
+    stop_return_scanner();
+    save_returned_buckets();
+  });
+  // Start return scanner when overlay is shown
+  if (state.ui.bucket_return_open) {
+    setTimeout(() => { start_return_scanner(); update_return_panel(); }, 100);
+  } else {
+    stop_return_scanner();
+  }
+
   // ── Scan-to-pack flow listeners ──
   // Shop step: pick a shop or type custom
   app.querySelectorAll("[data-pick-shop]").forEach(btn => btn.addEventListener("click", () => {
@@ -1215,16 +1685,16 @@ function attach_listeners() {
         });
       });
     }
-    // Bucket lines — buckets have container_id/fill_id null since their identity carries the coffee
-    if (packing_state.scanned_buckets.length > 0) {
+    // Bucket lines — one line per bucket, tagged with its actual container/fill (recorded at fill time)
+    packing_state.scanned_buckets.forEach(b => {
       lines.push({
-        type: "retail", kg: packing_state.scanned_buckets.length * 5,
-        bags: packing_state.scanned_buckets.length, bag_size: "Bar 5kg",
-        container_id: null, fill_id: null,
+        type: "retail", kg: 5, bags: 1, bag_size: "Bar 5kg",
+        container_id: b.container_id, fill_id: b.fill_id,
       });
-    }
+    });
     const total_kg = packing_total_kg();
-    // Pick a primary container_id for the dispatch row — use the first FP code's first line's container
+    // Pick a primary container_id for the dispatch row — use the first FP code's first line's container,
+    // or fall back to the first bucket's container
     let primary_container_id = null, primary_fill_id = null;
     for (const entry of Object.values(packing_state.scanned_items)) {
       if (entry.lines && entry.lines.length > 0) {
@@ -1233,11 +1703,19 @@ function attach_listeners() {
         break;
       }
     }
+    if (!primary_container_id && packing_state.scanned_buckets.length > 0) {
+      primary_container_id = packing_state.scanned_buckets[0].container_id;
+      primary_fill_id = packing_state.scanned_buckets[0].fill_id;
+    }
     const dispatch_id = await save_dispatch_v2(primary_container_id, primary_fill_id, packing_state.shop, lines, total_kg);
     if (dispatch_id && packing_state.scanned_buckets.length > 0) {
+      // Record bucket → dispatch link
       await supabaseClient.from("dispatch_buckets").insert(
         packing_state.scanned_buckets.map(b => ({ dispatch_id, bucket_id: b.id }))
       );
+      // Mark each bucket as dispatched (status flip)
+      const bucket_ids = packing_state.scanned_buckets.map(b => b.id);
+      await supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids);
     }
     // After save, check each container that was used and auto-flip to empty if remaining hits 0
     if (dispatch_id) {
@@ -1246,7 +1724,7 @@ function attach_listeners() {
         const c = state.containers.find(x => x.id === cid);
         if (!c) continue;
         const used_kg = lines.filter(l => l.container_id === cid).reduce((s,l) => s+l.kg, 0);
-        if (c.remaining - used_kg <= 0.01) {  // small float tolerance
+        if (c.remaining - used_kg <= 0.01) {
           await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", cid);
         }
       }
