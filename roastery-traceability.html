@@ -212,7 +212,7 @@ async function load_data() {
   state.coffees = (coffees_data||[]).map(c => c.name);
   const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code");
   state.fp_codes = (fp_codes_data||[]).map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
-  const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name");
+  const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id");
   state.shop_mappings = shop_mappings_data || [];
   // Build containers from roast_sessions — group by container_id
   const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false });
@@ -369,6 +369,11 @@ function build_scan_overlay() {
     return build_packing_page(fake_container, fake_fill);
   }
 
+  // SHOP QR scan — confirm pending deliveries for that shop
+  if (cid && cid.startsWith("SHOP-")) {
+    return build_shop_deliveries_page(cid);
+  }
+
   // Legacy: scanned a specific container's QR
   const container=state.containers.find(c=>c.id===cid);
   if (!container) return `<div class="overlay"><div class="modal" style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⚠️</div><h2 style="margin-bottom:8px">Container Not Found</h2><p class="hint">No container found with ID <strong>${esc(cid)}</strong>.</p><button class="btn btn-dark mt-16" id="close-scan">Go Back</button></div></div>`;
@@ -377,6 +382,74 @@ function build_scan_overlay() {
   const pending=state.dispatches.find(d=>d.container_id===cid&&!d.confirmed_at);
   if (pending) return build_shop_confirm_page(container,fill,pending);
   return build_packing_page(container,fill);
+}
+
+// Shop QR scan flow — list of pending deliveries for that shop, with confirm buttons
+function build_shop_deliveries_page(shop_qr_id) {
+  // Find the shop by qr_id (use first matching mapping)
+  const mapping = state.shop_mappings.find(m => m.shop_qr_id === shop_qr_id);
+  if (!mapping) {
+    return `<div class="overlay"><div class="modal" style="text-align:center">
+      <div style="font-size:40px;margin-bottom:12px">⚠️</div>
+      <h2 style="margin-bottom:8px">Shop Not Found</h2>
+      <p class="hint">No shop is registered with this QR code.</p>
+      <button class="btn btn-dark mt-16" id="close-scan">Close</button>
+    </div></div>`;
+  }
+  const shop = mapping.master_name;
+  // Find all unconfirmed dispatches for this shop
+  const pending = state.dispatches.filter(d => d.shop === shop && !d.confirmed_at).sort((a,b) => (a.date||"").localeCompare(b.date||""));
+
+  if (packing_state.step === "shop_done") {
+    return `<div class="overlay"><div class="modal" style="text-align:center">
+      <div style="font-size:64px">✅</div>
+      <h2 style="margin:12px 0 8px">Confirmed!</h2>
+      <p style="color:#555;font-size:15px">Deliveries marked as received for <strong>${esc(shop)}</strong>.</p>
+      <p class="hint" style="font-size:13px;margin-top:8px">Thank you!</p>
+      <button class="btn btn-dark mt-16" style="padding:12px 32px" id="close-scan">Close</button>
+    </div></div>`;
+  }
+
+  if (pending.length === 0) {
+    return `<div class="overlay"><div class="modal" style="text-align:center">
+      <div style="font-size:48px">📭</div>
+      <h2 style="margin:8px 0">${esc(shop)}</h2>
+      <p class="hint" style="font-size:14px;margin-top:8px">No pending deliveries to confirm.</p>
+      <button class="btn btn-dark mt-16" id="close-scan">Close</button>
+    </div></div>`;
+  }
+
+  const dispatch_rows = pending.map(d => {
+    const lines = (d.lines || []).map(l => {
+      const size_label = l.bag_size === "Bar 5kg" ? "Bar" : l.bag_size;
+      return `<div style="display:flex;justify-content:space-between;font-size:13px;color:#666;margin:2px 0">
+        <span>🛍️ ${l.bags||"—"} × ${esc(size_label||"?")}</span>
+        <span style="font-weight:600">${Number(l.kg).toFixed(1)}kg</span>
+      </div>`;
+    }).join("");
+    return `<div style="background:#fff;border:2px solid #e0d5c5;border-radius:10px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:10px">
+        <div>
+          <div style="font-weight:700;font-size:15px">${d.date}</div>
+          <div class="hint" style="font-size:12px;margin-top:2px">${Number(d.total_kg).toFixed(1)}kg total</div>
+        </div>
+        <button class="btn btn-green btn-sm" data-confirm-dispatch="${esc(d.id)}" style="padding:8px 14px">✓ Confirm</button>
+      </div>
+      ${lines}
+    </div>`;
+  }).join("");
+
+  return `<div class="overlay"><div class="modal" style="max-width:480px">
+    <div style="text-align:center;margin-bottom:18px">
+      <div style="font-size:40px">📦</div>
+      <h2 style="margin:8px 0 2px">Deliveries</h2>
+      <div style="font-weight:700;font-size:18px;color:#1a1008;margin-top:4px">${esc(shop)}</div>
+      <p class="hint" style="font-size:13px;margin-top:6px">${pending.length} pending delivery${pending.length>1?" — confirm what arrived":""}</p>
+    </div>
+    ${dispatch_rows}
+    ${pending.length > 1 ? `<button class="btn btn-dark" style="width:100%;padding:14px;font-size:15px;border-radius:10px;margin-top:8px" id="confirm-all-dispatches">✓ Confirm All (${pending.length})</button>` : ""}
+    <button class="btn btn-muted btn-full mt-10" id="close-scan">Cancel</button>
+  </div></div>`;
 }
 
 function build_containers_tab() {
@@ -1187,6 +1260,36 @@ function attach_listeners() {
     const d=state.dispatches.find(x=>x.container_id===state.scan_id&&!x.confirmed_at);
     if (d) await confirm_delivery(d.id);
     state.scan_id=null; const url=new URL(window.location); url.searchParams.delete("scan"); window.history.replaceState({},"",url); render();
+  });
+
+  // Shop QR confirm flow — confirm one dispatch at a time
+  app.querySelectorAll("[data-confirm-dispatch]").forEach(btn => btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Confirming…";
+    await supabaseClient.from("dispatches").update({ confirmed_at: new Date().toISOString() }).eq("id", btn.dataset.confirmDispatch);
+    await load_data();
+    // Check if any dispatches remain for this shop; if not, show "all done" screen
+    const shop_qr_id = state.scan_id;
+    const mapping = state.shop_mappings.find(m => m.shop_qr_id === shop_qr_id);
+    const remaining = mapping ? state.dispatches.filter(d => d.shop === mapping.master_name && !d.confirmed_at) : [];
+    if (remaining.length === 0) packing_state.step = "shop_done";
+    render();
+  }));
+
+  // Confirm All for the shop
+  app.querySelector("#confirm-all-dispatches")?.addEventListener("click", async () => {
+    const shop_qr_id = state.scan_id;
+    const mapping = state.shop_mappings.find(m => m.shop_qr_id === shop_qr_id);
+    if (!mapping) return;
+    const pending = state.dispatches.filter(d => d.shop === mapping.master_name && !d.confirmed_at);
+    const ids = pending.map(d => d.id);
+    if (ids.length === 0) return;
+    const btn = document.getElementById("confirm-all-dispatches");
+    if (btn) { btn.disabled = true; btn.textContent = "Confirming…"; }
+    await supabaseClient.from("dispatches").update({ confirmed_at: new Date().toISOString() }).in("id", ids);
+    await load_data();
+    packing_state.step = "shop_done";
+    render();
   });
 }
 </script>

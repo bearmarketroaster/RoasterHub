@@ -58,6 +58,7 @@
       <select id="type-select">
         <option value="bucket">Buckets</option>
         <option value="fp">Bag Labels (FP codes)</option>
+        <option value="shop">Shops</option>
       </select>
       <label>Size (mm)</label>
       <input type="number" id="size-input" value="40" min="10" max="120" step="1" style="width:64px" />
@@ -92,12 +93,18 @@
       coffee_filter: "all",
       buckets: [],
       fp_codes: [],
+      shops: [],
       selected_ids: new Set(init_ids || []),
     };
 
     async function init() {
       document.getElementById("type-select").value = state.type;
-      document.getElementById("go-back").addEventListener("click", () => window.history.back());
+      document.getElementById("go-back").addEventListener("click", () => {
+        // Try to close the tab if it was opened by JS, otherwise navigate to settings
+        window.close();
+        // window.close() may be silently blocked — fall back to navigation
+        setTimeout(() => { window.location.href = "settings.html"; }, 100);
+      });
       document.getElementById("print-btn").addEventListener("click", () => window.print());
       document.getElementById("type-select").addEventListener("change", e => {
         state.type = e.target.value;
@@ -118,19 +125,29 @@
       }));
 
 
-      const [{ data: buckets }, { data: fp_codes }] = await Promise.all([
+      const [{ data: buckets }, { data: fp_codes }, { data: shop_mappings }] = await Promise.all([
         supabaseClient.from("buckets").select("id, retired_at").order("created_at", { ascending: false }),
         supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code"),
+        supabaseClient.from("shop_mappings").select("master_name, shop_qr_id").order("master_name"),
       ]);
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
       state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
+      // Dedupe shops by master_name — collect distinct master+qr pairs
+      const shop_seen = new Set();
+      state.shops = (shop_mappings||[]).filter(s => {
+        if (!s.shop_qr_id || shop_seen.has(s.master_name)) return false;
+        shop_seen.add(s.master_name);
+        return true;
+      }).map(s => ({ id: s.shop_qr_id, label: s.master_name, master_name: s.master_name }));
 
       // If specific IDs were passed in the URL and they all match a bucket, auto-select them
       // Otherwise default to all of the chosen type
       if (init_ids && init_ids.length) {
         // already in selected_ids set
       } else {
-        const all = state.type === "bucket" ? state.buckets.map(b => b.id) : state.fp_codes.map(f => f.id);
+        const all = state.type === "bucket" ? state.buckets.map(b => b.id)
+                  : state.type === "shop"   ? state.shops.map(s => s.id)
+                  : state.fp_codes.map(f => f.id);
         state.selected_ids = new Set(all);
       }
 
@@ -140,11 +157,14 @@
 
     function render_picker() {
       const el = document.getElementById("picker");
+      const type_label = state.type === "bucket" ? "buckets" : state.type === "shop" ? "shops" : "FP codes";
       const all_items = state.type === "bucket"
         ? state.buckets.map(b => ({ id: b.id, label: b.id }))
+        : state.type === "shop"
+        ? state.shops
         : state.fp_codes;
       if (all_items.length === 0) {
-        el.innerHTML = `<p style="color:#888;font-size:13px;font-style:italic">No ${state.type === "bucket" ? "buckets" : "FP codes"} available.</p>`;
+        el.innerHTML = `<p style="color:#888;font-size:13px;font-style:italic">No ${type_label} available.</p>`;
         return;
       }
 
@@ -161,18 +181,16 @@
         }
       }
 
-      // Apply filter, then show selected items
       const items = state.type === "fp" && state.coffee_filter !== "all"
         ? all_items.filter(i => i.coffee_name === state.coffee_filter)
         : all_items;
 
-      // Auto-select all visible items so they always render — no manual selection needed
       state.selected_ids = new Set(items.map(i => i.id));
 
       el.innerHTML = `
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
           ${coffee_filter_html}
-          <span style="font-size:12px;color:#888">${items.length} ${state.type === "bucket" ? "bucket" : "FP code"}${items.length!==1?"s":""} shown</span>
+          <span style="font-size:12px;color:#888">${items.length} ${type_label.slice(0, -1)}${items.length!==1?"s":""} shown</span>
         </div>`;
 
       el.querySelector("#coffee-filter")?.addEventListener("change", e => {
@@ -185,6 +203,8 @@
       const grid = document.getElementById("grid");
       const items = state.type === "bucket"
         ? state.buckets.filter(b => state.selected_ids.has(b.id)).map(b => ({ id: b.id, value: b.id, label: b.id }))
+        : state.type === "shop"
+        ? state.shops.filter(s => state.selected_ids.has(s.id)).map(s => ({ id: s.id, value: `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, "")}roastery-traceability.html?scan=${s.id}`, label: s.label, master_name: s.master_name }))
         : state.fp_codes.filter(f => state.selected_ids.has(f.id)).map(f => ({ id: f.id, value: f.id, label: `${f.id}\n${f.label}`, coffee_name: f.coffee_name, bag_size: f.bag_size }));
 
       // Use mm for physical print sizing — browsers translate to pixels accurately
@@ -204,6 +224,8 @@
       grid.innerHTML = items.map((it, idx) => {
         const tip = state.type === "bucket"
           ? it.id
+          : state.type === "shop"
+          ? `${it.master_name} (${it.id})`
           : `${it.id} · ${it.coffee_name || ""} ${it.bag_size || ""}`.trim();
         return `<div class="qr-tile" title="${tip.replace(/"/g,'&quot;')}" data-idx="${idx}"><div class="qr-canvas" data-value="${it.value}"></div></div>`;
       }).join("");
@@ -235,10 +257,11 @@
         if (!canvas) return;
         const idx = Number(tile.dataset.idx);
         const it = items[idx];
-        // Build filename — fallback to the FP code itself if coffee name is missing
         let base;
         if (state.type === "bucket") {
           base = it.id;
+        } else if (state.type === "shop") {
+          base = `Shop-${it.master_name}`;
         } else {
           const parts = [it.coffee_name, it.bag_size].filter(Boolean);
           base = parts.length ? parts.join(" ") : it.id;

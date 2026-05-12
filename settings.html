@@ -166,12 +166,35 @@ async function load_shop_mappings() {
   state.shop_mappings = data || [];
 }
 
+// Sanitise a master name into a URL/QR-safe slug
+function slugify_shop(name) {
+  return name.trim().replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_-]/g, "").substring(0, 32);
+}
+
 async function add_shop_mapping(parsed_name, master_name) {
-  const { data, error } = await supabaseClient.from("shop_mappings").insert({ parsed_name, master_name }).select().single();
-  if (error) { state.ui.shop_err = error.code === "23505" ? "That parsed name already exists." : error.message; render(); return; }
+  // If this master already exists in mappings, reuse its shop_qr_id; otherwise generate a new one
+  const existing = state.shop_mappings.find(m => m.master_name === master_name);
+  let shop_qr_id = existing?.shop_qr_id;
+  if (!shop_qr_id) {
+    const r = crypto.randomUUID().split("-")[0].toUpperCase();
+    shop_qr_id = `SHOP-${slugify_shop(master_name)}-${r}`;
+  }
+  const { data, error } = await supabaseClient.from("shop_mappings").insert({ parsed_name, master_name, shop_qr_id }).select().single();
+  if (error) { state.ui.shop_err = error.code === "23505" ? "That alias already exists." : error.message; render(); return; }
   state.shop_mappings.push(data);
   state.shop_mappings.sort((a,b) => a.parsed_name.localeCompare(b.parsed_name));
   state.ui.new_shop_parsed = ""; state.ui.new_shop_master = ""; state.ui.shop_err = "";
+  render();
+}
+
+async function generate_shop_qr(master_name) {
+  // Retroactively generate a QR for an existing master shop (e.g. one created before QR feature)
+  const r = crypto.randomUUID().split("-")[0].toUpperCase();
+  const shop_qr_id = `SHOP-${slugify_shop(master_name)}-${r}`;
+  // Update ALL mappings for this master_name so they share the same shop_qr_id
+  const { error } = await supabaseClient.from("shop_mappings").update({ shop_qr_id }).eq("master_name", master_name);
+  if (error) { alert("Failed to generate QR: " + error.message); return; }
+  state.shop_mappings = state.shop_mappings.map(m => m.master_name === master_name ? { ...m, shop_qr_id } : m);
   render();
 }
 
@@ -799,38 +822,74 @@ function build_shops_section() {
   const open = state.open_section === "shops";
   const mappings = state.shop_mappings;
   const { new_shop_parsed, new_shop_master, shop_err } = state.ui;
+
+  // Group mappings by master_name so each shop appears once with its QR
+  const by_master = {};
+  mappings.forEach(m => {
+    if (!by_master[m.master_name]) by_master[m.master_name] = { master_name: m.master_name, shop_qr_id: m.shop_qr_id, parsed: [] };
+    by_master[m.master_name].parsed.push(m);
+    // If any mapping has the qr_id, use it
+    if (m.shop_qr_id) by_master[m.master_name].shop_qr_id = m.shop_qr_id;
+  });
+  const master_rows = Object.values(by_master).sort((a,b) => a.master_name.localeCompare(b.master_name));
+
   const body = open ? `
     <div class="section-body">
-      <p class="hint mb-12">Maps the shop name as it appears on purchase orders to your internal master name. Used when importing POs in Traceability.</p>
+      <p class="hint mb-12">Each shop has a master name and a unique QR code. Print and stick the QR at the shop — drivers/staff scan it to confirm deliveries.</p>
+
+      <div class="section-label">Shops</div>
       <div class="card-white" style="margin-bottom:12px">
-        <div style="display:grid;grid-template-columns:1fr 1fr auto;background:#f5f0eb;padding:8px 12px;border-bottom:1px solid #e0d5c5;gap:8px">
-          <span class="lbl" style="margin:0">Name on Purchase Order</span>
-          <span class="lbl" style="margin:0">Master Name</span>
-          <span></span>
-        </div>
-        ${mappings.length === 0 ? '<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No shop mappings yet.</div>' : ""}
-        ${mappings.map(m => `
-          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid #f0ebe4">
-            <span style="font-size:13px">${esc(m.parsed_name)}</span>
-            <span style="font-size:13px;font-weight:600">${esc(m.master_name)}</span>
-            <button data-delete-shop="${m.id}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>
+        ${master_rows.length === 0 ? '<div style="padding:14px 12px;font-size:13px;color:#aaa;font-style:italic">No shops yet — add a mapping below.</div>' : ""}
+        ${master_rows.map(s => `
+          <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:12px;border-top:1px solid #f0ebe4">
+            <div>
+              <div style="font-weight:700;font-size:14px">${esc(s.master_name)}</div>
+              ${s.shop_qr_id
+                ? `<div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${esc(s.shop_qr_id)}</div>`
+                : `<div style="font-size:11px;color:#e05c2a;margin-top:2px">No QR yet</div>`}
+              ${s.parsed.length > 1 ? `<div style="font-size:11px;color:#aaa;margin-top:4px">Aliases: ${s.parsed.map(p => esc(p.parsed_name)).join(", ")}</div>` : ""}
+            </div>
+            ${s.shop_qr_id
+              ? `<a href="print-qr.html?type=shop&ids=${encodeURIComponent(s.shop_qr_id)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">🖨️</a>`
+              : `<button data-generate-shop-qr="${esc(s.master_name)}" class="btn btn-dark btn-sm" style="font-size:11px">+ QR</button>`}
+            <span></span>
           </div>`).join("")}
-        <div style="padding:10px 12px;border-top:1px solid #f0ebe4;background:#fdfaf7">
-          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:flex-end">
-            <div><label class="lbl">Name on PO *</label><input id="new-shop-parsed" value="${esc(new_shop_parsed)}" placeholder="e.g. Custom Plaza" style="font-size:13px" /></div>
-            <div><label class="lbl">Master Name *</label><input id="new-shop-master" value="${esc(new_shop_master)}" placeholder="e.g. CHP" style="font-size:13px" /></div>
-            <button class="btn btn-amber btn-sm" id="add-shop-mapping" style="margin-top:18px">+ Add</button>
+      </div>
+
+      <details style="margin-top:8px"><summary style="font-size:13px;color:#888;cursor:pointer;font-weight:600">PO Name Aliases (${mappings.length})</summary>
+        <div class="card-white" style="margin-top:8px">
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;background:#f5f0eb;padding:8px 12px;border-bottom:1px solid #e0d5c5;gap:8px">
+            <span class="lbl" style="margin:0">Alias / PO Name</span>
+            <span class="lbl" style="margin:0">Master Shop</span>
+            <span></span>
           </div>
-          ${shop_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:4px">${esc(shop_err)}</p>` : ""}
+          ${mappings.length === 0 ? '<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No aliases yet.</div>' : ""}
+          ${mappings.map(m => `
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid #f0ebe4">
+              <span style="font-size:13px">${esc(m.parsed_name)}</span>
+              <span style="font-size:13px;font-weight:600">${esc(m.master_name)}</span>
+              <button data-delete-shop="${m.id}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>
+            </div>`).join("")}
         </div>
+      </details>
+
+      <div class="section-label" style="margin-top:16px">Add Shop / Alias</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:flex-end">
+          <div><label class="lbl">Alias / PO Name *</label><input id="new-shop-parsed" value="${esc(new_shop_parsed)}" placeholder="e.g. Stilorgan Bear Market" style="font-size:13px" /></div>
+          <div><label class="lbl">Master Shop *</label><input id="new-shop-master" value="${esc(new_shop_master)}" placeholder="e.g. Stillorgan" style="font-size:13px" /></div>
+          <button class="btn btn-dark btn-sm" id="add-shop-mapping">+ Add</button>
+        </div>
+        <p class="hint" style="font-size:12px;margin-top:8px">A QR code will be auto-generated for new master shops. Use the same master name to add an alias (a different way the shop name appears).</p>
+        ${shop_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:4px">${esc(shop_err)}</p>` : ""}
       </div>
     </div>` : "";
   return `
     <div class="section">
       <div class="section-header" data-toggle-section="shops">
         <div>
-          <div class="section-title"><span class="icon">🏪</span> Shop Mappings</div>
-          <div class="section-desc">${mappings.length} mapping${mappings.length !== 1 ? "s" : ""} · PO name → master name</div>
+          <div class="section-title"><span class="icon">🏪</span> Shops</div>
+          <div class="section-desc">${master_rows.length} shop${master_rows.length!==1?"s":""}${mappings.length>master_rows.length?` · ${mappings.length} alias${mappings.length-master_rows.length>1?"es":""}`:""}</div>
         </div>
         <span class="section-arrow">${open ? "▾" : "▸"}</span>
       </div>
@@ -1041,6 +1100,9 @@ function attach_listeners() {
   app.querySelectorAll("[data-delete-shop]").forEach(btn => btn.addEventListener("click", () => {
     if (!confirm("Remove this shop mapping?")) return;
     delete_shop_mapping(Number(btn.dataset.deleteShop));
+  }));
+  app.querySelectorAll("[data-generate-shop-qr]").forEach(btn => btn.addEventListener("click", () => {
+    generate_shop_qr(btn.dataset.generateShopQr);
   }));
 
   // ── Buckets
