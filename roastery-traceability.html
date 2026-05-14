@@ -886,10 +886,46 @@ function build_containers_tab() {
     ? `<button class="btn btn-dark" id="new-dispatch-btn" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`
     : `<button class="btn btn-grey" disabled title="Move a container to Active first" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`;
 
-  // Bucket fleet summary
-  const buckets_filled  = state.buckets.filter(b => b.status === "filled"  && !b.retired_at).length;
-  const buckets_empty   = state.buckets.filter(b => b.status === "empty"   && !b.retired_at).length;
-  const buckets_out     = state.buckets.filter(b => b.status === "dispatched" && !b.retired_at).length;
+  // Bucket fleet — full lists
+  const all_buckets = state.buckets.filter(b => !b.retired_at);
+  const filled_buckets = all_buckets.filter(b => b.status === "filled").sort((a,b) => (a.coffee||"").localeCompare(b.coffee||""));
+  const empty_buckets  = all_buckets.filter(b => b.status === "empty");
+  const out_buckets    = all_buckets.filter(b => b.status === "dispatched");
+  const buckets_filled = filled_buckets.length;
+  const buckets_empty  = empty_buckets.length;
+  const buckets_out    = out_buckets.length;
+
+  // Group filled buckets by coffee for the breakdown view
+  const filled_by_coffee = {};
+  filled_buckets.forEach(b => {
+    const k = b.coffee || "(unknown)";
+    if (!filled_by_coffee[k]) filled_by_coffee[k] = [];
+    filled_by_coffee[k].push(b);
+  });
+
+  // Build a row for each filled bucket showing name (if any), id, source container
+  const fmt_bucket_row = (b) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#fff;border-radius:6px;margin-bottom:4px;font-size:12px">
+    <div style="min-width:0;flex:1"><strong>${esc(b.name || b.id)}</strong>${b.name ? ` <span class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</span>` : ""}</div>
+    <div class="hint" style="font-size:11px;font-family:monospace">${esc(b.container_id || "?")}</div>
+  </div>`;
+
+  const filled_html = Object.entries(filled_by_coffee).map(([coffee, buckets]) => `
+    <div style="margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;color:#1a1008;margin-bottom:4px">${esc(coffee)} <span class="hint" style="font-weight:400">(${buckets.length} × 5kg = ${(buckets.length*5).toFixed(0)}kg)</span></div>
+      ${buckets.map(fmt_bucket_row).join("")}
+    </div>`).join("");
+
+  const out_html = out_buckets.length === 0 ? "" : `
+    <div style="margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;color:#1a1008;margin-bottom:4px">At shops <span class="hint" style="font-weight:400">(${out_buckets.length})</span></div>
+      ${out_buckets.map(fmt_bucket_row).join("")}
+    </div>`;
+
+  const empty_html = empty_buckets.length === 0 ? "" : `
+    <div style="margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;color:#1a1008;margin-bottom:4px">Empty at roastery <span class="hint" style="font-weight:400">(${empty_buckets.length})</span></div>
+      <div class="hint" style="font-size:12px">Ready to fill from any active container.</div>
+    </div>`;
 
   return `
     <div class="flex-between mb-16">
@@ -901,9 +937,17 @@ function build_containers_tab() {
     </div>
 
     ${(buckets_filled + buckets_empty + buckets_out) > 0 ? `
-      <div style="background:#fff8ee;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#666">
-        🪣 <strong>Buckets:</strong> ${buckets_filled} filled · ${buckets_empty} empty · ${buckets_out} out at shops
-      </div>` : ""}
+      <details style="background:#fff8ee;border-radius:10px;margin-bottom:14px;border:1px solid #e8d5b0">
+        <summary style="padding:12px 14px;cursor:pointer;font-size:13px;color:#1a1008;list-style:none;font-weight:600">
+          🪣 Bucket Fleet · <span style="font-weight:400">${buckets_filled} filled · ${buckets_empty} empty · ${buckets_out} out</span>
+          <span style="float:right;color:#c8a96e">▾</span>
+        </summary>
+        <div style="padding:0 14px 14px;border-top:1px solid #f0ebe4;background:#fdfaf5">
+          ${buckets_filled > 0 ? `<div style="font-size:11px;color:#c8a96e;font-weight:700;letter-spacing:1px;margin:10px 0 6px">FILLED — READY TO PACK</div>${filled_html}` : `<p class="hint" style="font-size:12px;margin:10px 0">No filled buckets — fill from an active container with the 🪣 button.</p>`}
+          ${out_html}
+          ${empty_html}
+        </div>
+      </details>` : ""}
 
     <div style="margin-bottom:18px">
       <div style="font-weight:700;color:#4a9e6b;margin-bottom:8px;display:flex;align-items:center;gap:6px">
