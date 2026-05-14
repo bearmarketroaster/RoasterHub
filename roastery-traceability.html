@@ -601,9 +601,12 @@ function build_fill_buckets_overlay() {
       <div id="fill-qr-scanner" style="width:100%;min-height:240px"></div>
     </div>
 
-    <div style="display:flex;gap:8px;margin-bottom:14px">
-      <input id="fill-manual-input" placeholder="Or type bucket ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
-      <button class="btn btn-dark btn-sm" id="fill-manual-btn">Add</button>
+    <div style="position:relative;margin-bottom:14px">
+      <div style="display:flex;gap:8px">
+        <input id="fill-manual-input" placeholder="Search empty buckets by name or ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
+        <button class="btn btn-dark btn-sm" id="fill-manual-btn">Add</button>
+      </div>
+      <div id="fill-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e0d5c5;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
     </div>
 
     <div id="fill-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
@@ -748,9 +751,12 @@ function build_bucket_return_overlay() {
       <div id="return-qr-scanner" style="width:100%;min-height:240px"></div>
     </div>
 
-    <div style="display:flex;gap:8px;margin-bottom:14px">
-      <input id="return-manual-input" placeholder="Or type bucket ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
-      <button class="btn btn-dark btn-sm" id="return-manual-btn">Add</button>
+    <div style="position:relative;margin-bottom:14px">
+      <div style="display:flex;gap:8px">
+        <input id="return-manual-input" placeholder="Search dispatched buckets by name or ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
+        <button class="btn btn-dark btn-sm" id="return-manual-btn">Add</button>
+      </div>
+      <div id="return-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e0d5c5;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
     </div>
 
     <div id="return-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
@@ -1552,9 +1558,60 @@ function attach_listeners() {
     if (!v) return;
     process_fill_scan(v);
     document.getElementById("fill-manual-input").value = "";
+    const sug = document.getElementById("fill-suggestions");
+    if (sug) sug.style.display = "none";
   });
   app.querySelector("#fill-manual-input")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") { e.preventDefault(); app.querySelector("#fill-manual-btn")?.click(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const sug = document.getElementById("fill-suggestions");
+      const first = sug?.querySelector("[data-suggest-bucket]");
+      if (first && sug.style.display !== "none") {
+        process_fill_scan(first.dataset.suggestBucket);
+        document.getElementById("fill-manual-input").value = "";
+        sug.style.display = "none";
+      } else {
+        app.querySelector("#fill-manual-btn")?.click();
+      }
+    } else if (e.key === "Escape") {
+      const sug = document.getElementById("fill-suggestions");
+      if (sug) sug.style.display = "none";
+    }
+  });
+  // Fill autocomplete — match against empty buckets only (we're filling them)
+  app.querySelector("#fill-manual-input")?.addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    const sug = document.getElementById("fill-suggestions");
+    if (!sug) return;
+    if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
+    const matches = state.buckets.filter(b => {
+      if (b.retired_at || b.status !== "empty") return false;
+      const hay = `${b.id} ${b.name||""}`.toLowerCase();
+      return hay.includes(q);
+    }).slice(0, 8);
+    if (matches.length === 0) {
+      sug.innerHTML = `<div style="padding:10px 14px;color:#888;font-size:13px;font-style:italic">No empty buckets match</div>`;
+    } else {
+      sug.innerHTML = matches.map(b => `<div data-suggest-bucket="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px">
+        <div style="font-weight:600">🪣 ${esc(b.name||b.id)}</div>
+        ${b.name ? `<div style="font-size:11px;color:#aaa;font-family:monospace">${esc(b.id)}</div>` : ""}
+      </div>`).join("");
+    }
+    sug.style.display = "block";
+  });
+  app.querySelector("#fill-suggestions")?.addEventListener("click", e => {
+    const row = e.target.closest("[data-suggest-bucket]");
+    if (!row) return;
+    process_fill_scan(row.dataset.suggestBucket);
+    document.getElementById("fill-manual-input").value = "";
+    const sug = document.getElementById("fill-suggestions");
+    if (sug) { sug.style.display = "none"; sug.innerHTML = ""; }
+  });
+  app.querySelector("#fill-manual-input")?.addEventListener("blur", () => {
+    setTimeout(() => {
+      const sug = document.getElementById("fill-suggestions");
+      if (sug) sug.style.display = "none";
+    }, 200);
   });
   app.querySelector("#fill-confirm-btn")?.addEventListener("click", () => {
     stop_fill_scanner();
@@ -1586,9 +1643,60 @@ function attach_listeners() {
     if (!v) return;
     process_return_scan(v);
     document.getElementById("return-manual-input").value = "";
+    const sug = document.getElementById("return-suggestions");
+    if (sug) sug.style.display = "none";
   });
   app.querySelector("#return-manual-input")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") { e.preventDefault(); app.querySelector("#return-manual-btn")?.click(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const sug = document.getElementById("return-suggestions");
+      const first = sug?.querySelector("[data-suggest-bucket]");
+      if (first && sug.style.display !== "none") {
+        process_return_scan(first.dataset.suggestBucket);
+        document.getElementById("return-manual-input").value = "";
+        sug.style.display = "none";
+      } else {
+        app.querySelector("#return-manual-btn")?.click();
+      }
+    } else if (e.key === "Escape") {
+      const sug = document.getElementById("return-suggestions");
+      if (sug) sug.style.display = "none";
+    }
+  });
+  // Return autocomplete — match against dispatched or filled buckets (anything not already 'empty' is potentially returnable)
+  app.querySelector("#return-manual-input")?.addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    const sug = document.getElementById("return-suggestions");
+    if (!sug) return;
+    if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
+    const matches = state.buckets.filter(b => {
+      if (b.retired_at || b.status === "empty") return false;
+      const hay = `${b.id} ${b.name||""} ${b.coffee||""}`.toLowerCase();
+      return hay.includes(q);
+    }).slice(0, 8);
+    if (matches.length === 0) {
+      sug.innerHTML = `<div style="padding:10px 14px;color:#888;font-size:13px;font-style:italic">No matching buckets out</div>`;
+    } else {
+      sug.innerHTML = matches.map(b => `<div data-suggest-bucket="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px">
+        <div style="font-weight:600">🪣 ${esc(b.name||b.id)}${b.coffee?` <span style="color:#888;font-weight:400">— ${esc(b.coffee)}</span>`:""}</div>
+        <div style="font-size:11px;color:#aaa;font-family:monospace">${esc(b.id)} · ${esc(b.status||"")}</div>
+      </div>`).join("");
+    }
+    sug.style.display = "block";
+  });
+  app.querySelector("#return-suggestions")?.addEventListener("click", e => {
+    const row = e.target.closest("[data-suggest-bucket]");
+    if (!row) return;
+    process_return_scan(row.dataset.suggestBucket);
+    document.getElementById("return-manual-input").value = "";
+    const sug = document.getElementById("return-suggestions");
+    if (sug) { sug.style.display = "none"; sug.innerHTML = ""; }
+  });
+  app.querySelector("#return-manual-input")?.addEventListener("blur", () => {
+    setTimeout(() => {
+      const sug = document.getElementById("return-suggestions");
+      if (sug) sug.style.display = "none";
+    }, 200);
   });
   app.querySelectorAll("[data-set-condition]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.bucket_return_condition = btn.dataset.setCondition;
