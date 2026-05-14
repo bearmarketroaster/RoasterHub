@@ -221,6 +221,17 @@ async function load_data() {
   // Load buckets with their lifecycle state
   const { data: buckets_data } = await supabaseClient.from("buckets").select("*").order("created_at", { ascending: false });
   state.buckets = buckets_data || [];
+
+  // Build a bucket_id → dispatch lookup so we can derive in-transit vs at-shop status
+  state._bucket_to_dispatch = {};
+  const { data: dispatch_buckets_data } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false });
+  (dispatch_buckets_data || []).forEach(db => {
+    // For each bucket, keep the MOST RECENT dispatch_id (already sorted desc by scanned_at)
+    if (!state._bucket_to_dispatch[db.bucket_id]) {
+      const d = state.dispatches.find(x => x.id === db.dispatch_id);
+      if (d) state._bucket_to_dispatch[db.bucket_id] = d;
+    }
+  });
   // Build containers from roast_sessions — group by container_id
   const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false });
   state.roast_sessions = roast_sessions || [];
@@ -896,10 +907,27 @@ function build_containers_tab() {
   const all_buckets = state.buckets.filter(b => !b.retired_at);
   const filled_buckets = all_buckets.filter(b => b.status === "filled").sort((a,b) => (a.coffee||"").localeCompare(b.coffee||""));
   const empty_buckets  = all_buckets.filter(b => b.status === "empty");
-  const out_buckets    = all_buckets.filter(b => b.status === "dispatched");
-  const buckets_filled = filled_buckets.length;
-  const buckets_empty  = empty_buckets.length;
-  const buckets_out    = out_buckets.length;
+  const dispatched_buckets = all_buckets.filter(b => b.status === "dispatched");
+
+  // For dispatched buckets, derive whether they're "in transit" (dispatch not confirmed)
+  // or "at shop" (dispatch confirmed) by looking up the dispatch they belong to.
+  // We use the dispatch_buckets join — but we already have it via state.dispatches?
+  // Simpler: dispatched buckets' dispatch_id can be found via the dispatch_buckets table,
+  // which isn't currently loaded in state. Let's load it.
+  // Walk through state.dispatches and their dispatch_buckets (loaded in load_data with a join below).
+  const bucket_to_dispatch = state._bucket_to_dispatch || {};
+  const in_transit_buckets = [], at_shop_buckets = [];
+  dispatched_buckets.forEach(b => {
+    const d = bucket_to_dispatch[b.id];
+    if (d && d.confirmed_at) at_shop_buckets.push({ ...b, _shop: d.shop, _confirmed_at: d.confirmed_at });
+    else in_transit_buckets.push({ ...b, _shop: d?.shop });
+  });
+
+  const buckets_filled  = filled_buckets.length;
+  const buckets_empty   = empty_buckets.length;
+  const buckets_transit = in_transit_buckets.length;
+  const buckets_atshop  = at_shop_buckets.length;
+  const buckets_out     = dispatched_buckets.length;  // total dispatched, for the Returns button
 
   // Group filled buckets by coffee for the breakdown view
   const filled_by_coffee = {};
@@ -909,9 +937,9 @@ function build_containers_tab() {
     filled_by_coffee[k].push(b);
   });
 
-  // Build a row for each filled bucket showing name (if any), id, source container
+  // Build a row for each bucket showing name (if any), id, source container, optionally shop
   const fmt_bucket_row = (b) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#fff;border-radius:6px;margin-bottom:4px;font-size:12px">
-    <div style="min-width:0;flex:1"><strong>${esc(b.name || b.id)}</strong>${b.name ? ` <span class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</span>` : ""}</div>
+    <div style="min-width:0;flex:1"><strong>${esc(b.name || b.id)}</strong>${b.name ? ` <span class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</span>` : ""}${b._shop ? ` <span class="hint" style="font-size:11px"> → ${esc(b._shop)}</span>` : ""}</div>
     <div class="hint" style="font-size:11px;font-family:monospace">${esc(b.container_id || "?")}</div>
   </div>`;
 
@@ -921,10 +949,16 @@ function build_containers_tab() {
       ${buckets.map(fmt_bucket_row).join("")}
     </div>`).join("");
 
-  const out_html = out_buckets.length === 0 ? "" : `
+  const in_transit_html = in_transit_buckets.length === 0 ? "" : `
     <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#1a1008;margin-bottom:4px">At shops <span class="hint" style="font-weight:400">(${out_buckets.length})</span></div>
-      ${out_buckets.map(fmt_bucket_row).join("")}
+      <div style="font-weight:700;font-size:13px;color:#e0a82a;margin-bottom:4px">⏳ In transit <span class="hint" style="font-weight:400;color:#888">(${in_transit_buckets.length}) — packed, awaiting delivery confirmation</span></div>
+      ${in_transit_buckets.map(fmt_bucket_row).join("")}
+    </div>`;
+
+  const at_shop_html = at_shop_buckets.length === 0 ? "" : `
+    <div style="margin-bottom:10px">
+      <div style="font-weight:700;font-size:13px;color:#4a9e6b;margin-bottom:4px">✓ At shops <span class="hint" style="font-weight:400;color:#888">(${at_shop_buckets.length}) — confirmed delivered</span></div>
+      ${at_shop_buckets.map(fmt_bucket_row).join("")}
     </div>`;
 
   const empty_html = empty_buckets.length === 0 ? "" : `
@@ -945,12 +979,13 @@ function build_containers_tab() {
     ${(buckets_filled + buckets_empty + buckets_out) > 0 ? `
       <details style="background:#fff8ee;border-radius:10px;margin-bottom:14px;border:1px solid #e8d5b0">
         <summary style="padding:12px 14px;cursor:pointer;font-size:13px;color:#1a1008;list-style:none;font-weight:600">
-          🪣 Bucket Fleet · <span style="font-weight:400">${buckets_filled} filled · ${buckets_empty} empty · ${buckets_out} out</span>
+          🪣 Bucket Fleet · <span style="font-weight:400">${buckets_filled} filled · ${buckets_empty} empty · ${buckets_transit} in transit · ${buckets_atshop} at shops</span>
           <span style="float:right;color:#c8a96e">▾</span>
         </summary>
         <div style="padding:0 14px 14px;border-top:1px solid #f0ebe4;background:#fdfaf5">
           ${buckets_filled > 0 ? `<div style="font-size:11px;color:#c8a96e;font-weight:700;letter-spacing:1px;margin:10px 0 6px">FILLED — READY TO PACK</div>${filled_html}` : `<p class="hint" style="font-size:12px;margin:10px 0">No filled buckets — fill from an active container with the 🪣 button.</p>`}
-          ${out_html}
+          ${in_transit_html}
+          ${at_shop_html}
           ${empty_html}
         </div>
       </details>` : ""}
