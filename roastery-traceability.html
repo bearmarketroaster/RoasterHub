@@ -222,16 +222,8 @@ async function load_data() {
   const { data: buckets_data } = await supabaseClient.from("buckets").select("*").order("created_at", { ascending: false });
   state.buckets = buckets_data || [];
 
-  // Build a bucket_id → dispatch lookup so we can derive in-transit vs at-shop status
-  state._bucket_to_dispatch = {};
-  const { data: dispatch_buckets_data } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false });
-  (dispatch_buckets_data || []).forEach(db => {
-    // For each bucket, keep the MOST RECENT dispatch_id (already sorted desc by scanned_at)
-    if (!state._bucket_to_dispatch[db.bucket_id]) {
-      const d = state.dispatches.find(x => x.id === db.dispatch_id);
-      if (d) state._bucket_to_dispatch[db.bucket_id] = d;
-    }
-  });
+  // (bucket_id → dispatch lookup is built after dispatches load — see below)
+
   // Build containers from roast_sessions — group by container_id
   const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false });
   state.roast_sessions = roast_sessions || [];
@@ -275,6 +267,16 @@ async function load_data() {
 
   const { data: dispatches } = await supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date",{ascending:false});
   state.dispatches=(dispatches||[]).map(d=>({...d,lines:d.dispatch_lines||[]}));
+
+  // Build a bucket_id → dispatch lookup so we can derive in-transit vs at-shop status
+  state._bucket_to_dispatch = {};
+  const { data: dispatch_buckets_data } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false });
+  (dispatch_buckets_data || []).forEach(db => {
+    if (!state._bucket_to_dispatch[db.bucket_id]) {
+      const d = state.dispatches.find(x => x.id === db.dispatch_id);
+      if (d) state._bucket_to_dispatch[db.bucket_id] = d;
+    }
+  });
 
   // Compute packed_kg per container from dispatch_lines (line-level for accuracy)
   state.dispatches.forEach(d => {
