@@ -30,6 +30,12 @@
     .status-active { background: #edf7f0; color: #4a9e6b; }
     .status-soon   { background: #f5f0eb; color: #c8a96e; }
     .module-arrow  { font-size: 18px; color: #c8a96e; }
+    .summary-card { background: #fff8ee; border-radius: 12px; padding: 18px 22px; margin-bottom: 24px; border: 1px solid #e8d5b0; }
+    .summary-card-title { font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #c8a96e; margin-bottom: 10px; }
+    .summary-card-body { font-size: 14px; color: #1a1008; }
+    .summary-card-stats { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 6px; }
+    .summary-card-stat { font-size: 13px; color: #555; }
+    .summary-card-stat strong { color: #1a1008; font-weight: 700; }
     .footer { text-align: center; padding: 32px; font-size: 12px; color: #c8a96e; border-top: 1px solid #e8d5b0; margin-top: 16px; }
     @media (max-width: 600px) { .header { padding: 16px 20px; } .main { padding: 24px 16px; } .module-grid { grid-template-columns: 1fr; } }
   </style>
@@ -51,6 +57,7 @@
   </div>
   <div class="main">
     <div class="section-label">Modules</div>
+    <div id="buckets-summary" style="display:none"></div>
     <div class="module-grid">
       <a class="module-card" href="stock.html">
         <div class="module-icon">📦</div>
@@ -110,6 +117,33 @@
           if (!href.includes("roastery-traceability")) card.style.display = "none";
         });
       }
+      // Load filled bucket summary (shown to everyone)
+      loadBucketSummary();
+    }
+    async function loadBucketSummary() {
+      const summary = document.getElementById("buckets-summary");
+      if (!summary) return;
+      const { data: buckets } = await supabaseClient.from("buckets").select("status, coffee, retired_at");
+      if (!buckets) return;
+      const active = buckets.filter(b => !b.retired_at);
+      const filled = active.filter(b => b.status === "filled");
+      const empty  = active.filter(b => b.status === "empty");
+      const out    = active.filter(b => b.status === "dispatched");
+      // Group filled by coffee
+      const by_coffee = {};
+      filled.forEach(b => { const k = b.coffee || "(unknown)"; by_coffee[k] = (by_coffee[k]||0) + 1; });
+      const coffee_breakdown = Object.entries(by_coffee).sort((a,b) => b[1]-a[1])
+        .map(([c, n]) => `<span class="summary-card-stat"><strong>${n}</strong> × ${c}</span>`).join("");
+      summary.innerHTML = `
+        <div class="summary-card">
+          <div class="summary-card-title">🪣 Bucket Fleet</div>
+          <div class="summary-card-body">
+            <strong>${filled.length}</strong> filled · <strong>${empty.length}</strong> empty · <strong>${out.length}</strong> out at shops
+          </div>
+          ${filled.length > 0 ? `<div class="summary-card-stats">${coffee_breakdown}</div>` : ""}
+        </div>
+      `;
+      summary.style.display = "block";
     }
     updateAuthUI();
   </script>

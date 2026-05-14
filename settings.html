@@ -517,9 +517,12 @@ function build_buckets_section() {
     return `
       <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4;${retired?"opacity:0.5":""}">
         <span class="mono" style="background:#f0ebe4;color:#5a3e1b;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(b.id)}</span>
-        <div style="font-size:12px;color:#888">
-          ${b.dispatch_count > 0 ? `${b.dispatch_count} dispatch${b.dispatch_count!==1?"es":""} · Last: ${esc(b.last_shop||"")} ${b.last_date||""}` : "Never used"}
-          ${retired?` · <span style="color:#e05c2a">retired</span>`:""}
+        <div>
+          <input type="text" data-bucket-name="${esc(b.id)}" value="${esc(b.name||"")}" placeholder="optional friendly name…" style="font-size:13px;padding:4px 8px;border:1px solid #e0d5c5;border-radius:5px;background:#fff;width:100%;max-width:220px" ${retired?"disabled":""} />
+          <div style="font-size:11px;color:#888;margin-top:3px">
+            ${b.dispatch_count > 0 ? `${b.dispatch_count} dispatch${b.dispatch_count!==1?"es":""} · Last: ${esc(b.last_shop||"")} ${b.last_date||""}` : "Never used"}
+            ${retired?` · <span style="color:#e05c2a">retired</span>`:""}
+          </div>
         </div>
         ${retired
           ? `<button data-restore-bucket="${esc(b.id)}" class="btn btn-ghost btn-sm" style="font-size:11px">↻ Restore</button>`
@@ -1108,6 +1111,16 @@ function attach_listeners() {
   app.querySelectorAll("[data-restore-bucket]").forEach(btn => btn.addEventListener("click", () => {
     restore_bucket(btn.dataset.restoreBucket);
   }));
+  app.querySelectorAll("[data-bucket-name]").forEach(inp => {
+    inp.addEventListener("change", async e => {
+      const id = inp.dataset.bucketName;
+      const name = e.target.value.trim() || null;
+      const { error } = await supabaseClient.from("buckets").update({ name }).eq("id", id);
+      if (error) { alert("Failed to save name: " + error.message); return; }
+      const b = state.buckets.find(x => x.id === id);
+      if (b) b.name = name;
+    });
+  });
 
   // ── Users
   app.querySelector("#new-user-email")?.addEventListener("input", e => { state.ui.new_user_email = e.target.value; });

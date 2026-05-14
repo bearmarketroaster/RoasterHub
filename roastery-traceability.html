@@ -265,16 +265,26 @@ async function load_data() {
   const { data: dispatches } = await supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date",{ascending:false});
   state.dispatches=(dispatches||[]).map(d=>({...d,lines:d.dispatch_lines||[]}));
 
-  // Compute packed_kg per container from dispatch_lines
+  // Compute packed_kg per container from dispatch_lines (line-level for accuracy)
   state.dispatches.forEach(d => {
-    const total = d.lines.reduce((s,l) => s + (Number(l.kg)||0) + d.lines.filter(l=>l.type==="retail").reduce((r,l) => r + calc_kg(l.bags, l.bag_size), 0), 0);
-    const c = state.containers.find(c => c.id === d.container_id);
-    if (c) c.packed_kg = (c.packed_kg||0) + (Number(d.total_kg)||0);
+    (d.lines||[]).forEach(l => {
+      if (!l.container_id) return;
+      const c = state.containers.find(c => c.id === l.container_id);
+      if (c) c.packed_kg = (c.packed_kg||0) + (Number(l.kg)||0);
+    });
   });
 
-  // Compute remaining per container
+  // Compute held-in-buckets kg per container: filled buckets that haven't been dispatched yet
+  state.containers.forEach(c => { c.held_in_buckets = 0; });
+  state.buckets.forEach(b => {
+    if (b.status !== "filled" || !b.container_id) return;
+    const c = state.containers.find(c => c.id === b.container_id);
+    if (c) c.held_in_buckets = (c.held_in_buckets || 0) + 5;
+  });
+
+  // Compute remaining per container = roasted − dispatched − held in unshipped buckets
   state.containers.forEach(c => {
-    c.remaining = Math.max(0, c.total_roasted - (c.packed_kg||0));
+    c.remaining = Math.max(0, c.total_roasted - (c.packed_kg||0) - (c.held_in_buckets||0));
   });
 }
 
@@ -328,6 +338,7 @@ async function save_dispatch_v2(primary_container_id, primary_fill_id, shop, lin
     id: `${dispatch_id}-L${i+1}`, dispatch_id,
     type: l.type, kg: l.kg, bags: l.bags || null, bag_size: l.bag_size || null,
     container_id: l.container_id || null, fill_id: l.fill_id || null,
+    fp_code: l.fp_code || null,
   }));
   const { error: l_err } = await supabaseClient.from("dispatch_lines").insert(lines_payload);
   if (l_err) { state.saving = false; alert("Failed to save dispatch lines: " + l_err.message); return null; }
@@ -991,9 +1002,9 @@ function build_dispatch_card(d, c, fill, confirmed, show_scan=true) {
       <div style="background:#f5f0eb;border-radius:8px;padding:10px;margin-bottom:${confirmed?0:10}px">
         <div style="font-size:12px;color:#888;margin-bottom:6px;font-weight:600">BREAKDOWN</div>
         ${b_line?`<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>🪣 Bar</span><span style="font-weight:600">${b_line.kg}kg</span></div>`:""}
-        ${r_lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>🛍️ ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label}</span><span style="font-weight:600">${l.bags} bags (${l.kg}kg)</span></div>`).join("")}
+        ${r_lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>🛍️ ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label||l.bag_size}</span><span style="font-weight:600">${l.bags} bags (${l.kg}kg)</span></div>`).join("")}
       </div>
-      
+      ${!confirmed && state.user_role === "admin" ? `<button class="btn btn-green btn-sm" data-mark-delivered="${esc(d.id)}" style="margin-top:6px">✓ Mark Delivered</button>` : ""}
     </div>`;
 }
 
@@ -1610,18 +1621,29 @@ function attach_listeners() {
     const sug = document.getElementById("manual-scan-suggestions");
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
-    // Match against FP codes by code, coffee name, or bag size
-    const matches = state.fp_codes.filter(f => {
+    // Match against FP codes (code, coffee, size) AND filled buckets (id, name, coffee)
+    const fp_matches = state.fp_codes.filter(f => {
       const hay = `${f.fp_code} ${f.coffee_name} ${f.bag_size}`.toLowerCase();
       return hay.includes(q);
-    }).slice(0, 8);
-    if (matches.length === 0) {
+    });
+    const bucket_matches = state.buckets.filter(b => {
+      if (b.status !== "filled" || b.retired_at) return false;
+      const hay = `${b.id} ${b.name||""} ${b.coffee||""}`.toLowerCase();
+      return hay.includes(q);
+    });
+    const total = fp_matches.length + bucket_matches.length;
+    if (total === 0) {
       sug.innerHTML = `<div style="padding:10px 14px;color:#888;font-size:13px;font-style:italic">No matches</div>`;
     } else {
-      sug.innerHTML = matches.map(f => `<div data-suggest-code="${esc(f.fp_code)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px">
+      const fp_html = fp_matches.slice(0, 6).map(f => `<div data-suggest-code="${esc(f.fp_code)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px">
         <div style="font-weight:600">${esc(f.coffee_name)} <span style="color:#888;font-weight:400">— ${esc(f.bag_size)}</span></div>
         <div style="font-size:11px;color:#aaa;font-family:monospace">${esc(f.fp_code)}</div>
       </div>`).join("");
+      const bucket_html = bucket_matches.slice(0, 6).map(b => `<div data-suggest-code="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px;background:#fff8ee">
+        <div style="font-weight:600">🪣 ${esc(b.name||b.id)} <span style="color:#888;font-weight:400">— ${esc(b.coffee||"?")} (5kg)</span></div>
+        <div style="font-size:11px;color:#aaa;font-family:monospace">${esc(b.id)}</div>
+      </div>`).join("");
+      sug.innerHTML = bucket_html + fp_html;
     }
     sug.style.display = "block";
   });
@@ -1682,14 +1704,19 @@ function attach_listeners() {
         lines.push({
           type: "retail", kg, bags: line.count, bag_size: fp.bag_size,
           container_id: line.container_id, fill_id: line.fill_id,
+          fp_code: code,
         });
       });
     }
     // Bucket lines — one line per bucket, tagged with its actual container/fill (recorded at fill time)
+    // FLAG: bucket→FP linking — looks up the FP code for (bucket's coffee, "Bar 5kg") and tags the line.
+    // If something goes wrong with reports, this can be rolled back by deleting fp_code from these lines.
     packing_state.scanned_buckets.forEach(b => {
+      const matching_fp = state.fp_codes.find(f => f.coffee_name === b.coffee && f.bag_size === "Bar 5kg");
       lines.push({
         type: "retail", kg: 5, bags: 1, bag_size: "Bar 5kg",
         container_id: b.container_id, fill_id: b.fill_id,
+        fp_code: matching_fp?.fp_code || null,
       });
     });
     const total_kg = packing_total_kg();
@@ -1742,6 +1769,15 @@ function attach_listeners() {
     if (d) await confirm_delivery(d.id);
     state.scan_id=null; const url=new URL(window.location); url.searchParams.delete("scan"); window.history.replaceState({},"",url); render();
   });
+
+  // Admin: manual mark-delivered from In Transit cards
+  app.querySelectorAll("[data-mark-delivered]").forEach(btn => btn.addEventListener("click", async () => {
+    if (!confirm("Mark this dispatch as delivered? Use this only if the shop QR can't be scanned.")) return;
+    btn.disabled = true; btn.textContent = "Saving…";
+    await supabaseClient.from("dispatches").update({ confirmed_at: new Date().toISOString() }).eq("id", btn.dataset.markDelivered);
+    await load_data();
+    render();
+  }));
 
   // Shop QR confirm flow — confirm one dispatch at a time
   app.querySelectorAll("[data-confirm-dispatch]").forEach(btn => btn.addEventListener("click", async () => {
