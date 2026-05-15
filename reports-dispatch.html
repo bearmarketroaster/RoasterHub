@@ -137,33 +137,43 @@ function build_reports() {
 
   const get_coffee_name = d => state.fill_coffee_map?.[d.fill_id] || state.containers.find(c => c.id===d.container_id)?.coffee || "Unknown";
 
+  // Build coffee + bag-size breakdown per shop using line-level data
   const shop_map = {};
   filtered.forEach(d => {
     const shop = d.shop || "Unknown";
     const k = shop_kind(shop);
-    // Apply kind filter to By Shop view
     if (state.ui.report_kind !== "all" && state.ui.report_kind !== k) return;
     if (!shop_map[shop]) shop_map[shop] = { total_kg:0, coffees:{}, dispatches:0, last_date:"", kind: k };
     shop_map[shop].total_kg += d.total_kg;
     shop_map[shop].dispatches++;
     if (d.date > shop_map[shop].last_date) shop_map[shop].last_date = d.date;
-    const coffee = get_coffee_name(d);
-    shop_map[shop].coffees[coffee] = (shop_map[shop].coffees[coffee]||0) + d.total_kg;
+
+    const dispatch_coffee_fallback = get_coffee_name(d);
+    const lines = d.lines || [];
+    if (lines.length === 0) {
+      // Legacy dispatch with no line detail — bucket the whole thing under the dispatch's coffee
+      const c = dispatch_coffee_fallback;
+      if (!shop_map[shop].coffees[c]) shop_map[shop].coffees[c] = { kg: 0, sizes: {} };
+      shop_map[shop].coffees[c].kg += d.total_kg;
+      const sz = "Unknown";
+      shop_map[shop].coffees[c].sizes[sz] = (shop_map[shop].coffees[c].sizes[sz] || 0) + d.total_kg;
+    } else {
+      lines.forEach(l => {
+        // Per-line coffee: prefer fill_id → coffee, fall back to dispatch-level
+        const c = state.fill_coffee_map?.[l.fill_id] || dispatch_coffee_fallback;
+        if (!shop_map[shop].coffees[c]) shop_map[shop].coffees[c] = { kg: 0, sizes: {} };
+        const kg = Number(l.kg) || 0;
+        const bags = Number(l.bags) || 0;
+        const sz = l.bag_size || "Unknown";
+        shop_map[shop].coffees[c].kg += kg;
+        if (!shop_map[shop].coffees[c].sizes[sz]) shop_map[shop].coffees[c].sizes[sz] = { kg: 0, bags: 0 };
+        shop_map[shop].coffees[c].sizes[sz].kg += kg;
+        shop_map[shop].coffees[c].sizes[sz].bags += bags;
+      });
+    }
   });
   const shop_rows = Object.entries(shop_map).sort((a,b) => b[1].total_kg - a[1].total_kg);
   const max_shop_kg = shop_rows[0]?.[1].total_kg || 1;
-
-  const coffee_map = {};
-  filtered.forEach(d => {
-    const coffee = get_coffee_name(d);
-    if (!coffee_map[coffee]) coffee_map[coffee] = { total_kg:0, shops:{}, dispatches:0 };
-    coffee_map[coffee].total_kg += d.total_kg;
-    coffee_map[coffee].dispatches++;
-    const shop = d.shop || "Unknown";
-    coffee_map[coffee].shops[shop] = (coffee_map[coffee].shops[shop]||0) + d.total_kg;
-  });
-  const coffee_rows = Object.entries(coffee_map).sort((a,b) => b[1].total_kg - a[1].total_kg);
-  const max_coffee_kg = coffee_rows[0]?.[1].total_kg || 1;
 
   const week_map = {};
   filtered.forEach(d => {
@@ -219,6 +229,39 @@ function build_reports() {
 
   const weekly_chart = weeks.length > 1 ? `<div class="card mb-16"><div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">📅 Weekly Dispatch Volume (kg)</div><div class="chart-wrap">${weeks.map(([week,kg])=>{ const h=Math.round((kg/max_week_kg)*90); return `<div class="chart-col"><div class="chart-val">${kg.toFixed(0)}</div><div class="chart-bar" style="height:${h}px"></div><div class="chart-lbl">${week.slice(5)}</div></div>`; }).join("")}</div></div>` : "";
 
+  // Build coffee_map (By Coffee view) using line-level data too
+  const coffee_map = {};
+  filtered.forEach(d => {
+    const shop = d.shop || "Unknown";
+    const lines = d.lines || [];
+    const fallback_coffee = get_coffee_name(d);
+    if (lines.length === 0) {
+      if (!coffee_map[fallback_coffee]) coffee_map[fallback_coffee] = { total_kg:0, shops:{}, dispatches:0, sizes:{} };
+      coffee_map[fallback_coffee].total_kg += d.total_kg;
+      coffee_map[fallback_coffee].dispatches++;
+      coffee_map[fallback_coffee].shops[shop] = (coffee_map[fallback_coffee].shops[shop] || 0) + d.total_kg;
+    } else {
+      const seen = new Set();
+      lines.forEach(l => {
+        const c = state.fill_coffee_map?.[l.fill_id] || fallback_coffee;
+        if (!coffee_map[c]) coffee_map[c] = { total_kg:0, shops:{}, dispatches:0, sizes:{} };
+        const kg = Number(l.kg) || 0;
+        const bags = Number(l.bags) || 0;
+        const sz = l.bag_size || "Unknown";
+        coffee_map[c].total_kg += kg;
+        coffee_map[c].shops[shop] = (coffee_map[c].shops[shop] || 0) + kg;
+        if (!coffee_map[c].sizes[sz]) coffee_map[c].sizes[sz] = { kg:0, bags:0 };
+        coffee_map[c].sizes[sz].kg += kg;
+        coffee_map[c].sizes[sz].bags += bags;
+        // Count one "dispatch" per coffee per dispatch (avoid double-counting across lines)
+        const k = `${d.id}::${c}`;
+        if (!seen.has(k)) { coffee_map[c].dispatches++; seen.add(k); }
+      });
+    }
+  });
+  const coffee_rows = Object.entries(coffee_map).sort((a,b) => b[1].total_kg - a[1].total_kg);
+  const max_coffee_kg = coffee_rows[0]?.[1].total_kg || 1;
+
   const breakdown_row = (label, kg, total, ci) => `<div style="display:flex;align-items:center;gap:8px"><div style="width:10px;height:10px;border-radius:2px;background:${color_for(ci)};flex-shrink:0"></div><div style="flex:1;font-size:13px">${esc(label)}</div><div style="font-size:13px;font-weight:600;color:#555;min-width:50px;text-align:right">${kg.toFixed(1)}kg</div><div class="report-bar-track"><div class="report-bar-fill" style="background:${color_for(ci)};width:${Math.round((kg/total)*100)}%"></div></div><div style="font-size:11px;color:#aaa;min-width:32px;text-align:right">${Math.round((kg/total)*100)}%</div></div>`;
 
   const kind_badge_html = (kind) => {
@@ -228,14 +271,57 @@ function build_reports() {
     return "";
   };
 
-  const shops_view = shop_rows.map(([shop,data]) => {
-    const entries = Object.entries(data.coffees).sort((a,b) => b[1]-a[1]);
-    return `<div class="card"><div class="flex-between mb-10"><div><div style="font-weight:700;font-size:15px">${esc(shop)}${kind_badge_html(data.kind)}</div><div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches!==1?"es":""} · Last: ${data.last_date}</div></div><div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div></div><div class="stock-track mb-12"><div style="background:#1a1008;border-radius:4px;height:8px;width:${Math.round((data.total_kg/max_shop_kg)*100)}%;transition:width 0.4s"></div></div><div style="display:grid;gap:6px">${entries.map(([coffee,kg],ci) => breakdown_row(coffee,kg,data.total_kg,ci)).join("")}</div></div>`;
+  // Bag-size icons + ordering
+  const SIZE_ORDER = ["100g","200g","250g","500g","1kg","Bar 5kg","Unknown"];
+  const size_icon = (sz) => {
+    if (sz === "Bar 5kg") return "🪣";
+    if (sz === "Unknown") return "❓";
+    return "🛍️";
+  };
+  const sort_sizes = (sizes_obj) => Object.entries(sizes_obj).sort((a,b) => {
+    const ai = SIZE_ORDER.indexOf(a[0]); const bi = SIZE_ORDER.indexOf(b[0]);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
+
+  // Build a drill-down panel: for each bag size in this coffee, show count + kg
+  const size_breakdown_html = (sizes_obj) => {
+    const items = sort_sizes(sizes_obj);
+    if (items.length === 0) return '<p class="hint" style="font-size:12px;margin:0">No detail.</p>';
+    return `<div style="display:grid;gap:4px;padding:8px 0 4px 22px">${items.map(([sz, val]) => {
+      // val can be a number (legacy) or { kg, bags }
+      const kg = typeof val === "number" ? val : val.kg;
+      const bags = typeof val === "number" ? null : val.bags;
+      return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#555"><span style="font-size:13px">${size_icon(sz)}</span><span style="flex:1">${esc(sz)}</span>${bags!==null ? `<span style="color:#888">${bags} ${bags===1?"unit":"units"}</span>` : ""}<span style="font-weight:600;min-width:48px;text-align:right">${kg.toFixed(1)}kg</span></div>`;
+    }).join("")}</div>`;
+  };
+
+  const shops_view = shop_rows.map(([shop, data]) => {
+    const entries = Object.entries(data.coffees).sort((a,b) => b[1].kg - a[1].kg);
+    const rows_html = entries.map(([coffee, coffee_data], ci) => {
+      const kg = coffee_data.kg;
+      const pct = Math.round((kg/data.total_kg)*100);
+      return `<details style="border-radius:4px"><summary style="display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;padding:2px 0">
+        <span style="color:#888;font-size:10px;width:10px">▸</span>
+        <div style="width:10px;height:10px;border-radius:2px;background:${color_for(ci)};flex-shrink:0"></div>
+        <div style="flex:1;font-size:13px">${esc(coffee)}</div>
+        <div style="font-size:13px;font-weight:600;color:#555;min-width:50px;text-align:right">${kg.toFixed(1)}kg</div>
+        <div class="report-bar-track"><div class="report-bar-fill" style="background:${color_for(ci)};width:${pct}%"></div></div>
+        <div style="font-size:11px;color:#aaa;min-width:32px;text-align:right">${pct}%</div>
+      </summary>${size_breakdown_html(coffee_data.sizes)}</details>`;
+    }).join("");
+    return `<div class="card"><div class="flex-between mb-10"><div><div style="font-weight:700;font-size:15px">${esc(shop)}${kind_badge_html(data.kind)}</div><div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches!==1?"es":""} · Last: ${data.last_date}</div></div><div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div></div><div class="stock-track mb-12"><div style="background:#1a1008;border-radius:4px;height:8px;width:${Math.round((data.total_kg/max_shop_kg)*100)}%;transition:width 0.4s"></div></div><div style="display:grid;gap:6px">${rows_html}</div></div>`;
   }).join("");
 
-  const coffees_view = coffee_rows.map(([coffee,data],ci) => {
+  const coffees_view = coffee_rows.map(([coffee, data], ci) => {
     const entries = Object.entries(data.shops).sort((a,b) => b[1]-a[1]);
-    return `<div class="card"><div class="flex-between mb-10"><div><div style="font-weight:700;font-size:15px">${esc(coffee)}</div><div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches!==1?"es":""} · ${entries.length} shop${entries.length!==1?"s":""}</div></div><div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div></div><div class="stock-track mb-12"><div style="background:${color_for(ci)};border-radius:4px;height:8px;width:${Math.round((data.total_kg/max_coffee_kg)*100)}%;transition:width 0.4s"></div></div><div style="display:grid;gap:6px">${entries.map(([shop,kg],si) => breakdown_row(shop,kg,data.total_kg,si)).join("")}</div></div>`;
+    const shop_rows_html = entries.map(([shop, kg], si) => breakdown_row(shop, kg, data.total_kg, si)).join("");
+    // Build a summary by bag size for this coffee
+    const size_summary = sort_sizes(data.sizes || {}).map(([sz, val]) => {
+      const kg = typeof val === "number" ? val : val.kg;
+      const bags = typeof val === "number" ? null : val.bags;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;background:#f5f0eb;padding:3px 8px;border-radius:10px;font-size:11px;margin-right:4px;margin-bottom:4px">${size_icon(sz)} ${esc(sz)}${bags!==null?` · ${bags}`:""} <span style="color:#888">${kg.toFixed(1)}kg</span></span>`;
+    }).join("");
+    return `<div class="card"><div class="flex-between mb-10"><div><div style="font-weight:700;font-size:15px">${esc(coffee)}</div><div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches!==1?"es":""} · ${entries.length} shop${entries.length!==1?"s":""}</div></div><div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div></div>${size_summary ? `<div style="margin-bottom:10px">${size_summary}</div>` : ""}<div class="stock-track mb-12"><div style="background:${color_for(ci)};border-radius:4px;height:8px;width:${Math.round((data.total_kg/max_coffee_kg)*100)}%;transition:width 0.4s"></div></div><div style="display:grid;gap:6px">${shop_rows_html}</div></div>`;
   }).join("");
 
   return `

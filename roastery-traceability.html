@@ -1200,6 +1200,10 @@ function process_scan(raw_value) {
     flash_scan(`${value} not found in settings`, "error");
     return;
   }
+  if (fp.bag_size === "Bar 5kg") {
+    flash_scan(`${value} is a bar — scan the bucket QR instead`, "error");
+    return;
+  }
 
   // FIFO: find the oldest active container for this coffee with stock available for this bag size
   const bag_kg = BAG_SIZE_KG[fp.bag_size] || 0;
@@ -1834,7 +1838,9 @@ function attach_listeners() {
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
     // Match against FP codes (code, coffee, size) AND filled buckets (id, name, coffee)
+    // Bar 5kg is intentionally excluded — for bars, the packer scans/picks a bucket (which carries the FP code itself)
     const fp_matches = state.fp_codes.filter(f => {
+      if (f.bag_size === "Bar 5kg") return false;
       const hay = `${f.fp_code} ${f.coffee_name} ${f.bag_size}`.toLowerCase();
       return hay.includes(q);
     });
