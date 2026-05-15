@@ -62,9 +62,11 @@ const color_for = i => PALETTE[i%PALETTE.length];
 const state = {
   containers: [],
   dispatches: [],
+  shop_mappings: [],
+  shop_kind_map: {},   // shop master_name → kind
   fill_coffee_map: {},
   loading: true,
-  ui: { report_from: today(), report_to: today(), report_view: "shops", report_status: "all" },
+  ui: { report_from: today(), report_to: today(), report_view: "shops", report_status: "all", report_kind: "all" },
 };
 
 async function init() {
@@ -92,6 +94,17 @@ async function load_data() {
 
   const { data: dispatches } = await supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date", { ascending: false });
   state.dispatches = (dispatches||[]).map(d => ({ ...d, lines: d.dispatch_lines||[] }));
+
+  const { data: shop_mappings } = await supabaseClient.from("shop_mappings").select("master_name, kind");
+  state.shop_mappings = shop_mappings || [];
+  state.shop_kind_map = {};
+  state.shop_mappings.forEach(m => { state.shop_kind_map[m.master_name] = m.kind || "shop"; });
+}
+
+function shop_kind(shop) {
+  if (!shop) return "shop";
+  if (shop.toLowerCase() === "samples") return "samples";
+  return state.shop_kind_map[shop] || "shop";
 }
 
 function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
@@ -127,7 +140,10 @@ function build_reports() {
   const shop_map = {};
   filtered.forEach(d => {
     const shop = d.shop || "Unknown";
-    if (!shop_map[shop]) shop_map[shop] = { total_kg:0, coffees:{}, dispatches:0, last_date:"" };
+    const k = shop_kind(shop);
+    // Apply kind filter to By Shop view
+    if (state.ui.report_kind !== "all" && state.ui.report_kind !== k) return;
+    if (!shop_map[shop]) shop_map[shop] = { total_kg:0, coffees:{}, dispatches:0, last_date:"", kind: k };
     shop_map[shop].total_kg += d.total_kg;
     shop_map[shop].dispatches++;
     if (d.date > shop_map[shop].last_date) shop_map[shop].last_date = d.date;
@@ -164,13 +180,11 @@ function build_reports() {
   const unique_coffees = new Set(filtered.map(d => get_coffee_name(d))).size;
   const total_label = report_status==="in_transit" ? "In Transit" : report_status==="delivered" ? "Delivered" : "Total Dispatched";
 
-  // ── Online vs Wholesale split (treat shop "Online" as online, "Samples" as samples, rest as wholesale)
-  const channel_split = { wholesale: 0, online: 0, samples: 0 };
+  // ── Channel split using shop kind (wholesale / online / samples / shop)
+  const channel_split = { wholesale: 0, online: 0, samples: 0, shop: 0 };
   filtered.forEach(d => {
-    const s = (d.shop || "").toLowerCase();
-    if (s === "online")  channel_split.online   += d.total_kg;
-    else if (s === "samples") channel_split.samples += d.total_kg;
-    else channel_split.wholesale += d.total_kg;
+    const k = shop_kind(d.shop);
+    channel_split[k] = (channel_split[k] || 0) + d.total_kg;
   });
 
   // ── Time-to-delivery per shop (avg days from dispatch date → confirmed_at, only for confirmed dispatches)
@@ -207,9 +221,16 @@ function build_reports() {
 
   const breakdown_row = (label, kg, total, ci) => `<div style="display:flex;align-items:center;gap:8px"><div style="width:10px;height:10px;border-radius:2px;background:${color_for(ci)};flex-shrink:0"></div><div style="flex:1;font-size:13px">${esc(label)}</div><div style="font-size:13px;font-weight:600;color:#555;min-width:50px;text-align:right">${kg.toFixed(1)}kg</div><div class="report-bar-track"><div class="report-bar-fill" style="background:${color_for(ci)};width:${Math.round((kg/total)*100)}%"></div></div><div style="font-size:11px;color:#aaa;min-width:32px;text-align:right">${Math.round((kg/total)*100)}%</div></div>`;
 
+  const kind_badge_html = (kind) => {
+    if (kind === "wholesale") return ' <span style="background:#f0e9f7;color:#7e57c2;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle">WHOLESALE</span>';
+    if (kind === "online")    return ' <span style="background:#fff8ee;color:#c8a96e;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle">ONLINE</span>';
+    if (kind === "samples")   return ' <span style="background:#edf7f0;color:#4a9e6b;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle">SAMPLES</span>';
+    return "";
+  };
+
   const shops_view = shop_rows.map(([shop,data]) => {
     const entries = Object.entries(data.coffees).sort((a,b) => b[1]-a[1]);
-    return `<div class="card"><div class="flex-between mb-10"><div><div style="font-weight:700;font-size:15px">${esc(shop)}</div><div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches!==1?"es":""} · Last: ${data.last_date}</div></div><div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div></div><div class="stock-track mb-12"><div style="background:#1a1008;border-radius:4px;height:8px;width:${Math.round((data.total_kg/max_shop_kg)*100)}%;transition:width 0.4s"></div></div><div style="display:grid;gap:6px">${entries.map(([coffee,kg],ci) => breakdown_row(coffee,kg,data.total_kg,ci)).join("")}</div></div>`;
+    return `<div class="card"><div class="flex-between mb-10"><div><div style="font-weight:700;font-size:15px">${esc(shop)}${kind_badge_html(data.kind)}</div><div style="font-size:12px;color:#888;margin-top:2px">${data.dispatches} dispatch${data.dispatches!==1?"es":""} · Last: ${data.last_date}</div></div><div style="font-weight:700;font-size:18px">${data.total_kg.toFixed(1)}kg</div></div><div class="stock-track mb-12"><div style="background:#1a1008;border-radius:4px;height:8px;width:${Math.round((data.total_kg/max_shop_kg)*100)}%;transition:width 0.4s"></div></div><div style="display:grid;gap:6px">${entries.map(([coffee,kg],ci) => breakdown_row(coffee,kg,data.total_kg,ci)).join("")}</div></div>`;
   }).join("");
 
   const coffees_view = coffee_rows.map(([coffee,data],ci) => {
@@ -221,20 +242,27 @@ function build_reports() {
     <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end"><div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div><div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div><div class="flex gap-6"><button class="btn btn-ghost btn-sm" data-report-range="30">30d</button><button class="btn btn-ghost btn-sm" data-report-range="90">90d</button><button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button></div></div></div>
     <div class="grid-4 mb-16">${stats_html}</div>
 
-    ${(channel_split.online + channel_split.wholesale + channel_split.samples) > 0 ? `
+    ${(channel_split.shop + channel_split.wholesale + channel_split.online + channel_split.samples) > 0 ? `
       <div class="card mb-16">
         <div style="font-weight:700;color:#1a1008;margin-bottom:12px;font-size:15px">By Channel</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:10px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:10px">
           <div style="background:#f5f0eb;border-radius:8px;padding:14px">
-            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600">🏪 Wholesale</div>
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600">🏪 Shops</div>
+            <div style="font-size:22px;font-weight:700;color:#1a1008;margin-top:4px">${channel_split.shop.toFixed(1)}kg</div>
+            <div style="font-size:11px;color:#888;margin-top:2px">${total_kg > 0 ? ((channel_split.shop/total_kg)*100).toFixed(0) : 0}% of total</div>
+          </div>
+          ${channel_split.wholesale > 0 ? `
+          <div style="background:#f5f0eb;border-radius:8px;padding:14px">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600">📦 Wholesale</div>
             <div style="font-size:22px;font-weight:700;color:#1a1008;margin-top:4px">${channel_split.wholesale.toFixed(1)}kg</div>
             <div style="font-size:11px;color:#888;margin-top:2px">${total_kg > 0 ? ((channel_split.wholesale/total_kg)*100).toFixed(0) : 0}% of total</div>
-          </div>
+          </div>` : ""}
+          ${channel_split.online > 0 ? `
           <div style="background:#f5f0eb;border-radius:8px;padding:14px">
             <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600">🛒 Online</div>
             <div style="font-size:22px;font-weight:700;color:#1a1008;margin-top:4px">${channel_split.online.toFixed(1)}kg</div>
             <div style="font-size:11px;color:#888;margin-top:2px">${total_kg > 0 ? ((channel_split.online/total_kg)*100).toFixed(0) : 0}% of total</div>
-          </div>
+          </div>` : ""}
           ${channel_split.samples > 0 ? `
           <div style="background:#f5f0eb;border-radius:8px;padding:14px">
             <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600">🎁 Samples</div>
@@ -276,6 +304,13 @@ function build_reports() {
     ${weekly_chart}
     <div class="flex gap-8 mb-12"><button class="btn ${report_status==="all"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="all"?"#e8d5b0":"#5a3e1b"}" data-report-status="all">All</button><button class="btn ${report_status==="in_transit"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="in_transit"?"#e8d5b0":"#5a3e1b"}" data-report-status="in_transit">⏳ In Transit</button><button class="btn ${report_status==="delivered"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="delivered"?"#e8d5b0":"#5a3e1b"}" data-report-status="delivered">✓ Delivered</button></div>
     <div class="flex gap-8 mb-16"><button class="btn ${report_view==="shops"?"btn-dark":"btn-ghost"}" style="flex:1;color:${report_view==="shops"?"#e8d5b0":"#5a3e1b"}" data-report-view="shops">🏪 By Shop</button><button class="btn ${report_view==="coffees"?"btn-dark":"btn-ghost"}" style="flex:1;color:${report_view==="coffees"?"#e8d5b0":"#5a3e1b"}" data-report-view="coffees">☕ By Coffee</button></div>
+    ${report_view==="shops" ? `
+      <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
+        <button class="btn btn-sm ${state.ui.report_kind==="all"?"btn-dark":"btn-ghost"}" style="color:${state.ui.report_kind==="all"?"#e8d5b0":"#5a3e1b"}" data-report-kind="all">All</button>
+        <button class="btn btn-sm ${state.ui.report_kind==="shop"?"btn-dark":"btn-ghost"}" style="color:${state.ui.report_kind==="shop"?"#e8d5b0":"#5a3e1b"}" data-report-kind="shop">🏪 Shops only</button>
+        <button class="btn btn-sm ${state.ui.report_kind==="wholesale"?"btn-dark":"btn-ghost"}" style="color:${state.ui.report_kind==="wholesale"?"#e8d5b0":"#5a3e1b"}" data-report-kind="wholesale">📦 Wholesale only</button>
+        <button class="btn btn-sm ${state.ui.report_kind==="online"?"btn-dark":"btn-ghost"}" style="color:${state.ui.report_kind==="online"?"#e8d5b0":"#5a3e1b"}" data-report-kind="online">🛒 Online only</button>
+      </div>` : ""}
     ${filtered.length===0?`<div class="card empty"><div class="icon">📊</div>No data for this period.</div>`:""}
     ${report_view==="shops"  ? `<div style="display:grid;gap:10px">${shops_view}</div>`   : ""}
     ${report_view==="coffees"? `<div style="display:grid;gap:10px">${coffees_view}</div>` : ""}`;
@@ -296,6 +331,7 @@ function attach_listeners() {
   }));
   app.querySelectorAll("[data-report-view]").forEach(btn => btn.addEventListener("click", () => { state.ui.report_view=btn.dataset.reportView; render(); }));
   app.querySelectorAll("[data-report-status]").forEach(btn => btn.addEventListener("click", () => { state.ui.report_status=btn.dataset.reportStatus; render(); }));
+  app.querySelectorAll("[data-report-kind]").forEach(btn => btn.addEventListener("click", () => { state.ui.report_kind=btn.dataset.reportKind; render(); }));
 }
 </script>
 </body>

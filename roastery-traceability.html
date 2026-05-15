@@ -215,7 +215,7 @@ async function load_data() {
   state.coffees = (coffees_data||[]).map(c => c.name);
   const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code");
   state.fp_codes = (fp_codes_data||[]).map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
-  const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id");
+  const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind");
   state.shop_mappings = shop_mappings_data || [];
 
   // Load buckets with their lifecycle state
@@ -337,8 +337,12 @@ async function save_dispatch_v2(primary_container_id, primary_fill_id, shop, lin
   }
   const dispatch_id = gen_id("DSP");
   // Auto-confirm Online (and Samples) dispatches — they leave immediately, never sit "in transit"
-  const auto_confirm_shops = ["Online", "Samples"];
-  const confirmed_at = auto_confirm_shops.includes(shop) ? new Date().toISOString() : null;
+  // Auto-confirm based on shop kind: wholesale and online both skip "in transit".
+  // Samples is a special internal sink — also auto-confirmed.
+  const mapping = state.shop_mappings.find(m => m.master_name === shop);
+  const kind = mapping?.kind;
+  const auto_confirm = (kind === "wholesale" || kind === "online" || shop === "Samples");
+  const confirmed_at = auto_confirm ? new Date().toISOString() : null;
   const { error: d_err } = await supabaseClient.from("dispatches").insert({
     id: dispatch_id,
     container_id: primary_container_id,
@@ -1521,8 +1525,25 @@ function build_packing_page(container, fill) {
     </div></div>`;
   }
 
-  // step "shop" — pick or type the shop
-  const shops = state.shop_mappings.map(m => m.master_name).filter((v,i,a) => a.indexOf(v)===i).sort();
+  // step "shop" — pick or type the shop. Group by kind for clarity.
+  const dedupe = {};
+  state.shop_mappings.forEach(m => {
+    if (!dedupe[m.master_name]) dedupe[m.master_name] = m;
+  });
+  const all_entries = Object.values(dedupe).sort((a,b) => a.master_name.localeCompare(b.master_name));
+  const shops_only     = all_entries.filter(e => (e.kind||"shop") === "shop");
+  const wholesale_only = all_entries.filter(e => e.kind === "wholesale");
+  const online_only    = all_entries.filter(e => e.kind === "online");
+
+  const render_btn = (e, badge_color, badge_label) => `<button data-pick-shop="${esc(e.master_name)}" style="background:#f5f0eb;border:2px solid #e0d5c5;border-radius:10px;padding:14px 16px;cursor:pointer;text-align:left;width:100%;font-weight:700;font-size:15px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+    <span>${esc(e.master_name)}</span>
+    ${badge_label ? `<span style="background:${badge_color};color:#fff;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700">${badge_label}</span>` : ""}
+  </button>`;
+
+  const group = (title, list, badge_color, badge_label) => list.length === 0 ? "" : `
+    <div style="font-size:11px;color:#888;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:14px 0 6px">${title}</div>
+    <div style="display:grid;gap:8px">${list.map(e => render_btn(e, badge_color, badge_label)).join("")}</div>`;
+
   return `<div class="overlay"><div class="modal">
     <div style="text-align:center;margin-bottom:24px">
       <div style="font-size:40px">📦</div>
@@ -1530,12 +1551,14 @@ function build_packing_page(container, fill) {
       <div class="mono" style="color:#c8a96e;font-size:15px;font-weight:700">${esc(container.id)}</div>
       <div style="color:#4a9e6b;font-size:14px;margin-top:4px">${fill.remaining.toFixed(1)}kg available</div>
     </div>
-    <h3 style="font-size:16px;margin-bottom:12px">Which shop is this for?</h3>
-    ${shops.length ? `<div style="display:grid;gap:8px;margin-bottom:14px">${shops.map(s => `<button data-pick-shop="${esc(s)}" style="background:#f5f0eb;border:2px solid #e0d5c5;border-radius:10px;padding:14px 16px;cursor:pointer;text-align:left;width:100%;font-weight:700;font-size:15px">${esc(s)}</button>`).join("")}</div>` : ""}
-    <div style="background:#fff8ee;border-radius:8px;padding:12px;margin-bottom:14px">
-      <label class="lbl" style="font-size:13px">Or type shop name</label>
+    <h3 style="font-size:16px;margin-bottom:4px">Where is this going?</h3>
+    ${group("Shops", shops_only, "#4a9e6b", "")}
+    ${group("Wholesale", wholesale_only, "#7e57c2", "WHOLESALE")}
+    ${group("Online", online_only, "#c8a96e", "ONLINE")}
+    <div style="background:#fff8ee;border-radius:8px;padding:12px;margin-top:14px;margin-bottom:14px">
+      <label class="lbl" style="font-size:13px">Or type a custom destination</label>
       <input id="pack-shop-custom" placeholder="e.g. Stillorgan" style="font-size:15px;padding:10px 12px" />
-      <button class="btn btn-dark btn-sm mt-8" id="pack-shop-custom-go" style="width:100%">Use this shop →</button>
+      <button class="btn btn-dark btn-sm mt-8" id="pack-shop-custom-go" style="width:100%">Use this →</button>
     </div>
     ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
     <button class="btn btn-muted btn-full" id="close-scan">Cancel</button>

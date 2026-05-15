@@ -117,6 +117,7 @@ const state = {
     // per-coffee inline new FP row: { [coffee_id]: { fp_code:"", bag_size:"100g", err:"" } }
     new_fp: {},
     new_shop_master: "",
+    new_shop_kind: "shop",
     shop_err: "",
     new_user_email: "",
     new_user_role: "viewer",
@@ -170,27 +171,27 @@ function slugify_shop(name) {
   return name.trim().replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_-]/g, "").substring(0, 32);
 }
 
-async function add_shop_mapping(master_name) {
+async function add_shop_mapping(master_name, kind) {
   master_name = master_name.trim();
+  kind = kind || "shop";
   if (!master_name) { state.ui.shop_err = "Please enter a shop name."; render(); return; }
-  // Check it doesn't already exist
   if (state.shop_mappings.find(m => m.master_name.toLowerCase() === master_name.toLowerCase())) {
-    state.ui.shop_err = "That shop already exists.";
+    state.ui.shop_err = "That entry already exists.";
     render(); return;
   }
-  // Online doesn't need a QR
-  const is_online = master_name.toLowerCase() === "online";
+  // Only physical shops get a QR; wholesale + online are virtual destinations
   let shop_qr_id = null;
-  if (!is_online) {
+  if (kind === "shop") {
     const r = crypto.randomUUID().split("-")[0].toUpperCase();
     shop_qr_id = `SHOP-${slugify_shop(master_name)}-${r}`;
   }
-  // We still use the existing schema (parsed_name set to master_name) to avoid migrations
-  const { data, error } = await supabaseClient.from("shop_mappings").insert({ parsed_name: master_name, master_name, shop_qr_id }).select().single();
+  const { data, error } = await supabaseClient.from("shop_mappings").insert({ parsed_name: master_name, master_name, shop_qr_id, kind }).select().single();
   if (error) { state.ui.shop_err = error.message; render(); return; }
   state.shop_mappings.push(data);
   state.shop_mappings.sort((a,b) => a.master_name.localeCompare(b.master_name));
-  state.ui.new_shop_master = ""; state.ui.shop_err = "";
+  state.ui.new_shop_master = "";
+  state.ui.new_shop_kind = "shop";
+  state.ui.shop_err = "";
   render();
 }
 
@@ -832,51 +833,78 @@ function build_traceability_section() {
 function build_shops_section() {
   const open = state.open_section === "shops";
   const mappings = state.shop_mappings;
-  const { new_shop_master, shop_err } = state.ui;
+  const { new_shop_master, new_shop_kind, shop_err } = state.ui;
+  const selected_kind = new_shop_kind || "shop";
 
-  // One row per unique master_name; show its QR
+  // One row per unique master_name; show its QR + kind
   const by_master = {};
   mappings.forEach(m => {
-    if (!by_master[m.master_name]) by_master[m.master_name] = { master_name: m.master_name, shop_qr_id: m.shop_qr_id, id: m.id };
+    if (!by_master[m.master_name]) by_master[m.master_name] = { master_name: m.master_name, shop_qr_id: m.shop_qr_id, id: m.id, kind: m.kind || "shop" };
     if (m.shop_qr_id) by_master[m.master_name].shop_qr_id = m.shop_qr_id;
+    if (m.kind) by_master[m.master_name].kind = m.kind;
   });
-  const shops = Object.values(by_master).sort((a,b) => a.master_name.localeCompare(b.master_name));
+  const entries = Object.values(by_master).sort((a,b) => a.master_name.localeCompare(b.master_name));
+
+  const kind_badge = (kind) => {
+    if (kind === "online")    return '<span style="background:#fff8ee;color:#c8a96e;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">ONLINE</span>';
+    if (kind === "wholesale") return '<span style="background:#f0e9f7;color:#7e57c2;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">WHOLESALE</span>';
+    return "";
+  };
+
+  const render_row = (s) => {
+    const has_qr = s.kind === "shop";
+    return `
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:12px;border-top:1px solid #f0ebe4">
+        <div>
+          <div style="font-weight:700;font-size:14px">${esc(s.master_name)}${kind_badge(s.kind)}</div>
+          ${!has_qr
+            ? `<div style="font-size:11px;color:#888;margin-top:2px">${s.kind === "wholesale" ? "Wholesale customer — auto-confirmed on dispatch, no QR" : "Online — auto-confirmed on dispatch, no QR"}</div>`
+            : s.shop_qr_id
+            ? `<div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${esc(s.shop_qr_id)}</div>`
+            : '<div style="font-size:11px;color:#e05c2a;margin-top:2px">No QR yet</div>'}
+        </div>
+        ${!has_qr
+          ? '<span></span>'
+          : s.shop_qr_id
+          ? `<a href="print-qr.html?type=shop&ids=${encodeURIComponent(s.shop_qr_id)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">🖨️</a>`
+          : `<button data-generate-shop-qr="${esc(s.master_name)}" class="btn btn-dark btn-sm" style="font-size:11px">+ QR</button>`}
+        <button data-delete-shop-master="${esc(s.master_name)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remove">✕</button>
+      </div>`;
+  };
+
+  const shops_list = entries.filter(e => e.kind === "shop");
+  const wholesale_list = entries.filter(e => e.kind === "wholesale");
+  const online_list = entries.filter(e => e.kind === "online");
+
+  const group = (title, list) => list.length === 0 ? "" : `
+    <div class="section-label" style="margin-top:14px">${title} (${list.length})</div>
+    <div class="card-white" style="margin-bottom:0">
+      ${list.map(render_row).join("")}
+    </div>`;
 
   const body = open ? `
     <div class="section-body">
-      <p class="hint mb-12">Each shop has a unique QR code. Print it and stick it at the shop — drivers/staff scan it to confirm deliveries on arrival.</p>
+      <p class="hint mb-12">Three types of destinations: <strong>Shops</strong> (Bearmarket — QR-confirmed on delivery), <strong>Wholesale</strong> (third-party customers — auto-confirmed at pack), <strong>Online</strong> (web orders — auto-confirmed at pack).</p>
 
-      <div class="card-white" style="margin-bottom:12px">
-        ${shops.length === 0 ? '<div style="padding:14px 12px;font-size:13px;color:#aaa;font-style:italic">No shops yet — add one below.</div>' : ""}
-        ${shops.map(s => {
-          const is_online = s.master_name.toLowerCase() === "online";
-          return `
-          <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:12px;border-top:1px solid #f0ebe4">
-            <div>
-              <div style="font-weight:700;font-size:14px">${esc(s.master_name)}${is_online?' <span style="background:#fff8ee;color:#c8a96e;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">ONLINE</span>':""}</div>
-              ${is_online
-                ? '<div style="font-size:11px;color:#888;margin-top:2px">No QR — destination for online orders</div>'
-                : s.shop_qr_id
-                ? `<div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${esc(s.shop_qr_id)}</div>`
-                : '<div style="font-size:11px;color:#e05c2a;margin-top:2px">No QR yet</div>'}
-            </div>
-            ${is_online
-              ? '<span></span>'
-              : s.shop_qr_id
-              ? `<a href="print-qr.html?type=shop&ids=${encodeURIComponent(s.shop_qr_id)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">🖨️</a>`
-              : `<button data-generate-shop-qr="${esc(s.master_name)}" class="btn btn-dark btn-sm" style="font-size:11px">+ QR</button>`}
-            <button data-delete-shop-master="${esc(s.master_name)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remove shop">✕</button>
-          </div>`;
-        }).join("")}
-      </div>
+      ${entries.length === 0 ? '<div class="card-white" style="padding:14px 12px;font-size:13px;color:#aaa;font-style:italic">Nothing here yet — add an entry below.</div>' : ""}
+      ${group("Shops", shops_list)}
+      ${group("Wholesale", wholesale_list)}
+      ${group("Online", online_list)}
 
-      <div class="section-label">Add Shop</div>
+      <div class="section-label" style="margin-top:16px">Add New</div>
       <div class="card">
-        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:flex-end">
-          <div><label class="lbl">Shop Name *</label><input id="new-shop-master" value="${esc(new_shop_master)}" placeholder="e.g. Stillorgan" style="font-size:13px" /></div>
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:flex-end">
+          <div><label class="lbl">Name *</label><input id="new-shop-master" value="${esc(new_shop_master)}" placeholder="e.g. Stillorgan, or Bewleys Cafe" style="font-size:13px" /></div>
+          <div><label class="lbl">Type</label>
+            <select id="new-shop-kind" style="font-size:13px;width:130px">
+              <option value="shop"      ${selected_kind==="shop"?"selected":""}>Shop</option>
+              <option value="wholesale" ${selected_kind==="wholesale"?"selected":""}>Wholesale</option>
+              <option value="online"    ${selected_kind==="online"?"selected":""}>Online</option>
+            </select>
+          </div>
           <button class="btn btn-dark btn-sm" id="add-shop-mapping">+ Add</button>
         </div>
-        <p class="hint" style="font-size:12px;margin-top:8px">A QR code will be auto-generated. Use "Online" for online orders (no QR needed).</p>
+        <p class="hint" style="font-size:12px;margin-top:8px">Shops get an auto-generated QR for delivery confirmation. Wholesale and Online auto-confirm at pack time.</p>
         ${shop_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:4px">${esc(shop_err)}</p>` : ""}
       </div>
     </div>` : "";
@@ -885,7 +913,7 @@ function build_shops_section() {
       <div class="section-header" data-toggle-section="shops">
         <div>
           <div class="section-title"><span class="icon">🏪</span> Shops</div>
-          <div class="section-desc">${shops.length} shop${shops.length!==1?"s":""}</div>
+          <div class="section-desc">${shops_list.length} shop${shops_list.length!==1?"s":""}${wholesale_list.length?` · ${wholesale_list.length} wholesale`:""}${online_list.length?` · ${online_list.length} online`:""}</div>
         </div>
         <span class="section-arrow">${open ? "▾" : "▸"}</span>
       </div>
@@ -1084,11 +1112,13 @@ function attach_listeners() {
 
   // ── Shops
   app.querySelector("#new-shop-master")?.addEventListener("input", e => { state.ui.new_shop_master = e.target.value; });
+  app.querySelector("#new-shop-kind")?.addEventListener("change", e => { state.ui.new_shop_kind = e.target.value; });
   app.querySelector("#new-shop-master")?.addEventListener("keydown", e => { if (e.key==="Enter") app.querySelector("#add-shop-mapping")?.click(); });
   app.querySelector("#add-shop-mapping")?.addEventListener("click", () => {
     const master = document.getElementById("new-shop-master")?.value.trim();
-    if (!master) { state.ui.shop_err = "Please enter a shop name."; render(); return; }
-    add_shop_mapping(master);
+    const kind = document.getElementById("new-shop-kind")?.value || "shop";
+    if (!master) { state.ui.shop_err = "Please enter a name."; render(); return; }
+    add_shop_mapping(master, kind);
   });
   app.querySelectorAll("[data-delete-shop-master]").forEach(btn => btn.addEventListener("click", () => {
     delete_shop_master(btn.dataset.deleteShopMaster);
