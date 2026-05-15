@@ -164,6 +164,38 @@ function build_reports() {
   const unique_coffees = new Set(filtered.map(d => get_coffee_name(d))).size;
   const total_label = report_status==="in_transit" ? "In Transit" : report_status==="delivered" ? "Delivered" : "Total Dispatched";
 
+  // ── Online vs Wholesale split (treat shop "Online" as online, "Samples" as samples, rest as wholesale)
+  const channel_split = { wholesale: 0, online: 0, samples: 0 };
+  filtered.forEach(d => {
+    const s = (d.shop || "").toLowerCase();
+    if (s === "online")  channel_split.online   += d.total_kg;
+    else if (s === "samples") channel_split.samples += d.total_kg;
+    else channel_split.wholesale += d.total_kg;
+  });
+
+  // ── Time-to-delivery per shop (avg days from dispatch date → confirmed_at, only for confirmed dispatches)
+  const delivery_times = {};
+  state.dispatches.forEach(d => {
+    if (!d.confirmed_at || !d.date) return;
+    if (d.date < report_from || d.date > report_to) return;
+    const shop = d.shop || "Unknown";
+    const ms = new Date(d.confirmed_at).getTime() - new Date(d.date + "T00:00:00").getTime();
+    const days = ms / (1000*60*60*24);
+    if (days < 0) return;  // ignore weird negatives
+    if (!delivery_times[shop]) delivery_times[shop] = [];
+    delivery_times[shop].push(days);
+  });
+  const time_rows = Object.entries(delivery_times)
+    .filter(([shop]) => !["online", "samples"].includes(shop.toLowerCase()))
+    .map(([shop, ds]) => {
+      const sorted = [...ds].sort((a,b) => a-b);
+      const avg = ds.reduce((s,d) => s+d, 0) / ds.length;
+      const med = sorted[Math.floor(sorted.length/2)];
+      const max = sorted[sorted.length-1];
+      return { shop, count: ds.length, avg, med, max };
+    })
+    .sort((a,b) => b.avg - a.avg);  // slowest first
+
   const stats_html = [
     { label: total_label, value: `${total_kg.toFixed(1)}kg`, icon: "⚖️" },
     { label: "Dispatches", value: filtered.length, icon: "🚚" },
@@ -188,6 +220,59 @@ function build_reports() {
   return `
     <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end"><div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div><div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div><div class="flex gap-6"><button class="btn btn-ghost btn-sm" data-report-range="30">30d</button><button class="btn btn-ghost btn-sm" data-report-range="90">90d</button><button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button></div></div></div>
     <div class="grid-4 mb-16">${stats_html}</div>
+
+    ${(channel_split.online + channel_split.wholesale + channel_split.samples) > 0 ? `
+      <div class="card mb-16">
+        <div style="font-weight:700;color:#1a1008;margin-bottom:12px;font-size:15px">By Channel</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:10px">
+          <div style="background:#f5f0eb;border-radius:8px;padding:14px">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600">🏪 Wholesale</div>
+            <div style="font-size:22px;font-weight:700;color:#1a1008;margin-top:4px">${channel_split.wholesale.toFixed(1)}kg</div>
+            <div style="font-size:11px;color:#888;margin-top:2px">${total_kg > 0 ? ((channel_split.wholesale/total_kg)*100).toFixed(0) : 0}% of total</div>
+          </div>
+          <div style="background:#f5f0eb;border-radius:8px;padding:14px">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600">🛒 Online</div>
+            <div style="font-size:22px;font-weight:700;color:#1a1008;margin-top:4px">${channel_split.online.toFixed(1)}kg</div>
+            <div style="font-size:11px;color:#888;margin-top:2px">${total_kg > 0 ? ((channel_split.online/total_kg)*100).toFixed(0) : 0}% of total</div>
+          </div>
+          ${channel_split.samples > 0 ? `
+          <div style="background:#f5f0eb;border-radius:8px;padding:14px">
+            <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:600">🎁 Samples</div>
+            <div style="font-size:22px;font-weight:700;color:#1a1008;margin-top:4px">${channel_split.samples.toFixed(1)}kg</div>
+            <div style="font-size:11px;color:#888;margin-top:2px">${total_kg > 0 ? ((channel_split.samples/total_kg)*100).toFixed(0) : 0}% of total</div>
+          </div>` : ""}
+        </div>
+      </div>` : ""}
+
+    ${time_rows.length > 0 ? `
+      <div class="card mb-16">
+        <div style="font-weight:700;color:#1a1008;margin-bottom:6px;font-size:15px">Time to Delivery</div>
+        <div class="hint" style="font-size:12px;margin-bottom:12px">Days between packing and shop QR confirmation. Slowest first.</div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:8px;background:#f5f0eb;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:700;border-bottom:1px solid #e0d5c5">Shop</th>
+                <th style="text-align:right;padding:8px;background:#f5f0eb;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:700;border-bottom:1px solid #e0d5c5">Deliveries</th>
+                <th style="text-align:right;padding:8px;background:#f5f0eb;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:700;border-bottom:1px solid #e0d5c5">Avg Days</th>
+                <th style="text-align:right;padding:8px;background:#f5f0eb;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:700;border-bottom:1px solid #e0d5c5">Median</th>
+                <th style="text-align:right;padding:8px;background:#f5f0eb;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;font-weight:700;border-bottom:1px solid #e0d5c5">Slowest</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${time_rows.map(r => `
+                <tr>
+                  <td style="padding:8px;border-bottom:1px solid #f0ebe4;font-weight:600">${esc(r.shop)}</td>
+                  <td style="padding:8px;border-bottom:1px solid #f0ebe4;text-align:right">${r.count}</td>
+                  <td style="padding:8px;border-bottom:1px solid #f0ebe4;text-align:right;font-weight:600;color:${r.avg > 5 ? '#e05c2a' : r.avg > 2 ? '#c8a96e' : '#4a9e6b'}">${r.avg.toFixed(1)}d</td>
+                  <td style="padding:8px;border-bottom:1px solid #f0ebe4;text-align:right">${r.med.toFixed(1)}d</td>
+                  <td style="padding:8px;border-bottom:1px solid #f0ebe4;text-align:right;color:#888">${r.max.toFixed(1)}d</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>` : ""}
+
     ${weekly_chart}
     <div class="flex gap-8 mb-12"><button class="btn ${report_status==="all"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="all"?"#e8d5b0":"#5a3e1b"}" data-report-status="all">All</button><button class="btn ${report_status==="in_transit"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="in_transit"?"#e8d5b0":"#5a3e1b"}" data-report-status="in_transit">⏳ In Transit</button><button class="btn ${report_status==="delivered"?"btn-dark":"btn-ghost"} btn-sm" style="flex:1;color:${report_status==="delivered"?"#e8d5b0":"#5a3e1b"}" data-report-status="delivered">✓ Delivered</button></div>
     <div class="flex gap-8 mb-16"><button class="btn ${report_view==="shops"?"btn-dark":"btn-ghost"}" style="flex:1;color:${report_view==="shops"?"#e8d5b0":"#5a3e1b"}" data-report-view="shops">🏪 By Shop</button><button class="btn ${report_view==="coffees"?"btn-dark":"btn-ghost"}" style="flex:1;color:${report_view==="coffees"?"#e8d5b0":"#5a3e1b"}" data-report-view="coffees">☕ By Coffee</button></div>
