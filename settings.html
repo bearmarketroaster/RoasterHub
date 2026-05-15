@@ -102,6 +102,7 @@ const state = {
   coffees: [],          // [{ id, name, fp_codes: [{id, fp_code, bag_size}] }]
   shop_mappings: [],    // [{ id, parsed_name, master_name }]
   buckets: [],          // [{ id, created_at, retired_at, notes }]
+  containers: [],       // [{ id, name, status, retired_at, ... }]
   user_roles: [],
   pending_invites: [],
   current_user: null,
@@ -127,6 +128,11 @@ const state = {
     bucket_filter: "active",
     bucket_err: "",
     bucket_msg: "",
+    new_container_id: "",
+    new_container_name: "",
+    container_filter: "active",
+    container_err: "",
+    container_msg: "",
     url_status: null,
     open_supplier: null,
     supplier_err: "",
@@ -350,11 +356,71 @@ async function restore_bucket(id) {
   render();
 }
 
+// ── CONTAINERS ───────────────────────────────────────────────────────────────
+async function load_containers() {
+  const { data: containers } = await supabaseClient.from("containers").select("*").order("id");
+  state.containers = containers || [];
+  // Count roast sessions per container (gives a sense of usage)
+  const { data: rs } = await supabaseClient.from("roast_sessions").select("container_id, date").order("date", { ascending: false });
+  const usage = {};
+  (rs || []).forEach(r => {
+    if (!r.container_id) return;
+    if (!usage[r.container_id]) usage[r.container_id] = { count: 0, last_date: null };
+    usage[r.container_id].count += 1;
+    if (!usage[r.container_id].last_date) usage[r.container_id].last_date = r.date;
+  });
+  state.containers.forEach(c => {
+    c.roast_count = usage[c.id]?.count || 0;
+    c.last_roast_date = usage[c.id]?.last_date || null;
+  });
+}
+
+async function add_container(id, name) {
+  id = id.trim().toUpperCase();
+  if (!id) { state.ui.container_err = "Please enter a container ID."; render(); return; }
+  if (!/^[A-Z0-9_-]{1,32}$/.test(id)) { state.ui.container_err = "ID can only contain letters, numbers, dashes, underscores."; render(); return; }
+  if (state.containers.find(c => c.id === id)) {
+    state.ui.container_err = "That ID already exists.";
+    render(); return;
+  }
+  const { error } = await supabaseClient.from("containers").insert({
+    id, name: name ? name.trim() : null, status: "empty"
+  });
+  if (error) { state.ui.container_err = error.message; render(); return; }
+  state.ui.container_err = "";
+  state.ui.new_container_id = "";
+  state.ui.new_container_name = "";
+  state.ui.container_msg = `Added container ${id}.`;
+  await load_containers();
+  render();
+  setTimeout(() => { state.ui.container_msg = ""; render(); }, 4000);
+}
+
+async function retire_container(id) {
+  if (!confirm(`Retire container ${id}? It will no longer be available for new roasts. Can be restored later.`)) return;
+  await supabaseClient.from("containers").update({ retired_at: new Date().toISOString() }).eq("id", id);
+  await load_containers();
+  render();
+}
+
+async function restore_container(id) {
+  await supabaseClient.from("containers").update({ retired_at: null }).eq("id", id);
+  await load_containers();
+  render();
+}
+
+async function update_container_name(id, name) {
+  const { error } = await supabaseClient.from("containers").update({ name: name || null }).eq("id", id);
+  if (error) { alert("Failed to save name: " + error.message); return; }
+  const c = state.containers.find(x => x.id === id);
+  if (c) c.name = name || null;
+}
+
 async function init() {
   await load_current_user();
   // Viewers shouldn't be in Settings at all — redirect to Reports
   if (state.current_user?.role !== "admin") { window.location.href = "reports.html"; return; }
-  await Promise.all([load_base_url(), load_coffees(), load_shop_mappings(), load_supplier_templates(), load_users(), load_buckets()]);
+  await Promise.all([load_base_url(), load_coffees(), load_shop_mappings(), load_supplier_templates(), load_users(), load_buckets(), load_containers()]);
   state.loading = false;
   render();
 }
@@ -582,6 +648,94 @@ function build_buckets_section() {
     </div>`;
 }
 
+// ── CONTAINERS SECTION ───────────────────────────────────────────────────────
+function build_containers_section() {
+  const open = state.open_section === "containers";
+  const { new_container_id, new_container_name, container_filter, container_err, container_msg } = state.ui;
+  const containers = state.containers;
+  const filtered = container_filter === "active"  ? containers.filter(c => !c.retired_at)
+                 : container_filter === "retired" ? containers.filter(c =>  c.retired_at)
+                 : containers;
+
+  const active_count  = containers.filter(c => !c.retired_at).length;
+  const retired_count = containers.filter(c =>  c.retired_at).length;
+
+  const print_url = filtered.length
+    ? `print-qr.html?type=container&ids=${filtered.map(c => encodeURIComponent(c.id)).join(",")}`
+    : "print-qr.html?type=container";
+
+  const status_badge = (status) => {
+    if (status === "active")  return '<span style="background:#edf7f0;color:#4a9e6b;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">ACTIVE</span>';
+    if (status === "waiting") return '<span style="background:#fff8ee;color:#c8a96e;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">WAITING</span>';
+    return '<span style="background:#f0ebe4;color:#888;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">EMPTY</span>';
+  };
+
+  const containers_html = filtered.map(c => {
+    const retired = !!c.retired_at;
+    return `
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4;${retired?"opacity:0.5":""}">
+        <span class="mono" style="background:#f0ebe4;color:#5a3e1b;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(c.id)}</span>
+        <div>
+          <input type="text" data-container-name="${esc(c.id)}" value="${esc(c.name||"")}" placeholder="optional friendly name…" style="font-size:13px;padding:4px 8px;border:1px solid #e0d5c5;border-radius:5px;background:#fff;width:100%;max-width:220px" ${retired?"disabled":""} />
+          <div style="font-size:11px;color:#888;margin-top:3px">
+            ${retired ? '' : status_badge(c.status||"empty") + ' · '}${c.roast_count > 0 ? `${c.roast_count} roast${c.roast_count!==1?"s":""}${c.last_roast_date?` · Last: ${c.last_roast_date}`:""}` : "Never used"}
+            ${retired?` · <span style="color:#e05c2a">retired</span>`:""}
+          </div>
+        </div>
+        ${retired
+          ? `<button data-restore-container="${esc(c.id)}" class="btn btn-ghost btn-sm" style="font-size:11px">↻ Restore</button>`
+          : `<button data-retire-container="${esc(c.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:14px;line-height:1;padding:0 6px" title="Retire">✕</button>`}
+        <a href="print-qr.html?type=container&ids=${encodeURIComponent(c.id)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">🖨️</a>
+      </div>`;
+  }).join("");
+
+  const body = open ? `
+    <div class="section-body">
+      <p class="hint mb-12">Storage containers hold coffee from a single roast. Each has a unique ID and gets a QR sticker. The Roasts module will pick from this list.</p>
+
+      <div class="card-white" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;background:#f5f0eb;padding:10px 12px;border-bottom:1px solid #e0d5c5">
+          <div class="flex gap-6">
+            <button class="btn ${container_filter==="active"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="active" style="${container_filter==="active"?"color:#e8d5b0":""}">Active (${active_count})</button>
+            <button class="btn ${container_filter==="retired"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="retired" style="${container_filter==="retired"?"color:#e8d5b0":""}">Retired (${retired_count})</button>
+            <button class="btn ${container_filter==="all"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="all" style="${container_filter==="all"?"color:#e8d5b0":""}">All</button>
+          </div>
+          ${filtered.length > 0 ? `<a href="${print_url}" target="_blank" class="btn btn-amber btn-sm" style="margin-left:auto;text-decoration:none">🖨️ Print All Visible</a>` : ""}
+        </div>
+        ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#aaa;font-style:italic">No containers in this view.</div>' : containers_html}
+      </div>
+
+      <div class="section-label">Add Container</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:flex-end">
+          <div style="width:160px">
+            <label class="lbl">Container ID *</label>
+            <input id="new-container-id" value="${esc(new_container_id)}" placeholder="e.g. XL01" style="font-size:13px;text-transform:uppercase" />
+          </div>
+          <div>
+            <label class="lbl">Friendly name (optional)</label>
+            <input id="new-container-name" value="${esc(new_container_name)}" placeholder="e.g. Big silver one" style="font-size:13px" />
+          </div>
+          <button class="btn btn-dark btn-sm" id="add-container-btn">+ Add</button>
+        </div>
+        <p class="hint" style="font-size:12px;margin-top:8px">Letters, numbers, dashes, underscores only. Use whatever convention works for your physical containers (XL01, BIN-A, etc.).</p>
+        ${container_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:8px">${esc(container_err)}</p>` : ""}
+        ${container_msg ? `<p style="color:#4a9e6b;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(container_msg)}</p>` : ""}
+      </div>
+    </div>` : "";
+  return `
+    <div class="section">
+      <div class="section-header" data-toggle-section="containers">
+        <div>
+          <div class="section-title"><span class="icon">📦</span> Containers</div>
+          <div class="section-desc">${active_count} active${retired_count?` · ${retired_count} retired`:""}</div>
+        </div>
+        <span class="section-arrow">${open ? "▾" : "▸"}</span>
+      </div>
+      ${body}
+    </div>`;
+}
+
 // ── USERS SECTION ────────────────────────────────────────────────────────────
 function build_users_section() {
   const open = state.open_section === "users";
@@ -694,6 +848,7 @@ function build_app() {
       ${build_shops_section()}
       ${build_suppliers_section()}
       ${build_buckets_section()}
+      ${build_containers_section()}
       ${build_users_section()}
     </div>`;
 }
@@ -1151,6 +1306,32 @@ function attach_listeners() {
       if (error) { alert("Failed to save name: " + error.message); return; }
       const b = state.buckets.find(x => x.id === id);
       if (b) b.name = name;
+    });
+  });
+
+  // ── Containers
+  app.querySelector("#new-container-id")?.addEventListener("input", e => { state.ui.new_container_id = e.target.value; });
+  app.querySelector("#new-container-name")?.addEventListener("input", e => { state.ui.new_container_name = e.target.value; });
+  app.querySelector("#new-container-id")?.addEventListener("keydown", e => { if (e.key==="Enter") app.querySelector("#add-container-btn")?.click(); });
+  app.querySelector("#new-container-name")?.addEventListener("keydown", e => { if (e.key==="Enter") app.querySelector("#add-container-btn")?.click(); });
+  app.querySelector("#add-container-btn")?.addEventListener("click", () => {
+    const id = document.getElementById("new-container-id")?.value;
+    const name = document.getElementById("new-container-name")?.value;
+    add_container(id, name);
+  });
+  app.querySelectorAll("[data-container-filter]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.container_filter = btn.dataset.containerFilter;
+    render();
+  }));
+  app.querySelectorAll("[data-retire-container]").forEach(btn => btn.addEventListener("click", () => {
+    retire_container(btn.dataset.retireContainer);
+  }));
+  app.querySelectorAll("[data-restore-container]").forEach(btn => btn.addEventListener("click", () => {
+    restore_container(btn.dataset.restoreContainer);
+  }));
+  app.querySelectorAll("[data-container-name]").forEach(inp => {
+    inp.addEventListener("change", e => {
+      update_container_name(inp.dataset.containerName, e.target.value.trim());
     });
   });
 

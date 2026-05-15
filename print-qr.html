@@ -57,6 +57,7 @@
       <label>Type</label>
       <select id="type-select">
         <option value="bucket">Buckets</option>
+        <option value="container">Containers</option>
         <option value="fp">Bag Labels (FP codes)</option>
         <option value="shop">Shops</option>
       </select>
@@ -92,6 +93,7 @@
       size_mm: 40,
       coffee_filter: "all",
       buckets: [],
+      containers: [],
       fp_codes: [],
       shops: [],
       selected_ids: new Set(init_ids || []),
@@ -125,12 +127,14 @@
       }));
 
 
-      const [{ data: buckets }, { data: fp_codes }, { data: shop_mappings }] = await Promise.all([
-        supabaseClient.from("buckets").select("id, retired_at").order("created_at", { ascending: false }),
+      const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }] = await Promise.all([
+        supabaseClient.from("buckets").select("id, name, retired_at").order("created_at", { ascending: false }),
+        supabaseClient.from("containers").select("id, name, retired_at").order("id"),
         supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code"),
         supabaseClient.from("shop_mappings").select("master_name, shop_qr_id").order("master_name"),
       ]);
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
+      state.containers = (containers||[]).filter(c => !c.retired_at);
       state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
       // Dedupe shops by master_name — collect distinct master+qr pairs
       const shop_seen = new Set();
@@ -145,8 +149,9 @@
       if (init_ids && init_ids.length) {
         // already in selected_ids set
       } else {
-        const all = state.type === "bucket" ? state.buckets.map(b => b.id)
-                  : state.type === "shop"   ? state.shops.map(s => s.id)
+        const all = state.type === "bucket"    ? state.buckets.map(b => b.id)
+                  : state.type === "container" ? state.containers.map(c => c.id)
+                  : state.type === "shop"      ? state.shops.map(s => s.id)
                   : state.fp_codes.map(f => f.id);
         state.selected_ids = new Set(all);
       }
@@ -157,9 +162,11 @@
 
     function render_picker() {
       const el = document.getElementById("picker");
-      const type_label = state.type === "bucket" ? "buckets" : state.type === "shop" ? "shops" : "FP codes";
+      const type_label = state.type === "bucket" ? "buckets" : state.type === "container" ? "containers" : state.type === "shop" ? "shops" : "FP codes";
       const all_items = state.type === "bucket"
         ? state.buckets.map(b => ({ id: b.id, label: b.id }))
+        : state.type === "container"
+        ? state.containers.map(c => ({ id: c.id, label: c.id }))
         : state.type === "shop"
         ? state.shops
         : state.fp_codes;
@@ -202,7 +209,9 @@
     function render_grid() {
       const grid = document.getElementById("grid");
       const items = state.type === "bucket"
-        ? state.buckets.filter(b => state.selected_ids.has(b.id)).map(b => ({ id: b.id, value: b.id, label: b.id }))
+        ? state.buckets.filter(b => state.selected_ids.has(b.id)).map(b => ({ id: b.id, value: b.id, label: b.id, name: b.name }))
+        : state.type === "container"
+        ? state.containers.filter(c => state.selected_ids.has(c.id)).map(c => ({ id: c.id, value: c.id, label: c.id, name: c.name }))
         : state.type === "shop"
         ? state.shops.filter(s => state.selected_ids.has(s.id)).map(s => ({ id: s.id, value: `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, "")}roastery-traceability.html?scan=${s.id}`, label: s.label, master_name: s.master_name }))
         : state.fp_codes.filter(f => state.selected_ids.has(f.id)).map(f => ({ id: f.id, value: f.id, label: `${f.id}\n${f.label}`, coffee_name: f.coffee_name, bag_size: f.bag_size }));
@@ -223,7 +232,9 @@
 
       grid.innerHTML = items.map((it, idx) => {
         const tip = state.type === "bucket"
-          ? it.id
+          ? (it.name ? `${it.name} (${it.id})` : it.id)
+          : state.type === "container"
+          ? (it.name ? `${it.id} — ${it.name}` : it.id)
           : state.type === "shop"
           ? `${it.master_name} (${it.id})`
           : `${it.id} · ${it.coffee_name || ""} ${it.bag_size || ""}`.trim();
@@ -259,6 +270,8 @@
         const it = items[idx];
         let base;
         if (state.type === "bucket") {
+          base = it.id;
+        } else if (state.type === "container") {
           base = it.id;
         } else if (state.type === "shop") {
           base = `Shop-${it.master_name}`;

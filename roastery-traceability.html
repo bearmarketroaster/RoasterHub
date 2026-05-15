@@ -229,7 +229,7 @@ async function load_data() {
   state.roast_sessions = roast_sessions || [];
 
   // Get container statuses
-  const { data: container_rows } = await supabaseClient.from("containers").select("id, status, status_changed_at");
+  const { data: container_rows } = await supabaseClient.from("containers").select("id, status, status_changed_at, retired_at").is("retired_at", null);
   const status_map = {};
   (container_rows || []).forEach(c => { status_map[c.id] = { status: c.status || "waiting", status_changed_at: c.status_changed_at }; });
 

@@ -98,6 +98,7 @@ const state = {
   view:           "home",
   roast_sessions: [],
   coffees:        [],
+  containers:     [],
   loading:        true,
   saving:         false,
   session:        new_session(),
@@ -123,6 +124,11 @@ function yield_class(pct) { if (pct===null) return "hint"; if (pct>=80&&pct<=90)
 async function load_data() {
   const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
   state.coffees = (coffees_data || []).map(c => c.name);
+
+  // Load containers list (non-retired) so the user can pick from a dropdown
+  const { data: containers_data } = await supabaseClient.from("containers").select("id, name, status, retired_at").order("id");
+  state.containers = (containers_data || []).filter(c => !c.retired_at);
+
   const { data: sessions, error } = await supabaseClient.from("roast_sessions").select("*, roast_batches(*)").order("date", { ascending: false });
   if (error) { console.error("Failed to load roast sessions:", error); return; }
   state.roast_sessions = (sessions||[]).map(s => ({ ...s, batches: (s.roast_batches||[]).sort((a,b) => a.batch_number - b.batch_number) }));
@@ -258,7 +264,18 @@ function build_step1() {
           </select>
         </div>
         <div><label class="lbl">Roast Date *</label><input type="date" id="s1-date" value="${s.date}" /></div>
-        <div><label class="lbl">Container to Fill *</label><input id="s1-container" value="${esc(s.container_id)}" placeholder="e.g. XL01042601" /></div>
+        <div>
+          <label class="lbl">Container to Fill *</label>
+          <select id="s1-container">
+            <option value="">— Select container —</option>
+            ${state.containers.map(c => {
+              const display = c.name ? `${c.id} — ${c.name}` : c.id;
+              const status_hint = c.status === "active" ? " (currently active)" : c.status === "waiting" ? " (waiting)" : "";
+              return `<option value="${esc(c.id)}" ${s.container_id===c.id?"selected":""}>${esc(display)}${status_hint}</option>`;
+            }).join("")}
+          </select>
+          ${state.containers.length === 0 ? '<p class="hint" style="font-size:11px;margin-top:4px;color:#e05c2a">No containers yet — add some in Settings → Containers.</p>' : ""}
+        </div>
         <div><label class="lbl">Number of Batches *</label><input type="number" id="s1-count" value="${s.batch_count}" min="1" max="20" /></div>
       </div>
       <p id="s1-err" class="err" style="display:none"></p>
@@ -394,7 +411,7 @@ function attach_listeners() {
     const count = Number(document.getElementById("s1-count")?.value)||0;
     const err_el = document.getElementById("s1-err");
     if (!coffee) { err_el.textContent="Please select a coffee."; err_el.style.display="block"; return; }
-    if (!container) { err_el.textContent="Please enter a container ID."; err_el.style.display="block"; return; }
+    if (!container) { err_el.textContent="Please select a container."; err_el.style.display="block"; return; }
     if (count<1) { err_el.textContent="At least one batch required."; err_el.style.display="block"; return; }
     state.session.coffee=coffee; state.session.date=date; state.session.container_id=container;
     state.session.batch_count=count;
