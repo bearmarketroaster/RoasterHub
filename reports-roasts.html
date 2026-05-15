@@ -195,6 +195,114 @@ function build_chart_svg(points, value_key, color, unit) {
   return `<svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${band_rect}${band_line_top}${band_line_bot}${mean_line}${polyline}${dots}${y_labels}${x_labels}</svg>`;
 }
 
+// Build a GitHub-style activity heatmap for a single roaster's sessions over the last 52 weeks
+function build_heatmap(roaster) {
+  // ALL of the roaster's sessions (not just the date-filtered ones), because heatmap is always 52 weeks
+  const all_for_roaster = state.sessions.filter(s => (s.roaster_id || "__unknown__") === roaster.roaster_id);
+
+  // Compute the 52-week window ending today (Sunday-aligned for week columns)
+  const end = new Date();
+  end.setHours(0,0,0,0);
+  // Find the most recent Saturday (end of current week)
+  const end_dow = end.getDay(); // 0=Sun
+  const end_offset = (6 - end_dow + 7) % 7;
+  const end_saturday = new Date(end);
+  end_saturday.setDate(end.getDate() + end_offset);
+  // Start 52 weeks earlier on a Sunday
+  const start_sunday = new Date(end_saturday);
+  start_sunday.setDate(end_saturday.getDate() - 52 * 7 + 1);
+
+  // Aggregate sessions by yyyy-mm-dd
+  const by_day = {};
+  all_for_roaster.forEach(s => {
+    const dt = new Date(s.date + "T00:00:00");
+    if (dt < start_sunday || dt > end_saturday) return;
+    if (!by_day[s.date]) by_day[s.date] = { sessions: 0, kg: 0 };
+    by_day[s.date].sessions += 1;
+    by_day[s.date].kg += s.roasted_weight;
+  });
+
+  // Find max sessions to set intensity scale
+  const max_sessions = Math.max(1, ...Object.values(by_day).map(d => d.sessions));
+
+  // Build a 52×7 grid (weeks × days), columns left-to-right are old→new
+  const CELL = 11, GAP = 2;
+  const cols = 52;
+  const rows = 7;
+  const W = cols * (CELL + GAP);
+  const H = rows * (CELL + GAP);
+
+  // Colour ramp — five steps from very light to dark green
+  const colour = (n) => {
+    if (n === 0) return "#f0ebe4";
+    const t = Math.min(1, n / max_sessions);
+    if (t < 0.25) return "#cce6d4";
+    if (t < 0.5)  return "#9fcfae";
+    if (t < 0.75) return "#6ab584";
+    return "#4a9e6b";
+  };
+
+  // Build cell rects
+  const cells = [];
+  const month_marks = [];   // [{ col, label }] for month labels above the grid
+  let last_month = -1;
+  for (let c = 0; c < cols; c++) {
+    const week_start = new Date(start_sunday);
+    week_start.setDate(start_sunday.getDate() + c * 7);
+    // Record a label when we cross into a new month
+    const this_month = week_start.getMonth();
+    if (this_month !== last_month) {
+      const month_label = week_start.toLocaleDateString(undefined, { month: "short" });
+      month_marks.push({ col: c, label: month_label });
+      last_month = this_month;
+    }
+    for (let r = 0; r < rows; r++) {
+      const dt = new Date(week_start);
+      dt.setDate(week_start.getDate() + r);
+      if (dt > end_saturday) continue;
+      const iso = dt.toISOString().split("T")[0];
+      const stats = by_day[iso] || { sessions: 0, kg: 0 };
+      const x = c * (CELL + GAP);
+      const y = r * (CELL + GAP);
+      const date_label = dt.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+      const tooltip = stats.sessions > 0
+        ? `${date_label} — ${stats.sessions} session${stats.sessions!==1?"s":""}, ${stats.kg.toFixed(1)}kg`
+        : `${date_label} — no roasts`;
+      cells.push(`<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}" rx="2" fill="${colour(stats.sessions)}"><title>${esc(tooltip)}</title></rect>`);
+    }
+  }
+
+  const month_text = month_marks.map(m => `<text x="${m.col * (CELL+GAP)}" y="9" font-size="9" fill="#888">${esc(m.label)}</text>`).join("");
+
+  // Day-of-week labels (Mon, Wed, Fri — keep sparse)
+  const dow_labels = [
+    { r: 1, label: "Mon" },
+    { r: 3, label: "Wed" },
+    { r: 5, label: "Fri" },
+  ];
+  const dow_text = dow_labels.map(d => `<text x="-4" y="${d.r*(CELL+GAP) + CELL - 1}" font-size="9" fill="#888" text-anchor="end">${d.label}</text>`).join("");
+
+  const total_sessions = Object.values(by_day).reduce((s,d) => s+d.sessions, 0);
+  const total_kg = Object.values(by_day).reduce((s,d) => s+d.kg, 0);
+
+  return `
+    <div style="margin-bottom:18px;padding:12px;background:#fafafa;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div style="font-weight:700;font-size:14px">${esc(roaster.name)}</div>
+        <div class="hint" style="font-size:12px">${total_sessions} session${total_sessions!==1?"s":""} · ${total_kg.toFixed(1)}kg in last 52 weeks</div>
+      </div>
+      <div style="overflow-x:auto">
+        <svg viewBox="-28 -2 ${W+32} ${H+14}" style="width:100%;min-width:${W+32}px;height:${H+14}px;display:block">
+          ${month_text}
+          <g transform="translate(0, 12)">
+            ${dow_text}
+            ${cells.join("")}
+          </g>
+        </svg>
+      </div>
+    </div>`;
+}
+
 function build_report() {
   const { report_from, report_to, grouping } = state.ui;
   if (state.sessions.length === 0) return `<div class="card empty"><div class="icon">🔥</div>No roast sessions logged yet.</div>`;
@@ -442,6 +550,13 @@ function build_report() {
           </tbody>
         </table>
       </div>
+    </div>` : ""}
+
+    ${roaster_rows.length > 0 ? `
+    <div class="card mb-16">
+      <div style="font-weight:700;color:#1a1008;margin-bottom:4px;font-size:15px">Roaster Activity</div>
+      <div class="hint" style="font-size:12px;margin-bottom:14px">Last 52 weeks · hover for daily details</div>
+      ${roaster_rows.map(r => build_heatmap(r)).join("")}
     </div>` : ""}
 
     ${coffee_cards}
