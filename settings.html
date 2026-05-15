@@ -591,11 +591,12 @@ function build_users_section() {
   const users_html = users.map(u => {
     const is_self = state.current_user?.id === u.user_id;
     return `
-      <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4">
+      <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4">
         <div>
           <div style="font-size:13px;font-weight:600">${esc(u.email)}${is_self?` <span class="hint" style="font-size:11px;font-weight:400">(you)</span>`:""}</div>
           <div style="font-size:11px;color:#aaa">Joined ${u.created_at?new Date(u.created_at).toLocaleDateString():"—"}</div>
         </div>
+        <input type="text" data-user-name="${u.user_id}" value="${esc(u.display_name||"")}" placeholder="Display name…" style="font-size:12px;padding:4px 8px" />
         <select class="user-role-select" data-uid="${u.user_id}" ${is_self?"disabled":""} style="font-size:12px;width:110px">
           <option value="admin"  ${u.role==="admin" ?"selected":""}>Admin</option>
           <option value="packer" ${u.role==="packer"?"selected":""}>Packer</option>
@@ -625,8 +626,9 @@ function build_users_section() {
 
       <div class="section-label">Active Users</div>
       <div class="card-white" style="margin-bottom:0">
-        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;background:#f5f0eb;padding:8px 12px;border-bottom:1px solid #e0d5c5">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;background:#f5f0eb;padding:8px 12px;border-bottom:1px solid #e0d5c5">
           <span class="lbl" style="margin:0">Email</span>
+          <span class="lbl" style="margin:0">Display Name</span>
           <span class="lbl" style="margin:0">Role</span>
           <span></span>
         </div>
@@ -1133,6 +1135,16 @@ function attach_listeners() {
   app.querySelectorAll(".user-role-select").forEach(sel => sel.addEventListener("change", e => {
     update_user_role(sel.dataset.uid, e.target.value);
   }));
+  app.querySelectorAll("[data-user-name]").forEach(inp => {
+    inp.addEventListener("change", async e => {
+      const uid = inp.dataset.userName;
+      const name = e.target.value.trim() || null;
+      const { error } = await supabaseClient.from("user_roles").update({ display_name: name }).eq("user_id", uid);
+      if (error) { alert("Failed to save name: " + error.message); return; }
+      const u = state.user_roles.find(r => r.user_id === uid);
+      if (u) u.display_name = name;
+    });
+  });
   app.querySelectorAll("[data-remove-user]").forEach(btn => btn.addEventListener("click", () => {
     const [uid, email] = btn.dataset.removeUser.split("__");
     remove_user(uid, email);
