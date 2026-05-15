@@ -35,7 +35,28 @@
     .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
     .hint { color: #888; font-size: 13px; }
     .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
-    @media (max-width: 600px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .content { padding: 16px; } }
+    .section-title { font-weight: 700; color: #1a1008; margin-bottom: 12px; font-size: 15px; }
+    .supplier-card { border: 1px solid #f0ebe4; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+    .supplier-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+    .supplier-name { font-weight: 700; font-size: 15px; }
+    .supplier-flag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
+    .supplier-flag-active { background: #edf7f0; color: #4a9e6b; }
+    .supplier-flag-watch { background: #fff8ee; color: #c8a96e; }
+    .supplier-flag-stale { background: #fbeae5; color: #e05c2a; }
+    .supplier-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; font-size: 13px; }
+    .supplier-stat-label { font-size: 11px; color: #888; }
+    .supplier-stat-val { font-weight: 700; color: #1a1008; }
+    .supplier-coffees { margin-top: 8px; font-size: 12px; color: #555; }
+    .pill { display: inline-block; background: #f5f0eb; color: #5a3e1b; padding: 2px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 10px 8px; background: #f5f0eb; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e0d5c5; }
+    td { padding: 10px 8px; border-bottom: 1px solid #f0ebe4; vertical-align: middle; }
+    tr:hover td { background: #fdfaf5; }
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .filters select, .filters input { max-width: 220px; padding: 6px 10px; font-size: 13px; }
+    .invoice-link { background: #fff8ee; color: #c8a96e; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; text-decoration: none; cursor: pointer; border: none; }
+    .invoice-link:hover { background: #c8a96e; color: #fff; }
+    @media (max-width: 600px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .content { padding: 16px; } table { font-size: 12px; } th, td { padding: 8px 6px; } }
   </style>
 </head>
 <body>
@@ -52,14 +73,20 @@ const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replac
 
 const state = {
   stock_adjustments: [],
+  deliveries: [],
   loading: true,
-  ui: { report_from: today(), report_to: today() },
+  ui: {
+    report_from: today(),
+    report_to: today(),
+    deliveries_supplier: "all",
+    deliveries_coffee: "all",
+  },
 };
 
 async function init() {
   await load_data();
-  if (state.stock_adjustments.length) {
-    const d = new Date(); d.setDate(d.getDate()-30);
+  if (state.stock_adjustments.length || state.deliveries.length) {
+    const d = new Date(); d.setDate(d.getDate()-90);
     state.ui.report_from = d.toISOString().split("T")[0];
     state.ui.report_to = today();
   }
@@ -68,8 +95,31 @@ async function init() {
 }
 
 async function load_data() {
-  const { data: adjustments } = await supabaseClient.from("stock_adjustments").select("*").order("date", { ascending: false });
+  const [{ data: adjustments }, { data: deliveries }] = await Promise.all([
+    supabaseClient.from("stock_adjustments").select("*").order("date", { ascending: false }),
+    supabaseClient.from("stock_deliveries").select("*, stock_delivery_items(*)").order("date", { ascending: false }),
+  ]);
   state.stock_adjustments = adjustments || [];
+  state.deliveries = (deliveries || []).map(d => ({ ...d, items: d.stock_delivery_items || [] }));
+}
+
+async function download_invoice(invoice_path) {
+  const { data, error } = await supabaseClient.storage.from("invoices").download(invoice_path);
+  if (error) { alert("Failed to download: " + error.message); return; }
+  const url = URL.createObjectURL(data);
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function days_since(date_str) {
+  if (!date_str) return null;
+  const ms = Date.now() - new Date(date_str).getTime();
+  return Math.floor(ms / (1000 * 60 * 60 * 24));
+}
+
+function avg(arr) {
+  if (arr.length === 0) return null;
+  return arr.reduce((a,b) => a+b, 0) / arr.length;
 }
 
 function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
@@ -90,20 +140,24 @@ function build_app() {
 
 function build_stock_report() {
   const { report_from, report_to } = state.ui;
-  if (state.stock_adjustments.length === 0) return `<div class="card empty"><div class="icon">🌱</div>No stock movements recorded yet.</div>`;
-  const first_date = state.stock_adjustments.reduce((min,a) => a.date<min ? a.date : min, state.stock_adjustments[0].date);
+  if (state.stock_adjustments.length === 0 && state.deliveries.length === 0) {
+    return `<div class="card empty"><div class="icon">🌱</div>No stock movements recorded yet.</div>`;
+  }
+  const all_dates = [...state.stock_adjustments.map(a => a.date), ...state.deliveries.map(d => d.date)].filter(Boolean);
+  const first_date = all_dates.length ? all_dates.reduce((min, d) => d < min ? d : min) : today();
 
-  const filtered = state.stock_adjustments.filter(a => a.date >= report_from && a.date <= report_to);
+  const filtered_adj = state.stock_adjustments.filter(a => a.date >= report_from && a.date <= report_to);
+  const filtered_deliveries = state.deliveries.filter(d => d.date >= report_from && d.date <= report_to);
 
-  const total_in  = filtered.filter(a => a.change_kg > 0).reduce((s,a) => s + a.change_kg, 0);
-  const total_out = filtered.filter(a => a.change_kg < 0).reduce((s,a) => s + Math.abs(a.change_kg), 0);
+  // Top summary
+  const total_in  = filtered_adj.filter(a => a.change_kg > 0).reduce((s,a) => s + a.change_kg, 0);
+  const total_out = filtered_adj.filter(a => a.change_kg < 0).reduce((s,a) => s + Math.abs(a.change_kg), 0);
   const net       = total_in - total_out;
-  const manual_count = filtered.filter(a => !a.auto).length;
-  const auto_count   = filtered.filter(a =>  a.auto).length;
 
+  // By reason
   const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", other:"📝 Other" };
   const by_reason = {};
-  filtered.forEach(a => {
+  filtered_adj.forEach(a => {
     if (!by_reason[a.reason]) by_reason[a.reason] = { in:0, out:0, count:0 };
     if (a.change_kg > 0) by_reason[a.reason].in  += a.change_kg;
     else                 by_reason[a.reason].out += Math.abs(a.change_kg);
@@ -111,8 +165,9 @@ function build_stock_report() {
   });
   const reason_rows = Object.entries(by_reason).sort((a,b) => (b[1].in+b[1].out) - (a[1].in+a[1].out));
 
+  // By coffee
   const by_coffee = {};
-  filtered.forEach(a => {
+  filtered_adj.forEach(a => {
     if (!by_coffee[a.coffee]) by_coffee[a.coffee] = { in:0, out:0, count:0 };
     if (a.change_kg > 0) by_coffee[a.coffee].in  += a.change_kg;
     else                 by_coffee[a.coffee].out += Math.abs(a.change_kg);
@@ -120,7 +175,16 @@ function build_stock_report() {
   });
   const coffee_rows = Object.entries(by_coffee).sort((a,b) => (b[1].in+b[1].out) - (a[1].in+a[1].out));
 
-  const recent = filtered.slice(0, 50);
+  const suppliers = build_supplier_stats(filtered_deliveries);
+  const coffee_cadence = build_coffee_cadence(filtered_deliveries);
+
+  const all_suppliers_list = [...new Set(state.deliveries.map(d => d.supplier).filter(Boolean))].sort();
+  const all_coffees_list = [...new Set(state.deliveries.flatMap(d => d.items.map(i => i.coffee)).filter(Boolean))].sort();
+  let deliveries_view = filtered_deliveries;
+  if (state.ui.deliveries_supplier !== "all") deliveries_view = deliveries_view.filter(d => d.supplier === state.ui.deliveries_supplier);
+  if (state.ui.deliveries_coffee !== "all")   deliveries_view = deliveries_view.filter(d => d.items.some(i => i.coffee === state.ui.deliveries_coffee));
+
+  const recent = filtered_adj.slice(0, 50);
   const recent_html = recent.map(a => `
     <div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #f0ebe4;font-size:13px">
       <span class="tag" style="background:${a.change_kg>0?"#edf7f0":"#fff0ee"};color:${a.change_kg>0?"#4a9e6b":"#e05c2a"};min-width:70px;text-align:center;font-weight:600">${a.change_kg>0?"+":""}${Number(a.change_kg).toFixed(1)}kg</span>
@@ -145,11 +209,103 @@ function build_stock_report() {
       <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📥</div><div style="font-size:22px;font-weight:700;color:#4a9e6b">+${total_in.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Stock In</div></div>
       <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📤</div><div style="font-size:22px;font-weight:700;color:#e05c2a">-${total_out.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Stock Out</div></div>
       <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">⚖️</div><div style="font-size:22px;font-weight:700;color:${net>=0?"#1a1008":"#e05c2a"}">${net>=0?"+":""}${net.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Net Change</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📝</div><div style="font-size:22px;font-weight:700;color:#1a1008">${manual_count}</div><div style="font-size:11px;color:#888;margin-top:2px">Manual / ${auto_count} Auto</div></div>
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📦</div><div style="font-size:22px;font-weight:700;color:#1a1008">${filtered_deliveries.length}</div><div style="font-size:11px;color:#888;margin-top:2px">Deliveries</div></div>
     </div>
 
     <div class="card mb-16">
-      <div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">By Reason</div>
+      <div class="section-title">Per-Supplier Scorecard</div>
+      ${suppliers.length === 0 ? '<p class="hint">No deliveries in this range.</p>' : suppliers.map(s => `
+        <div class="supplier-card">
+          <div class="supplier-header">
+            <div class="supplier-name">${esc(s.supplier)}</div>
+            <span class="supplier-flag supplier-flag-${s.flag}">${s.flag === "active" ? "● Active" : s.flag === "watch" ? "● Watch" : "● Stale"}</span>
+          </div>
+          <div class="supplier-stats">
+            <div><div class="supplier-stat-label">Deliveries</div><div class="supplier-stat-val">${s.delivery_count}</div></div>
+            <div><div class="supplier-stat-label">Total kg</div><div class="supplier-stat-val">${s.total_kg.toFixed(1)}kg</div></div>
+            <div><div class="supplier-stat-label">Avg / Delivery</div><div class="supplier-stat-val">${s.avg_kg.toFixed(1)}kg</div></div>
+            <div><div class="supplier-stat-label">Last Delivery</div><div class="supplier-stat-val">${s.last_date || "—"}</div></div>
+            <div><div class="supplier-stat-label">Days Since</div><div class="supplier-stat-val">${s.days_since !== null ? s.days_since + "d" : "—"}</div></div>
+          </div>
+          ${s.coffees.length > 0 ? `<div class="supplier-coffees">Coffees: ${s.coffees.map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>` : ""}
+        </div>`).join("")}
+    </div>
+
+    <div class="card mb-16">
+      <div class="section-title">Per-Coffee Cadence</div>
+      ${coffee_cadence.length === 0 ? '<p class="hint">No deliveries in this range.</p>' : `
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Coffee</th>
+                <th>Suppliers</th>
+                <th>Deliveries</th>
+                <th>Total kg</th>
+                <th>Avg Gap</th>
+                <th>Last Delivery</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${coffee_cadence.map(c => `
+                <tr>
+                  <td style="font-weight:600">${esc(c.coffee)}</td>
+                  <td>${c.suppliers.map(s => `<span class="pill">${esc(s)}</span>`).join("")}</td>
+                  <td style="text-align:center">${c.delivery_count}</td>
+                  <td>${c.total_kg.toFixed(1)}kg</td>
+                  <td>${c.avg_gap_days !== null ? c.avg_gap_days.toFixed(0) + "d" : "—"}</td>
+                  <td>${c.last_date || "—"}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>`}
+    </div>
+
+    <div class="card mb-16">
+      <div class="section-title">Delivery Activity (${deliveries_view.length})</div>
+      <div class="filters">
+        <select id="filter-supplier">
+          <option value="all">All suppliers</option>
+          ${all_suppliers_list.map(s => `<option value="${esc(s)}" ${state.ui.deliveries_supplier===s?"selected":""}>${esc(s)}</option>`).join("")}
+        </select>
+        <select id="filter-coffee">
+          <option value="all">All coffees</option>
+          ${all_coffees_list.map(c => `<option value="${esc(c)}" ${state.ui.deliveries_coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+        </select>
+      </div>
+      ${deliveries_view.length === 0 ? '<p class="hint">No deliveries match.</p>' : `
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Supplier</th>
+                <th>Coffees</th>
+                <th>Total kg</th>
+                <th>Invoice</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${deliveries_view.map(d => {
+                const items = d.items || [];
+                const total_kg = items.reduce((s, i) => s + (Number(i.weight_kg) || 0), 0);
+                const coffees_in_delivery = [...new Set(items.map(i => i.coffee).filter(Boolean))];
+                return `
+                  <tr>
+                    <td>${d.date}</td>
+                    <td style="font-weight:600">${esc(d.supplier || "—")}</td>
+                    <td>${coffees_in_delivery.map(c => `<span class="pill">${esc(c)}</span>`).join("") || '<span class="hint">—</span>'}</td>
+                    <td>${total_kg.toFixed(1)}kg</td>
+                    <td>${d.invoice_path ? `<button class="invoice-link" data-invoice="${esc(d.invoice_path)}">📄 ${esc(d.invoice_ref || "View")}</button>` : (d.invoice_ref ? esc(d.invoice_ref) : '<span class="hint">—</span>')}</td>
+                  </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>`}
+    </div>
+
+    <div class="card mb-16">
+      <div class="section-title">By Reason</div>
       ${reason_rows.length===0?'<p class="hint">No movements in this range.</p>':reason_rows.map(([r,d]) => `
         <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0ebe4;font-size:13px">
           <span style="font-weight:500">${esc(reason_labels[r]||r)}</span>
@@ -160,7 +316,7 @@ function build_stock_report() {
     </div>
 
     <div class="card mb-16">
-      <div style="font-weight:700;color:#1a1008;margin-bottom:14px;font-size:15px">By Coffee</div>
+      <div class="section-title">By Coffee</div>
       ${coffee_rows.length===0?'<p class="hint">No movements in this range.</p>':coffee_rows.map(([c,d]) => `
         <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0ebe4;font-size:13px">
           <span style="font-weight:500">${esc(c)}</span>
@@ -171,9 +327,75 @@ function build_stock_report() {
     </div>
 
     <div class="card">
-      <div style="font-weight:700;color:#1a1008;margin-bottom:6px;font-size:15px">Recent Movements ${recent.length<filtered.length?`<span class="hint" style="font-weight:400;font-size:12px">(latest 50 of ${filtered.length})</span>`:""}</div>
+      <div class="section-title">Recent Movements ${recent.length<filtered_adj.length?`<span class="hint" style="font-weight:400;font-size:12px">(latest 50 of ${filtered_adj.length})</span>`:""}</div>
       ${recent_html||'<p class="hint">No movements in this range.</p>'}
     </div>`;
+}
+
+function build_supplier_stats(deliveries) {
+  const map = {};
+  deliveries.forEach(d => {
+    if (!d.supplier) return;
+    if (!map[d.supplier]) map[d.supplier] = { supplier: d.supplier, deliveries: [], total_kg: 0, coffees: new Set() };
+    map[d.supplier].deliveries.push(d);
+    (d.items || []).forEach(i => {
+      map[d.supplier].total_kg += Number(i.weight_kg) || 0;
+      if (i.coffee) map[d.supplier].coffees.add(i.coffee);
+    });
+  });
+  return Object.values(map).map(s => {
+    const delivery_count = s.deliveries.length;
+    const avg_kg = delivery_count > 0 ? s.total_kg / delivery_count : 0;
+    const last_date = s.deliveries.reduce((max, d) => (!max || d.date > max) ? d.date : max, null);
+    const ds = days_since(last_date);
+    let flag;
+    if (ds === null) flag = "stale";
+    else if (ds <= 60) flag = "active";
+    else if (ds <= 120) flag = "watch";
+    else flag = "stale";
+    return {
+      supplier: s.supplier,
+      delivery_count,
+      total_kg: s.total_kg,
+      avg_kg,
+      last_date,
+      days_since: ds,
+      coffees: [...s.coffees].sort(),
+      flag,
+    };
+  }).sort((a, b) => {
+    const flag_rank = { active: 0, watch: 1, stale: 2 };
+    return flag_rank[a.flag] - flag_rank[b.flag] || b.total_kg - a.total_kg;
+  });
+}
+
+function build_coffee_cadence(deliveries) {
+  const map = {};
+  deliveries.forEach(d => {
+    (d.items || []).forEach(i => {
+      if (!i.coffee) return;
+      if (!map[i.coffee]) map[i.coffee] = { coffee: i.coffee, dates: [], total_kg: 0, suppliers: new Set() };
+      map[i.coffee].dates.push(d.date);
+      map[i.coffee].total_kg += Number(i.weight_kg) || 0;
+      if (d.supplier) map[i.coffee].suppliers.add(d.supplier);
+    });
+  });
+  return Object.values(map).map(c => {
+    const dates_sorted = [...new Set(c.dates)].sort();
+    let gaps = [];
+    for (let i = 1; i < dates_sorted.length; i++) {
+      const ms = new Date(dates_sorted[i]).getTime() - new Date(dates_sorted[i-1]).getTime();
+      gaps.push(ms / (1000 * 60 * 60 * 24));
+    }
+    return {
+      coffee: c.coffee,
+      delivery_count: c.dates.length,
+      total_kg: c.total_kg,
+      avg_gap_days: gaps.length > 0 ? avg(gaps) : null,
+      last_date: dates_sorted[dates_sorted.length - 1] || null,
+      suppliers: [...c.suppliers].sort(),
+    };
+  }).sort((a, b) => b.total_kg - a.total_kg);
 }
 
 function attach_listeners() {
@@ -189,6 +411,9 @@ function attach_listeners() {
     state.ui.report_to = today();
     render();
   }));
+  app.querySelector("#filter-supplier")?.addEventListener("change", e => { state.ui.deliveries_supplier = e.target.value; render(); });
+  app.querySelector("#filter-coffee")?.addEventListener("change", e => { state.ui.deliveries_coffee = e.target.value; render(); });
+  app.querySelectorAll("[data-invoice]").forEach(btn => btn.addEventListener("click", () => download_invoice(btn.dataset.invoice)));
 }
 </script>
 </body>
