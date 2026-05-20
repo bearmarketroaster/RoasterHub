@@ -288,7 +288,9 @@ function build_step1() {
           </select>
           ${state.containers.length === 0 ? '<p class="hint" style="font-size:11px;margin-top:4px;color:#e05c2a">No containers yet — add some in Settings → Containers.</p>' : ""}
         </div>`}
-        <div><label class="lbl">Number of Batches *</label><input type="number" id="s1-count" value="${s.batch_count}" min="1" max="20" /></div>
+        ${s.is_test
+          ? `<div><label class="lbl">Number of Batches</label><input type="number" value="1" disabled style="background:#f5f0eb;color:#888" /><p class="hint" style="font-size:11px;margin-top:4px">Test roasts are limited to 1 batch. Log more as separate sessions.</p></div>`
+          : `<div><label class="lbl">Number of Batches *</label><input type="number" id="s1-count" value="${s.batch_count}" min="1" max="20" /></div>`}
       </div>
       <p id="s1-err" class="err" style="display:none"></p>
       <div style="display:flex;gap:8px;margin-top:16px">
@@ -419,14 +421,19 @@ function attach_listeners() {
 
   app.querySelector("#s1-is-test")?.addEventListener("change", e => {
     state.session.is_test = e.target.checked;
-    if (e.target.checked) state.session.container_id = "";
+    if (e.target.checked) {
+      state.session.container_id = "";
+      state.session.batch_count = 1;
+      state.session.batches = state.session.batches.slice(0, 1);
+      if (state.session.batches.length === 0) state.session.batches = [{cropster_id:"", green_weight:""}];
+    }
     render();
   });
   app.querySelector("#s1-next")?.addEventListener("click", () => {
     const coffee = document.getElementById("s1-coffee")?.value;
     const date = document.getElementById("s1-date")?.value;
     const container = document.getElementById("s1-container")?.value.trim() || "";
-    const count = Number(document.getElementById("s1-count")?.value)||0;
+    const count = state.session.is_test ? 1 : (Number(document.getElementById("s1-count")?.value)||0);
     const err_el = document.getElementById("s1-err");
     if (!coffee) { err_el.textContent="Please select a coffee."; err_el.style.display="block"; return; }
     if (!state.session.is_test && !container) { err_el.textContent="Please select a container."; err_el.style.display="block"; return; }
