@@ -8,24 +8,24 @@
   <script src="config.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #1a1008; }
-    .login-card { background: #fff; border-radius: 16px; padding: 40px 36px; width: 100%; max-width: 400px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #1a1a1a; }
+    .login-card { background: #fff; border-radius: 16px; padding: 40px 36px; width: 100%; max-width: 400px; box-shadow: 0 4px 24px rgba(0,0,0,0.06); border: 1px solid #e8e6e1; }
     .brand { text-align: center; margin-bottom: 32px; }
     .brand-logo { font-size: 48px; margin-bottom: 10px; }
-    .brand-name { font-size: 22px; font-weight: 700; color: #1a1008; }
-    .brand-sub  { font-size: 13px; color: #c8a96e; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
+    .brand-name { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .brand-sub  { font-size: 13px; color: #999; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
     .field { margin-bottom: 16px; }
-    label  { display: block; font-size: 12px; color: #888; margin-bottom: 5px; font-weight: 500; }
-    input  { width: 100%; padding: 11px 14px; border-radius: 8px; border: 1px solid #ddd; font-size: 15px; font-family: inherit; box-sizing: border-box; }
-    input:focus { outline: none; border-color: #c8a96e; box-shadow: 0 0 0 3px rgba(200,169,110,0.15); }
-    .btn-login { width: 100%; padding: 13px; background: #1a1008; color: #e8d5b0; border: none; border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 8px; font-family: inherit; }
-    .btn-login:hover    { background: #2d1e0f; }
-    .btn-login:disabled { background: #888; cursor: not-allowed; }
-    .msg-err  { background: #fff0ee; border: 1px solid #e05c2a; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #e05c2a; margin-top: 14px; }
-    .msg-info { background: #fff8ee; border: 1px solid #c8a96e; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #5a3e1b; margin-top: 14px; }
-    .login-footer { margin-top: 24px; text-align: center; font-size: 12px; color: #c8a96e; }
-    h2 { font-size: 18px; margin-bottom: 6px; }
-    .hint { font-size: 13px; color: #888; margin-bottom: 18px; line-height: 1.5; }
+    label  { display: block; font-size: 12px; color: #666; margin-bottom: 5px; font-weight: 500; }
+    input  { width: 100%; padding: 11px 14px; border-radius: 8px; border: 1px solid #e8e6e1; font-size: 15px; font-family: inherit; box-sizing: border-box; background: #fff; color: #1a1a1a; }
+    input:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
+    .btn-login { width: 100%; padding: 13px; background: #1a1a1a; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 8px; font-family: inherit; transition: background 0.15s; }
+    .btn-login:hover    { background: #000; }
+    .btn-login:disabled { background: #999; cursor: not-allowed; }
+    .msg-err  { background: #fdecea; border: 1px solid #dc2626; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #dc2626; margin-top: 14px; }
+    .msg-info { background: #f4f2ed; border: 1px solid #d4d1ca; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #1a1a1a; margin-top: 14px; }
+    .login-footer { margin-top: 24px; text-align: center; font-size: 12px; color: #999; }
+    h2 { font-size: 18px; margin-bottom: 6px; color: #1a1a1a; }
+    .hint { font-size: 13px; color: #666; margin-bottom: 18px; line-height: 1.5; }
   </style>
 </head>
 <body>
@@ -95,7 +95,7 @@
         <div class="field"><label for="email">Email</label><input type="email" id="email" placeholder="you@bearmarket.ie" autocomplete="email"></div>
         <div class="field"><label for="password">Password</label><input type="password" id="password" placeholder="••••••••" autocomplete="current-password"></div>
         <button class="btn-login" id="login-btn">Log In</button>
-        <div style="text-align:center;margin-top:14px"><a href="#" id="forgot-link" style="font-size:13px;color:#c8a96e;text-decoration:none;font-weight:500">Forgot your password?</a></div>`;
+        <div style="text-align:center;margin-top:14px"><a href="#" id="forgot-link" style="font-size:13px;color:#1a1a1a;text-decoration:underline;font-weight:500">Forgot your password?</a></div>`;
       document.getElementById("forgot-link")?.addEventListener("click", e => { e.preventDefault(); renderForgot(); });
       const emailEl    = document.getElementById("email");
       const passwordEl = document.getElementById("password");
@@ -127,7 +127,7 @@
         <p class="hint">Enter your email and we'll send you a link to reset your password.</p>
         <div class="field"><label for="forgot-email">Email</label><input type="email" id="forgot-email" placeholder="you@bearmarket.ie" autocomplete="email"></div>
         <button class="btn-login" id="forgot-btn">Send Reset Link</button>
-        <div style="text-align:center;margin-top:14px"><a href="#" id="back-to-login" style="font-size:13px;color:#c8a96e;text-decoration:none;font-weight:500">← Back to log in</a></div>`;
+        <div style="text-align:center;margin-top:14px"><a href="#" id="back-to-login" style="font-size:13px;color:#1a1a1a;text-decoration:underline;font-weight:500">← Back to log in</a></div>`;
       const emailEl = document.getElementById("forgot-email");
       const btn     = document.getElementById("forgot-btn");
       async function doReset() {
