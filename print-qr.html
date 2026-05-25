@@ -71,7 +71,7 @@
         <option value="shop">Shops</option>
       </select>
       <label>Size (mm)</label>
-      <input type="number" id="size-input" value="40" min="10" max="120" step="1" style="width:64px" />
+      <input type="number" id="size-input" value="38" min="10" max="120" step="1" style="width:64px" />
       <div class="flex gap-6" style="display:flex;gap:4px">
         <button class="size-preset" data-size="20">20</button>
         <button class="size-preset" data-size="30">30</button>
@@ -84,7 +84,7 @@
   </div>
 
   <div class="picker" id="picker"></div>
-  <div class="sheet"><p style="text-align:center;color:#888;font-size:13px;margin-bottom:14px">💡 Click any QR to download as PNG · Or "Print All" for the whole sheet</p><div id="grid" class="qr-grid"></div></div>
+  <div class="sheet"><p style="text-align:center;color:#666;font-size:13px;margin-bottom:14px">💡 Click any QR to print just that one · Or "Print All" for the whole sheet</p><div id="grid" class="qr-grid"></div></div>
 
   <script>
     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -99,7 +99,7 @@
 
     const state = {
       type: init_type,
-      size_mm: 40,
+      size_mm: 38,
       coffee_filter: "all",
       buckets: [],
       containers: [],
@@ -294,86 +294,22 @@
           if (img) img.alt = el.dataset.value;
         }, 0);
       });
-      // Click-to-download: left-click downloads the QR + label as a PNG with a friendly filename
+      // Click-to-print: left-click a tile to print just that one QR (browser print dialog opens).
+      // User can choose their Zebra (or Save as PDF) from there.
       grid.querySelectorAll(".qr-tile").forEach(tile => tile.addEventListener("click", e => {
         if (e.button !== 0) return;
-        const src_canvas = tile.querySelector("canvas");
-        if (!src_canvas) return;
-        const idx = Number(tile.dataset.idx);
-        const it = items[idx];
-
-        // Build the label text — same logic as on-screen labels
-        let primary = "", secondary = "";
-        if (state.type === "container") {
-          primary = it.id;
-          secondary = it.name || "";
-        } else if (state.type === "bucket") {
-          primary = it.name || it.id;
-          secondary = it.name ? it.id : "";
-        } else if (state.type === "shop") {
-          primary = it.master_name || "";
-        } else if (state.type === "fp") {
-          primary = it.id;
-          const parts = [it.coffee_name, it.bag_size].filter(Boolean).join(" · ");
-          secondary = parts;
-        }
-
-        // Filename uses friendly name when available
-        let base;
-        if (state.type === "bucket") {
-          base = it.name ? `${it.name}-${it.id}` : it.id;
-        } else if (state.type === "container") {
-          base = it.name ? `${it.id}-${it.name}` : it.id;
-        } else if (state.type === "shop") {
-          base = `Shop-${it.master_name}`;
-        } else {
-          const parts = [it.coffee_name, it.bag_size].filter(Boolean);
-          base = parts.length ? parts.join(" ") : it.id;
-        }
-        const filename = `${base} ${state.size_mm}mm`.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_\-.]/g, "") + ".png";
-
-        // Compose QR + label into a new canvas
-        const qr_size = src_canvas.width;
-        const padding = Math.round(qr_size * 0.04);
-        const primary_pt = Math.round(qr_size * 0.09);
-        const secondary_pt = Math.round(qr_size * 0.065);
-        const line_gap = Math.round(qr_size * 0.03);
-        const label_height = primary
-          ? padding + primary_pt + (secondary ? line_gap + secondary_pt : 0) + padding
-          : 0;
-        const composite = document.createElement("canvas");
-        composite.width = qr_size;
-        composite.height = qr_size + label_height;
-        const ctx = composite.getContext("2d");
-        // White background
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, composite.width, composite.height);
-        // Draw QR
-        ctx.drawImage(src_canvas, 0, 0);
-        // Draw label
-        if (primary) {
-          ctx.fillStyle = "#1a1a1a";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "top";
-          ctx.font = `bold ${primary_pt}px system-ui, sans-serif`;
-          ctx.fillText(primary, composite.width / 2, qr_size + padding, qr_size - padding * 2);
-          if (secondary) {
-            ctx.fillStyle = "#666666";
-            ctx.font = `${secondary_pt}px system-ui, sans-serif`;
-            ctx.fillText(secondary, composite.width / 2, qr_size + padding + primary_pt + line_gap, qr_size - padding * 2);
-          }
-        }
-
-        composite.toBlob(blob => {
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }, "image/png");
+        document.querySelectorAll(".qr-tile.printing-only").forEach(t => t.classList.remove("printing-only"));
+        tile.classList.add("printing-only");
+        document.body.classList.add("print-single");
+        // Print after a tick so the class application is committed
+        setTimeout(() => {
+          window.print();
+          // Clean up afterward
+          setTimeout(() => {
+            document.body.classList.remove("print-single");
+            tile.classList.remove("printing-only");
+          }, 100);
+        }, 50);
       }));
     }
   </script>
