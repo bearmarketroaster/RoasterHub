@@ -34,7 +34,13 @@
     .qr-tile.printing-only { /* added during single-tile print */ }
     body.print-single .qr-tile:not(.printing-only) { display: none !important; }
     .qr-tile .qr-canvas { width: var(--qr-size, 140px); height: var(--qr-size, 140px); margin: 0 auto; }
-    .qr-tile .qr-canvas img, .qr-tile .qr-canvas canvas { width: 100% !important; height: 100% !important; }
+    .qr-tile .qr-canvas img, .qr-tile .qr-canvas canvas {
+      width: 100% !important;
+      height: 100% !important;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+      image-rendering: pixelated;
+    }
     .qr-label { margin-top: 6px; line-height: 1.2; }
     .qr-label-primary { font-weight: 700; font-size: var(--qr-label-primary-size, 11pt); color: #1a1a1a; word-break: break-word; }
     .qr-label-secondary { font-size: var(--qr-label-secondary-size, 8pt); color: #666; margin-top: 2px; word-break: break-word; }
@@ -221,9 +227,10 @@
 
       // Use mm for physical print sizing — browsers translate to pixels accurately
       grid.style.setProperty("--qr-size", state.size_mm + "mm");
-      // QR canvas pixel size — make it generous so it stays sharp at any print size
-      // Roughly 5 pixels per mm gives 200dpi-quality output
-      const px = Math.max(80, Math.round(state.size_mm * 6));
+      // QR canvas pixel size — generous resolution for sharp printing on thermal label printers (Zebra, Brother, etc.)
+      // ~24 pixels per mm gives roughly 600 DPI source, which downscales cleanly to any printer
+      // (Zebra ZDesigner is typically 203 or 300 DPI native)
+      const px = Math.max(160, Math.round(state.size_mm * 24));
       grid.style.setProperty("--qr-canvas-px", px);
       grid.style.setProperty("--qr-label-size", Math.max(7, Math.round(state.size_mm / 4)) + "pt");
       // Primary label scales with QR size for readable stickers
@@ -267,12 +274,13 @@
 
       grid.querySelectorAll(".qr-canvas").forEach(el => {
         el.innerHTML = "";
-        const canvas_px = Math.max(80, Math.round(state.size_mm * 6));
+        // Render the QR at ~600 DPI source resolution for crisp output on Zebra/Brother thermal printers
+        const canvas_px = Math.max(160, Math.round(state.size_mm * 24));
         new window.QRCode(el, {
           text: el.dataset.value,
           width: canvas_px,
           height: canvas_px,
-          colorDark: "#1a1008",
+          colorDark: "#1a1a1a",
           colorLight: "#ffffff",
           correctLevel: window.QRCode.CorrectLevel.H,
         });
