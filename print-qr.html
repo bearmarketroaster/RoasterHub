@@ -227,10 +227,10 @@
 
       // Use mm for physical print sizing — browsers translate to pixels accurately
       grid.style.setProperty("--qr-size", state.size_mm + "mm");
-      // QR canvas pixel size — generous resolution for sharp printing on thermal label printers (Zebra, Brother, etc.)
-      // ~24 pixels per mm gives roughly 600 DPI source, which downscales cleanly to any printer
-      // (Zebra ZDesigner is typically 203 or 300 DPI native)
-      const px = Math.max(160, Math.round(state.size_mm * 24));
+      // QR canvas pixel size — target the native resolution of common thermal printers (203 DPI = ~8 dots/mm).
+      // Matching the printer's exact dot pitch avoids resampling fuzz on QR module edges.
+      // 203 DPI = 7.99 px/mm. Round to 8 px/mm for clean math.
+      const px = Math.max(160, Math.round(state.size_mm * 8));
       grid.style.setProperty("--qr-canvas-px", px);
       grid.style.setProperty("--qr-label-size", Math.max(7, Math.round(state.size_mm / 4)) + "pt");
       // Primary label scales with QR size for readable stickers
@@ -274,8 +274,9 @@
 
       grid.querySelectorAll(".qr-canvas").forEach(el => {
         el.innerHTML = "";
-        // Render the QR at ~600 DPI source resolution for crisp output on Zebra/Brother thermal printers
-        const canvas_px = Math.max(160, Math.round(state.size_mm * 24));
+        // Render at 8 px/mm — matches Zebra's 203 DPI native resolution exactly.
+        // Avoids the driver having to upscale or downsample, which would blur module edges.
+        const canvas_px = Math.max(160, Math.round(state.size_mm * 8));
         new window.QRCode(el, {
           text: el.dataset.value,
           width: canvas_px,
