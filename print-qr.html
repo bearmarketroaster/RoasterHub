@@ -35,6 +35,9 @@
     body.print-single .qr-tile:not(.printing-only) { display: none !important; }
     .qr-tile .qr-canvas { width: var(--qr-size, 140px); height: var(--qr-size, 140px); margin: 0 auto; }
     .qr-tile .qr-canvas img, .qr-tile .qr-canvas canvas { width: 100% !important; height: 100% !important; }
+    .qr-label { margin-top: 6px; line-height: 1.2; }
+    .qr-label-primary { font-weight: 700; font-size: var(--qr-label-primary-size, 11pt); color: #1a1a1a; word-break: break-word; }
+    .qr-label-secondary { font-size: var(--qr-label-secondary-size, 8pt); color: #666; margin-top: 2px; word-break: break-word; }
     .empty { text-align: center; padding: 60px 20px; color: #888; }
     @media print {
       p { display: none !important; }
@@ -223,6 +226,9 @@
       const px = Math.max(80, Math.round(state.size_mm * 6));
       grid.style.setProperty("--qr-canvas-px", px);
       grid.style.setProperty("--qr-label-size", Math.max(7, Math.round(state.size_mm / 4)) + "pt");
+      // Primary label scales with QR size for readable stickers
+      grid.style.setProperty("--qr-label-primary-size", Math.max(8, Math.round(state.size_mm / 4)) + "pt");
+      grid.style.setProperty("--qr-label-secondary-size", Math.max(6, Math.round(state.size_mm / 6)) + "pt");
       grid.style.setProperty("--gap", Math.max(2, Math.round(state.size_mm / 8)) + "mm");
 
       if (items.length === 0) {
@@ -238,7 +244,25 @@
           : state.type === "shop"
           ? `${it.master_name} (${it.id})`
           : `${it.id} · ${it.coffee_name || ""} ${it.bag_size || ""}`.trim();
-        return `<div class="qr-tile" title="${tip.replace(/"/g,'&quot;')}" data-idx="${idx}"><div class="qr-canvas" data-value="${it.value}"></div></div>`;
+
+        // Build label below the QR — what people see on the sticker
+        let label_html = "";
+        if (state.type === "container") {
+          const primary = it.id;
+          const secondary = it.name || "";
+          label_html = `<div class="qr-label"><div class="qr-label-primary">${primary}</div>${secondary?`<div class="qr-label-secondary">${secondary}</div>`:""}</div>`;
+        } else if (state.type === "bucket") {
+          const primary = it.name || it.id;
+          const secondary = it.name ? it.id : "";
+          label_html = `<div class="qr-label"><div class="qr-label-primary">${primary}</div>${secondary?`<div class="qr-label-secondary">${secondary}</div>`:""}</div>`;
+        } else if (state.type === "shop") {
+          label_html = `<div class="qr-label"><div class="qr-label-primary">${it.master_name}</div></div>`;
+        } else if (state.type === "fp") {
+          const parts = [it.coffee_name, it.bag_size].filter(Boolean).join(" · ");
+          label_html = `<div class="qr-label"><div class="qr-label-primary">${it.id}</div>${parts?`<div class="qr-label-secondary">${parts}</div>`:""}</div>`;
+        }
+
+        return `<div class="qr-tile" title="${tip.replace(/"/g,'&quot;')}" data-idx="${idx}"><div class="qr-canvas" data-value="${it.value}"></div>${label_html}</div>`;
       }).join("");
 
       grid.querySelectorAll(".qr-canvas").forEach(el => {
