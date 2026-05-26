@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Print QR Codes — Bear Roastery</title>
+  <title>Print QR Codes — Bear Mrkt</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="config.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -23,46 +24,100 @@
     .btn-print:hover { background: #e8e6e1; }
     .size-preset { background: #2a2a2a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; transition: all 0.15s; }
     .size-preset:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .mode-toggle { display: flex; gap: 0; background: #2a2a2a; border-radius: 6px; padding: 2px; }
+    .mode-toggle button { background: transparent; color: #ccc; border: none; padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 4px; transition: all 0.15s; }
+    .mode-toggle button.active { background: #fff; color: #1a1a1a; }
     .picker { background: #fff; padding: 16px 24px; border-bottom: 1px solid #e8e6e1; }
     .picker h3 { font-size: 14px; margin-bottom: 10px; color: #1a1a1a; }
-    .pick-item { display: inline-flex; align-items: center; gap: 6px; background: #f4f2ed; border-radius: 4px; padding: 4px 10px; margin: 2px; cursor: pointer; font-size: 12px; user-select: none; border: 1px solid #e8e6e1; transition: all 0.1s; }
-    .pick-item:hover { border-color: #1a1a1a; }
-    .pick-item.selected { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
     .sheet { padding: 20px; max-width: 1100px; margin: 0 auto; }
-    .qr-grid { display: grid; gap: var(--gap, 10px); grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 140px), max-content)); justify-content: center; }
-    .qr-tile { background: #fff; border: 1px dashed #d4d1ca; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; transition: border-color 0.15s, transform 0.1s; cursor: pointer; }
-    .qr-tile:hover { border-color: #1a1a1a; border-style: solid; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .qr-tile.printing-only { /* added during single-tile print */ }
-    body.print-single .qr-tile:not(.printing-only) { display: none !important; }
-    .qr-tile .qr-canvas { width: var(--qr-size, 140px); height: var(--qr-size, 140px); margin: 0 auto; }
-    .qr-tile .qr-canvas img, .qr-tile .qr-canvas canvas {
-      width: 100% !important;
-      height: 100% !important;
-      image-rendering: -webkit-optimize-contrast;
-      image-rendering: crisp-edges;
-      image-rendering: pixelated;
-    }
-    .qr-label { margin-top: 6px; line-height: 1.2; }
-    .qr-label-primary { font-weight: 700; font-size: var(--qr-label-primary-size, 11pt); color: #1a1a1a; word-break: break-word; }
-    .qr-label-secondary { font-size: var(--qr-label-secondary-size, 8pt); color: #666; margin-top: 2px; word-break: break-word; }
+    .help-line { text-align: center; color: #666; font-size: 13px; margin-bottom: 14px; }
+
+    /* SHEET MODE — grid of tiles, multiple per A4 page */
+    body.mode-sheet .qr-grid { display: grid; gap: var(--gap, 10px); grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 140px), max-content)); justify-content: center; }
+    body.mode-sheet .qr-tile { background: #fff; border: 1px dashed #d4d1ca; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; transition: border-color 0.15s, transform 0.1s; cursor: pointer; position: relative; }
+    body.mode-sheet .qr-tile:hover { border-color: #1a1a1a; border-style: solid; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    body.mode-sheet .qr-tile .qr-canvas { width: var(--qr-size, 140px); height: var(--qr-size, 140px); margin: 0 auto; }
+    body.mode-sheet .qr-tile .qr-canvas img, body.mode-sheet .qr-tile .qr-canvas canvas { width: 100% !important; height: 100% !important; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges; image-rendering: pixelated; }
+    body.mode-sheet .qr-label { margin-top: 6px; line-height: 1.2; }
+    body.mode-sheet .qr-label-primary { font-weight: 700; font-size: var(--qr-label-primary-size, 11pt); color: #1a1a1a; word-break: break-word; }
+    body.mode-sheet .qr-label-secondary { font-size: var(--qr-label-secondary-size, 8pt); color: #666; margin-top: 2px; word-break: break-word; }
+
+    /* SINGLE-LABEL MODE — each tile is a preview of a 105×150mm label */
+    body.mode-single .qr-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    body.mode-single .qr-tile { background: #fff; border: 1px solid #e8e6e1; border-radius: 6px; padding: 10px; cursor: pointer; transition: all 0.15s; position: relative; }
+    body.mode-single .qr-tile:hover { border-color: #1a1a1a; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    /* The label-frame mimics the printed sticker (105×150mm) at a screen-friendly scale */
+    body.mode-single .label-frame { aspect-ratio: 105 / 150; background: #fff; border: 1px dashed #d4d1ca; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8% 4%; }
+    body.mode-single .label-frame .qr-canvas { width: 75%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; }
+    body.mode-single .label-frame.fp-mode .qr-canvas { width: 90%; }
+    body.mode-single .label-frame .qr-canvas img, body.mode-single .label-frame .qr-canvas canvas { width: 100% !important; height: 100% !important; image-rendering: pixelated; }
+    body.mode-single .label-frame .label-primary { font-weight: 700; font-size: 12px; color: #1a1a1a; text-align: center; margin-top: 6px; word-break: break-word; line-height: 1.15; }
+    body.mode-single .label-frame .label-secondary { font-size: 9px; color: #666; text-align: center; margin-top: 2px; word-break: break-word; }
+    /* On-screen-only descriptor — never prints */
+    body.mode-single .tile-descriptor { font-size: 11px; color: #666; text-align: center; margin-top: 8px; padding-top: 6px; border-top: 1px solid #f0eee9; }
+    body.mode-single .tile-descriptor strong { color: #1a1a1a; font-weight: 600; }
+
+    .pdf-btn { position: absolute; top: 4px; right: 4px; background: rgba(255,255,255,0.95); border: 1px solid #e8e6e1; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer; color: #1a1a1a; opacity: 0; transition: opacity 0.15s; }
+    .qr-tile:hover .pdf-btn { opacity: 1; }
+    .pdf-btn:hover { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
     .empty { text-align: center; padding: 60px 20px; color: #999; }
+
+    /* ── PRINT STYLES ────────────────────────────────────────────────────── */
     @media print {
-      p { display: none !important; }
+      p, .help-line { display: none !important; }
       .toolbar, .picker { display: none !important; }
       body { background: #fff; }
       .sheet { padding: 0; max-width: none; }
-      .qr-tile { border: none; padding: 4px; }
-      @page { margin: 10mm; }
+    }
+
+    /* Single-label print: page is exactly the sticker — 105×150mm portrait */
+    @media print {
+      body.mode-single { margin: 0; padding: 0; }
+      body.mode-single @page { /* fallback, see explicit @page below */ }
+      body.mode-single .qr-grid { display: block; gap: 0; padding: 0; margin: 0; }
+      body.mode-single .qr-tile { border: none !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; page-break-after: always; break-after: page; }
+      body.mode-single .qr-tile:last-child { page-break-after: auto; break-after: auto; }
+      body.mode-single .label-frame { width: 105mm; height: 150mm; aspect-ratio: auto; border: none !important; padding: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+      body.mode-single .label-frame .qr-canvas { width: 75mm; height: 75mm; }
+      body.mode-single .label-frame.fp-mode .qr-canvas { width: 95mm; height: 95mm; }
+      body.mode-single .label-frame .label-primary { font-size: 16pt; margin-top: 6mm; }
+      body.mode-single .label-frame .label-secondary { font-size: 10pt; margin-top: 2mm; }
+      body.mode-single .tile-descriptor { display: none !important; }
+      body.mode-single .pdf-btn { display: none !important; }
+      /* Hide other tiles when printing a single one */
+      body.mode-single.print-single .qr-tile:not(.printing-only) { display: none !important; }
+    }
+    /* The @page rule must be at the top level of the stylesheet (not nested in @media block in some browsers) */
+    @page single-label { size: 105mm 150mm; margin: 0; }
+    /* When mode-single class is on body, use the single-label page rule */
+    @media print {
+      body.mode-single { page: single-label; }
+    }
+
+    /* Sheet print: A4 default, tiles stack naturally */
+    @media print {
+      body.mode-sheet .qr-tile { border: none; padding: 4px; }
+      body.mode-sheet.print-single .qr-tile:not(.printing-only) { display: none !important; }
+      body.mode-sheet .pdf-btn { display: none !important; }
+    }
+    @page sheet { margin: 10mm; }
+    @media print {
+      body.mode-sheet { page: sheet; }
     }
   </style>
 </head>
-<body>
+<body class="mode-single">
   <div class="toolbar">
     <div class="toolbar-left">
       <button class="toolbar-back" id="go-back">← Back</button>
       <div class="toolbar-title">🖨️ QR Code Printer</div>
     </div>
     <div class="toolbar-controls">
+      <div class="mode-toggle">
+        <button data-mode="single" class="active">Single Label</button>
+        <button data-mode="sheet">Sheet</button>
+      </div>
       <label>Type</label>
       <select id="type-select">
         <option value="bucket">Buckets</option>
@@ -70,21 +125,26 @@
         <option value="fp">Bag Labels (FP codes)</option>
         <option value="shop">Shops</option>
       </select>
-      <label>Size (mm)</label>
-      <input type="number" id="size-input" value="38" min="10" max="120" step="1" style="width:64px" />
-      <div class="flex gap-6" style="display:flex;gap:4px">
-        <button class="size-preset" data-size="20">20</button>
-        <button class="size-preset" data-size="30">30</button>
-        <button class="size-preset" data-size="40">40</button>
-        <button class="size-preset" data-size="60">60</button>
-        <button class="size-preset" data-size="80">80</button>
+      <div id="size-controls" style="display:none;align-items:center;gap:8px">
+        <label>Size (mm)</label>
+        <input type="number" id="size-input" value="38" min="10" max="120" step="1" style="width:64px" />
+        <div style="display:flex;gap:4px">
+          <button class="size-preset" data-size="20">20</button>
+          <button class="size-preset" data-size="30">30</button>
+          <button class="size-preset" data-size="40">40</button>
+          <button class="size-preset" data-size="60">60</button>
+          <button class="size-preset" data-size="80">80</button>
+        </div>
       </div>
-<button class="btn-print" id="print-btn">🖨️ Print All</button>
+      <button class="btn-print" id="print-btn">🖨️ Print All</button>
     </div>
   </div>
 
   <div class="picker" id="picker"></div>
-  <div class="sheet"><p style="text-align:center;color:#666;font-size:13px;margin-bottom:14px">💡 Click any QR to print just that one · Or "Print All" for the whole sheet</p><div id="grid" class="qr-grid"></div></div>
+  <div class="sheet">
+    <p class="help-line" id="help-line">💡 Click any QR tile to print just that one · Hover for PDF download · Or "Print All" for the whole batch</p>
+    <div id="grid" class="qr-grid"></div>
+  </div>
 
   <script>
     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
@@ -101,6 +161,7 @@
     const init_ids   = url_params.get("ids") ? url_params.get("ids").split(",") : null;
 
     const state = {
+      mode: "single",       // "single" = ZD230 label / "sheet" = A4 grid
       type: init_type,
       size_mm: 38,
       coffee_filter: "all",
@@ -114,12 +175,22 @@
     async function init() {
       document.getElementById("type-select").value = state.type;
       document.getElementById("go-back").addEventListener("click", () => {
-        // Try to close the tab if it was opened by JS, otherwise navigate to settings
-        window.close();
-        // window.close() may be silently blocked — fall back to navigation
-        setTimeout(() => { window.location.href = "settings.html"; }, 100);
+        window.location.href = "settings.html";
       });
       document.getElementById("print-btn").addEventListener("click", () => window.print());
+
+      // Mode toggle
+      document.querySelectorAll("[data-mode]").forEach(btn => btn.addEventListener("click", () => {
+        const mode = btn.dataset.mode;
+        if (mode === state.mode) return;
+        state.mode = mode;
+        document.body.classList.remove("mode-single", "mode-sheet");
+        document.body.classList.add(`mode-${mode}`);
+        document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
+        document.getElementById("size-controls").style.display = mode === "sheet" ? "flex" : "none";
+        render_grid();
+      }));
+
       document.getElementById("type-select").addEventListener("change", e => {
         state.type = e.target.value;
         state.selected_ids = new Set();
@@ -138,7 +209,6 @@
         render_grid();
       }));
 
-
       const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }] = await Promise.all([
         supabaseClient.from("buckets").select("id, name, retired_at").order("created_at", { ascending: false }),
         supabaseClient.from("containers").select("id, name, retired_at").order("id"),
@@ -148,7 +218,6 @@
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
       state.containers = (containers||[]).filter(c => !c.retired_at);
       state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
-      // Dedupe shops by master_name — collect distinct master+qr pairs
       const shop_seen = new Set();
       state.shops = (shop_mappings||[]).filter(s => {
         if (!s.shop_qr_id || shop_seen.has(s.master_name)) return false;
@@ -156,11 +225,7 @@
         return true;
       }).map(s => ({ id: s.shop_qr_id, label: s.master_name, master_name: s.master_name }));
 
-      // If specific IDs were passed in the URL and they all match a bucket, auto-select them
-      // Otherwise default to all of the chosen type
-      if (init_ids && init_ids.length) {
-        // already in selected_ids set
-      } else {
+      if (!(init_ids && init_ids.length)) {
         const all = state.type === "bucket"    ? state.buckets.map(b => b.id)
                   : state.type === "container" ? state.containers.map(c => c.id)
                   : state.type === "shop"      ? state.shops.map(s => s.id)
@@ -187,7 +252,6 @@
         return;
       }
 
-      // Coffee filter (FP mode only)
       let coffee_filter_html = "";
       if (state.type === "fp") {
         const coffees = [...new Set(state.fp_codes.map(f => f.coffee_name).filter(Boolean))].sort();
@@ -225,28 +289,22 @@
         : state.type === "container"
         ? state.containers.filter(c => state.selected_ids.has(c.id)).map(c => ({ id: c.id, value: c.id, label: c.id, name: c.name }))
         : state.type === "shop"
-        ? state.shops.filter(s => state.selected_ids.has(s.id)).map(s => ({ id: s.id, value: `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, "")}roastery-traceability.html?scan=${s.id}`, label: s.label, master_name: s.master_name }))
-        : state.fp_codes.filter(f => state.selected_ids.has(f.id)).map(f => ({ id: f.id, value: f.id, label: `${f.id}\n${f.label}`, coffee_name: f.coffee_name, bag_size: f.bag_size }));
-
-      // Use mm for physical print sizing — browsers translate to pixels accurately
-      grid.style.setProperty("--qr-size", state.size_mm + "mm");
-      // QR canvas pixel size — target the native resolution of common thermal printers (203 DPI = ~8 dots/mm).
-      // Matching the printer's exact dot pitch avoids resampling fuzz on QR module edges.
-      // 203 DPI = 7.99 px/mm. Round to 8 px/mm for clean math.
-      const px = Math.max(160, Math.round(state.size_mm * 8));
-      grid.style.setProperty("--qr-canvas-px", px);
-      grid.style.setProperty("--qr-label-size", Math.max(7, Math.round(state.size_mm / 4)) + "pt");
-      // Primary label scales with QR size for readable stickers
-      grid.style.setProperty("--qr-label-primary-size", Math.max(8, Math.round(state.size_mm / 4)) + "pt");
-      grid.style.setProperty("--qr-label-secondary-size", Math.max(6, Math.round(state.size_mm / 6)) + "pt");
-      grid.style.setProperty("--gap", Math.max(2, Math.round(state.size_mm / 8)) + "mm");
+        ? state.shops.filter(s => state.selected_ids.has(s.id)).map(s => ({ id: s.id, value: `${window.location.origin}${window.location.pathname.replace(/[^/]*$/, "")}delivery-confirm.html?scan=${s.id}`, label: s.label, master_name: s.master_name }))
+        : state.fp_codes.filter(f => state.selected_ids.has(f.id)).map(f => ({ id: f.id, value: f.id, label: f.label, coffee_name: f.coffee_name, bag_size: f.bag_size }));
 
       if (items.length === 0) {
         grid.innerHTML = `<div class="empty">Nothing to show. Try changing the filter above.</div>`;
         return;
       }
 
+      // Sheet mode size variables (only used in sheet mode)
+      grid.style.setProperty("--qr-size", state.size_mm + "mm");
+      grid.style.setProperty("--qr-label-primary-size", Math.max(8, Math.round(state.size_mm / 4)) + "pt");
+      grid.style.setProperty("--qr-label-secondary-size", Math.max(6, Math.round(state.size_mm / 6)) + "pt");
+      grid.style.setProperty("--gap", Math.max(2, Math.round(state.size_mm / 8)) + "mm");
+
       grid.innerHTML = items.map((it, idx) => {
+        // Per-type descriptor (on-screen + printed sticker, except FP where it's screen-only)
         const tip = state.type === "bucket"
           ? (it.name ? `${it.name} (${it.id})` : it.id)
           : state.type === "container"
@@ -255,31 +313,52 @@
           ? `${it.master_name} (${it.id})`
           : `${it.id} · ${it.coffee_name || ""} ${it.bag_size || ""}`.trim();
 
-        // Build label below the QR — what people see on the sticker
-        let label_html = "";
-        if (state.type === "container") {
-          const primary = it.id;
-          const secondary = it.name || "";
-          label_html = `<div class="qr-label"><div class="qr-label-primary">${primary}</div>${secondary?`<div class="qr-label-secondary">${secondary}</div>`:""}</div>`;
-        } else if (state.type === "bucket") {
-          const primary = it.name || it.id;
-          const secondary = it.name ? it.id : "";
-          label_html = `<div class="qr-label"><div class="qr-label-primary">${primary}</div>${secondary?`<div class="qr-label-secondary">${secondary}</div>`:""}</div>`;
-        } else if (state.type === "shop") {
-          label_html = `<div class="qr-label"><div class="qr-label-primary">${it.master_name}</div></div>`;
-        } else if (state.type === "fp") {
-          const parts = [it.coffee_name, it.bag_size].filter(Boolean).join(" · ");
-          label_html = `<div class="qr-label"><div class="qr-label-primary">${it.id}</div>${parts?`<div class="qr-label-secondary">${parts}</div>`:""}</div>`;
-        }
+        let primary = "", secondary = "";
+        if (state.type === "container")     { primary = it.id; secondary = it.name || ""; }
+        else if (state.type === "bucket")   { primary = it.name || it.id; secondary = it.name ? it.id : ""; }
+        else if (state.type === "shop")     { primary = it.master_name; secondary = ""; }
+        else /* fp */                       { primary = it.id; secondary = ""; }   // FP: never printed
+        const is_fp = state.type === "fp";
 
-        return `<div class="qr-tile" title="${tip.replace(/"/g,'&quot;')}" data-idx="${idx}"><div class="qr-canvas" data-value="${it.value}"></div>${label_html}</div>`;
+        if (state.mode === "single") {
+          // Single-label tile (mimics 105×150mm label) + on-screen descriptor (never prints)
+          const sticker_html = is_fp
+            ? `<div class="label-frame fp-mode"><div class="qr-canvas" data-value="${esc_attr(it.value)}"></div></div>`
+            : `<div class="label-frame">
+                 <div class="qr-canvas" data-value="${esc_attr(it.value)}"></div>
+                 ${primary ? `<div class="label-primary">${esc(primary)}</div>` : ""}
+                 ${secondary ? `<div class="label-secondary">${esc(secondary)}</div>` : ""}
+               </div>`;
+          return `<div class="qr-tile" title="${esc_attr(tip)}" data-idx="${idx}">
+            <button class="pdf-btn" data-pdf="${idx}" title="Download as PDF">📄 PDF</button>
+            ${sticker_html}
+            <div class="tile-descriptor"><strong>${esc(primary || it.id)}</strong>${secondary ? ` · ${esc(secondary)}` : ""}${is_fp && it.coffee_name ? ` · ${esc(it.coffee_name)} ${esc(it.bag_size || "")}` : ""}</div>
+          </div>`;
+        } else {
+          // Sheet mode (A4 grid) — same as before, with PDF button added
+          let label_html = "";
+          if (is_fp) {
+            // FP sheet: still no descriptor on the sticker, but show one on-screen
+            label_html = `<div class="qr-label" style="display:none"></div>`;
+          } else if (state.type === "container" || state.type === "bucket") {
+            label_html = `<div class="qr-label"><div class="qr-label-primary">${esc(primary)}</div>${secondary?`<div class="qr-label-secondary">${esc(secondary)}</div>`:""}</div>`;
+          } else if (state.type === "shop") {
+            label_html = `<div class="qr-label"><div class="qr-label-primary">${esc(primary)}</div></div>`;
+          }
+          return `<div class="qr-tile" title="${esc_attr(tip)}" data-idx="${idx}">
+            <button class="pdf-btn" data-pdf="${idx}" title="Download as PDF">📄 PDF</button>
+            <div class="qr-canvas" data-value="${esc_attr(it.value)}"></div>
+            ${label_html}
+          </div>`;
+        }
       }).join("");
 
+      // Generate QR codes — render at native printer resolution (203 DPI = 8 px/mm)
       grid.querySelectorAll(".qr-canvas").forEach(el => {
         el.innerHTML = "";
-        // Render at 8 px/mm — matches Zebra's 203 DPI native resolution exactly.
-        // Avoids the driver having to upscale or downsample, which would blur module edges.
-        const canvas_px = Math.max(160, Math.round(state.size_mm * 8));
+        // For single mode, render at the printed sticker size (max ~95mm). For sheet, use the user-chosen size.
+        const target_mm = state.mode === "single" ? (state.type === "fp" ? 95 : 75) : state.size_mm;
+        const canvas_px = Math.max(160, Math.round(target_mm * 8));
         new window.QRCode(el, {
           text: el.dataset.value,
           width: canvas_px,
@@ -288,8 +367,6 @@
           colorLight: "#ffffff",
           correctLevel: window.QRCode.CorrectLevel.H,
         });
-        // qrcodejs renders both a <canvas> and <img>.
-        // Show the img (prettier scaling) but keep canvas in DOM so we can use toBlob for download.
         setTimeout(() => {
           const canvas = el.querySelector("canvas");
           const img = el.querySelector("img");
@@ -297,24 +374,91 @@
           if (img) img.alt = el.dataset.value;
         }, 0);
       });
-      // Click-to-print: left-click a tile to print just that one QR (browser print dialog opens).
-      // User can choose their Zebra (or Save as PDF) from there.
+
+      // Cache the rendered items so PDF / click handlers can find them by index
+      state.rendered_items = items;
+
+      // Click tile → print just that one
       grid.querySelectorAll(".qr-tile").forEach(tile => tile.addEventListener("click", e => {
+        // Don't trigger print if user clicked the PDF button
+        if (e.target.closest(".pdf-btn")) return;
         if (e.button !== 0) return;
         document.querySelectorAll(".qr-tile.printing-only").forEach(t => t.classList.remove("printing-only"));
         tile.classList.add("printing-only");
         document.body.classList.add("print-single");
-        // Print after a tick so the class application is committed
         setTimeout(() => {
           window.print();
-          // Clean up afterward
           setTimeout(() => {
             document.body.classList.remove("print-single");
             tile.classList.remove("printing-only");
           }, 100);
         }, 50);
       }));
+
+      // PDF download per tile
+      grid.querySelectorAll("[data-pdf]").forEach(btn => btn.addEventListener("click", e => {
+        e.stopPropagation();
+        const idx = Number(btn.dataset.pdf);
+        download_pdf(idx);
+      }));
     }
+
+    function download_pdf(idx) {
+      const item = state.rendered_items?.[idx];
+      if (!item) return;
+
+      // Find the canvas element for this tile so we get the exact rendered QR
+      const tile = document.querySelector(`.qr-tile[data-idx="${idx}"]`);
+      const canvas = tile?.querySelector(".qr-canvas canvas");
+      if (!canvas) { alert("QR not ready yet — try again in a moment."); return; }
+
+      // Determine PDF size:
+      //   Single mode: 105×150mm (label-sized PDF, ready to print on ZD230)
+      //   Sheet mode:  square sized to the user's chosen mm (QR-only, no descriptor — clean drop into Canva)
+      const { jsPDF } = window.jspdf;
+      let pdf, qr_mm, qr_x, qr_y, page_w, page_h;
+      if (state.mode === "single") {
+        page_w = 105; page_h = 150;
+        pdf = new jsPDF({ unit: "mm", format: [page_w, page_h], orientation: "portrait" });
+        const is_fp = state.type === "fp";
+        qr_mm = is_fp ? 95 : 75;
+        qr_x = (page_w - qr_mm) / 2;
+        qr_y = is_fp ? (page_h - qr_mm) / 2 : 20;
+      } else {
+        // Sheet mode: just the QR at the chosen size — no padding, no descriptor
+        qr_mm = state.size_mm;
+        page_w = qr_mm; page_h = qr_mm;
+        pdf = new jsPDF({ unit: "mm", format: [page_w, page_h], orientation: "portrait" });
+        qr_x = 0; qr_y = 0;
+      }
+      // Render the canvas at high resolution into the PDF
+      const img_data = canvas.toDataURL("image/png");
+      pdf.addImage(img_data, "PNG", qr_x, qr_y, qr_mm, qr_mm, undefined, "NONE");
+
+      // For single mode + non-FP types, also add the descriptor below the QR
+      if (state.mode === "single" && state.type !== "fp") {
+        let primary = "", secondary = "";
+        if (state.type === "container")   { primary = item.id; secondary = item.name || ""; }
+        else if (state.type === "bucket") { primary = item.name || item.id; secondary = item.name ? item.id : ""; }
+        else if (state.type === "shop")   { primary = item.master_name; secondary = ""; }
+        if (primary) {
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(16);
+          pdf.text(primary, page_w / 2, qr_y + qr_mm + 12, { align: "center", maxWidth: page_w - 8 });
+        }
+        if (secondary) {
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(10);
+          pdf.text(secondary, page_w / 2, qr_y + qr_mm + 20, { align: "center", maxWidth: page_w - 8 });
+        }
+      }
+
+      const safe_id = String(item.id).replace(/[^a-zA-Z0-9_-]/g, "_");
+      pdf.save(`${state.type}-${safe_id}.pdf`);
+    }
+
+    function esc(s)      { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    function esc_attr(s) { return String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;"); }
   </script>
 </body>
 </html>
