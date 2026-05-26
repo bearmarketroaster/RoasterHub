@@ -435,21 +435,27 @@
       // Cache the rendered items so PDF / click handlers can find them by index
       state.rendered_items = items;
 
-      // Click tile → print just that one
+      // Click tile → print just that one.
+      // We use the `afterprint` window event (not setTimeout) to clean up state —
+      // setTimeout's cleanup could race a subsequent print and leave the page
+      // in a half-cleaned state, making print #2 onwards come out blank.
+      const cleanup_print_state = () => {
+        document.body.classList.remove("print-single");
+        document.querySelectorAll(".qr-tile.printing-only").forEach(t => t.classList.remove("printing-only"));
+      };
+      window.removeEventListener("afterprint", cleanup_print_state);
+      window.addEventListener("afterprint", cleanup_print_state);
+
       grid.querySelectorAll(".qr-tile").forEach(tile => tile.addEventListener("click", e => {
         // Don't trigger print if user clicked the PDF button
         if (e.target.closest(".pdf-btn")) return;
         if (e.button !== 0) return;
-        document.querySelectorAll(".qr-tile.printing-only").forEach(t => t.classList.remove("printing-only"));
+        // Defensive: clear any leftover state before the new print
+        cleanup_print_state();
         tile.classList.add("printing-only");
         document.body.classList.add("print-single");
-        setTimeout(() => {
-          window.print();
-          setTimeout(() => {
-            document.body.classList.remove("print-single");
-            tile.classList.remove("printing-only");
-          }, 100);
-        }, 50);
+        // Give the browser one paint tick to apply classes before opening the dialog
+        requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
       }));
 
       // PDF download per tile
