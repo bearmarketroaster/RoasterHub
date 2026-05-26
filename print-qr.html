@@ -71,18 +71,79 @@
       .sheet { padding: 0; max-width: none; }
     }
 
-    /* Single-label print: page is exactly the sticker — 105×150mm portrait */
+    /* Single-label print: page is exactly the sticker — 105×150mm portrait.
+       We use absolute positioning in mm units so sizes land precisely
+       regardless of printer driver quirks (flexbox + aspect-ratio were unreliable). */
     @media print {
       body.mode-single { margin: 0; padding: 0; }
-      body.mode-single @page { /* fallback, see explicit @page below */ }
       body.mode-single .qr-grid { display: block; gap: 0; padding: 0; margin: 0; }
       body.mode-single .qr-tile { border: none !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; page-break-after: always; break-after: page; }
       body.mode-single .qr-tile:last-child { page-break-after: auto; break-after: auto; }
-      body.mode-single .label-frame { width: 105mm; height: 150mm; aspect-ratio: auto; border: none !important; padding: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-      body.mode-single .label-frame .qr-canvas { width: 75mm; height: 75mm; }
-      body.mode-single .label-frame.fp-mode .qr-canvas { width: 95mm; height: 95mm; }
-      body.mode-single .label-frame .label-primary { font-size: 16pt; margin-top: 6mm; }
-      body.mode-single .label-frame .label-secondary { font-size: 10pt; margin-top: 2mm; }
+
+      /* The label-frame becomes a 105×150mm canvas with absolutely-positioned children */
+      body.mode-single .label-frame {
+        position: relative;
+        width: 105mm;
+        height: 150mm;
+        aspect-ratio: auto;
+        border: none !important;
+        padding: 0 !important;
+        display: block;     /* override flex */
+        overflow: hidden;
+      }
+
+      /* QR: 75mm square, centred horizontally, sitting in the upper portion of the label */
+      body.mode-single .label-frame .qr-canvas {
+        position: absolute;
+        left: 15mm;        /* (105 - 75) / 2 */
+        top: 12mm;
+        width: 75mm;
+        height: 75mm;
+        display: block;
+      }
+      body.mode-single .label-frame.fp-mode .qr-canvas {
+        left: 5mm;          /* (105 - 95) / 2 */
+        top: 27.5mm;        /* (150 - 95) / 2 — vertical-centre for FP since no descriptor */
+        width: 95mm;
+        height: 95mm;
+      }
+      /* Force the QR image inside to fill its container */
+      body.mode-single .label-frame .qr-canvas img,
+      body.mode-single .label-frame .qr-canvas canvas {
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+        image-rendering: pixelated;
+      }
+
+      /* Primary text — large, centred, sits below the QR */
+      body.mode-single .label-frame .label-primary {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 100mm;        /* QR ends at 12 + 75 = 87mm; gap, then text */
+        text-align: center;
+        font-size: 22pt;
+        font-weight: 700;
+        color: #1a1a1a;
+        line-height: 1.1;
+        padding: 0 4mm;
+        margin: 0;
+      }
+      /* Secondary text — smaller, below primary */
+      body.mode-single .label-frame .label-secondary {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 118mm;
+        text-align: center;
+        font-size: 13pt;
+        color: #1a1a1a;
+        line-height: 1.1;
+        padding: 0 4mm;
+        margin: 0;
+      }
+
       body.mode-single .tile-descriptor { display: none !important; }
       body.mode-single .pdf-btn { display: none !important; }
       /* Hide other tiles when printing a single one */
