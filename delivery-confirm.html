@@ -37,7 +37,6 @@
     .btn-confirm-row { padding: 10px 16px; white-space: nowrap; }
     .footer-msg { text-align: center; color: #999; font-size: 12px; margin-top: 24px; }
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
-    .err-card { background: #fdecea; border: 1px solid #dc2626; border-radius: 8px; padding: 14px; color: #dc2626; font-size: 13px; text-align: center; }
   </style>
 </head>
 <body>
@@ -49,11 +48,9 @@ const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.
 
 const state = {
   loading: true,
-  shop_qr_id: null,
   shop_name: null,
   pending: [],     // unconfirmed dispatches for this shop
   view: "list",    // "list" | "done" | "no-pending" | "not-found"
-  error: null,
   reporting_id: null,   // dispatch id currently showing the "missing items" form
   report_note: "",      // text in that form
 };
@@ -65,12 +62,10 @@ async function init() {
   const scan_id = params.get("scan");
   if (!scan_id) {
     state.view = "not-found";
-    state.error = "No delivery code in the link.";
     state.loading = false;
     render();
     return;
   }
-  state.shop_qr_id = scan_id;
 
   // Look up the shop
   const { data: mappings, error: mappings_err } = await supabaseClient
@@ -222,7 +217,6 @@ function build_app() {
         <div style="background:#fff7ed;border:1px solid #fde4c2;border-radius:8px;padding:12px;margin-top:12px">
           <div style="font-size:13px;font-weight:600;color:#d97706;margin-bottom:8px">⚠️ Report missing items</div>
           <textarea
-            id="issue-note-${esc(d.id)}"
             data-issue-note
             placeholder="What's missing? e.g. 2× 500g Holy Roast bags, one bucket"
             rows="3"

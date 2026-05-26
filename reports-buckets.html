@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Buckets Report — Bear Roastery</title>
+  <title>Buckets Report — Bear Mrkt</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <style>
@@ -37,7 +37,7 @@
     .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
     .tag-empty   { background: #f0eee9; color: #666; }
     .tag-filled  { background: #fff7ed; color: #d97706; }
-    .tag-transit { background: #fff3e0; color: #d97706; }
+    .tag-transit { background: #fff7ed; color: #d97706; }
     .tag-atshop  { background: #e7f5ec; color: #16a34a; }
     .tag-retired { background: #fdecea; color: #dc2626; }
     .tag-condition-clean   { background: #e7f5ec; color: #16a34a; }
@@ -73,7 +73,6 @@ const esc = s => String(s ?? "").replace(/[<>&"']/g, c => ({"<":"&lt;",">":"&gt;
 
 const state = {
   buckets: [],                 // bucket rows
-  dispatch_buckets: [],        // dispatch_bucket rows
   dispatches_by_id: {},        // id → dispatch
   per_bucket_history: {},      // bucket_id → [{ dispatch_id, shop, dispatched_at, confirmed_at, filled_at, returned_at, condition }]
   loaded: false,
@@ -100,13 +99,12 @@ async function load() {
   state.dispatches_by_id = {};
   (dispatches || []).forEach(d => { state.dispatches_by_id[d.id] = d; });
 
-  // Pull dispatch_buckets (the link table)
+  // Pull dispatch_buckets (the link table) — iterate directly to build per-bucket history
   const { data: db } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false });
-  state.dispatch_buckets = db || [];
 
   // Build per-bucket history (most-recent dispatch first)
   state.per_bucket_history = {};
-  state.dispatch_buckets.forEach(row => {
+  (db || []).forEach(row => {
     const d = state.dispatches_by_id[row.dispatch_id];
     if (!d) return;
     if (!state.per_bucket_history[row.bucket_id]) state.per_bucket_history[row.bucket_id] = [];
@@ -302,7 +300,7 @@ function render() {
         <div style="width:1px;height:24px;background:#333;margin:0 4px"></div>
         <div>
           <div class="header-title">🪣 Buckets Report</div>
-          <div class="header-sub">Bear Roastery</div>
+          <div class="header-sub">Bear Mrkt</div>
         </div>
       </div>
       <button class="btn-logout" id="logout-btn">Log Out</button>

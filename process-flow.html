@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Bear Roastery — Operations Flow</title>
+<title>Bear Mrkt — Operations Flow</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
   * { box-sizing: border-box; }
@@ -26,23 +26,30 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>🐻 Bear Roastery — Operations Flow</h1>
+  <h1>🐻 Bear Mrkt — Operations Flow</h1>
   <div class="sub">End-to-end traceability: green delivery → roast → pack → dispatch → delivery → return</div>
 
   <div class="mermaid">
 flowchart TD
     Start([Green coffee arrives]) --> Stock[<b>Admin</b><br/>Log delivery in Stock<br/>Upload invoice PDF]
     Stock --> Ready{Green stock<br/>available?}
-    Ready -->|Yes| RoastStart
+    Ready -->|Yes| RoastDecide
+
+    RoastDecide{Production roast<br/>or test?}
+    RoastDecide -->|Production| RoastStart
+    RoastDecide -->|Test| TestRoast[<b>Roaster</b><br/>Test roast<br/>1 batch · no container<br/>Stock still deducted]
+    TestRoast --> Done
 
     RoastStart["<b>Roaster</b><br/>Pick coffee + container<br/>from Settings list"]
     RoastStart --> LogBatches[<b>Roaster</b><br/>Log each batch:<br/>Cropster ID + green weight]
-    LogBatches --> WeighOut[<b>Roaster</b><br/>Weigh full container<br/>after roasting]
+    LogBatches --> WeighOut[<b>Roaster</b><br/>Weigh container<br/>Gross or net]
     WeighOut --> SaveRoast[<b>Roaster</b><br/>Save roast<br/>Container = WAITING]
 
     SaveRoast --> Cool([Coffee rests / degasses])
-    Cool --> PackTrigger{Order to pack?}
-    PackTrigger -->|Yes| PackStart
+    Cool --> PackTrigger{Order to pack<br/>or staff takeaway?}
+    PackTrigger -->|Pack order| PackStart
+    PackTrigger -->|Staff takeaway| StaffPath[<b>Admin</b><br/>Stock → Staff Takeaway<br/>200g or 500g bag]
+    StaffPath --> AutoConfirm
 
     PackStart[<b>Packer</b><br/>Open Traceability<br/>Set container ACTIVE]
     PackStart --> ScanLoop[<b>Packer</b><br/>Scan bag QR<br/>or bucket QR]
@@ -54,10 +61,10 @@ flowchart TD
 
     Confirm --> Route{Destination<br/>kind?}
     Route -->|Shop| Transit[Status: IN TRANSIT<br/>Courier delivers]
-    Route -->|Wholesale or Online| AutoConfirm[Auto-confirmed<br/>at pack time]
+    Route -->|Wholesale / Online| AutoConfirm[Auto-confirmed<br/>at pack time]
 
     Transit --> ShopScan[<b>Shop manager</b><br/>scans shop QR<br/>on arrival]
-    ShopScan --> Delivered[Status: DELIVERED]
+    ShopScan --> Delivered[Status: DELIVERED<br/>Issues flagged if reported]
     AutoConfirm --> Delivered
 
     Delivered --> BucketReturn{Buckets<br/>involved?}
@@ -72,9 +79,9 @@ flowchart TD
     classDef adminClass fill:#f0e9f7,stroke:#7e57c2,stroke-width:1px,color:#1a1a1a
     classDef sysClass fill:#f4f2ed,stroke:#666,color:#1a1a1a
 
-    class RoastStart,LogBatches,WeighOut,SaveRoast roasterClass
+    class RoastStart,LogBatches,WeighOut,SaveRoast,TestRoast roasterClass
     class PackStart,ScanLoop,PickShop,Confirm,Return packerClass
-    class Stock adminClass
+    class Stock,StaffPath adminClass
     class ShopScan packerClass
   </div>
 
@@ -89,8 +96,12 @@ flowchart TD
     <ul>
       <li><strong>FIFO automation</strong> — packers can't accidentally pick the wrong container; the system picks the oldest active one for them.</li>
       <li><strong>Bucket traceability</strong> — every 5kg bar bucket is uniquely identified, tracked through every dispatch, and audited on return.</li>
-      <li><strong>Shop QR confirmation</strong> — drivers / shop managers confirm receipt with a single scan. No paperwork.</li>
-      <li><strong>Wholesale &amp; online</strong> — auto-confirmed at pack time. Same flow, no QR overhead.</li>
+      <li><strong>Shop QR confirmation</strong> — drivers / shop managers confirm receipt with a single scan on a dedicated public page. No paperwork.</li>
+      <li><strong>Wholesale, online &amp; staff</strong> — auto-confirmed at pack time. Same flow, no QR overhead.</li>
+      <li><strong>Staff takeaway tracking</strong> — coffee given to staff is logged + deducted from container stock. Rules out staff as a cause when stock looks short.</li>
+      <li><strong>Test roasts</strong> — separate from production metrics. No container assigned, 1 batch max, green stock still deducted.</li>
+      <li><strong>Missing-items reporting</strong> — shops can flag a delivery as incomplete during confirmation. Flagged dispatches surface in the dispatch report.</li>
+      <li><strong>Empty container weights</strong> — optional per-container empty kg means roasters can weigh gross (no zeroing) and the system calculates net.</li>
       <li><strong>Full audit trail</strong> — from green delivery (with invoice) to shop confirmation. Every kg accounted for.</li>
       <li><strong>Roaster attribution</strong> — every roast is tagged to the logged-in roaster. Reports show consistency per roaster.</li>
       <li><strong>Bucket condition tracking</strong> — clean / dirty / damaged / lost on return. Reports flag shops mistreating buckets.</li>

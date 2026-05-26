@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Roasts — Bear Roastery</title>
+  <title>Roasts — Bear Mrkt</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
@@ -24,7 +24,6 @@
     input:focus, select:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
     input.big { font-size: 22px; padding: 12px; text-align: center; font-weight: 700; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .span-2 { grid-column: 1 / -1; }
     .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
     .btn-dark { background: #1a1a1a; }
     .btn-dark:hover:not(:disabled) { background: #000; }
@@ -54,8 +53,6 @@
     .flex-wrap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .mt-4 { margin-top: 4px; }
     .mt-8 { margin-top: 8px; }
-    .mt-12 { margin-top: 12px; }
-    .mt-16 { margin-top: 16px; }
     .mb-8 { margin-bottom: 8px; }
     .mb-12 { margin-bottom: 12px; }
     .mb-16 { margin-bottom: 16px; }
@@ -78,7 +75,7 @@
 <div id="app"></div>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-// BEAR ROASTERY — Roasts Module
+// BEAR MRKT — Roasts Module
 // Roasting flow:
 //   1. Pick coffee to roast + roast date
 //   2. Select container to fill + how many batches
@@ -105,7 +102,7 @@ const state = {
   loading:        true,
   saving:         false,
   session:        new_session(),
-  ui: { step: 1, err: "", gross_weight: "" },
+  ui: { step: 1, gross_weight: "" },
 };
 
 function new_session() {
@@ -156,7 +153,7 @@ async function save_session() {
     roaster_id: user?.id || null,
     is_test: !!s.is_test,
   });
-  if (session_err) { state.saving = false; state.ui.err = "Failed to save session. Please try again."; render(); return; }
+  if (session_err) { state.saving = false; alert("Failed to save session. Please try again."); render(); return; }
 
   const batches = s.batches.map((b,i) => ({
     id: `${id}-B${i+1}`, roast_session_id: id, batch_number: i+1,
@@ -194,7 +191,7 @@ function build_app() {
       <div class="header-left">
         <button class="header-back" id="go-dashboard">← Dashboard</button>
         <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
-        <div><div class="header-title">🔥 Roasts</div><div class="header-sub">Bear Roastery</div></div>
+        <div><div class="header-title">🔥 Roasts</div><div class="header-sub">Bear Mrkt</div></div>
       </div>
       ${state.view==="home" ? `
         <div style="display:flex;gap:8px;align-items:center">

@@ -55,10 +55,9 @@
     .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
-    .span-2 { grid-column: 1 / -1; }
     .flex { display: flex; } .flex-between { display: flex; justify-content: space-between; align-items: center; }
     .flex-wrap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .gap-6{gap:6px} .gap-8{gap:8px} .gap-10{gap:10px} .gap-12{gap:12px}
+    .gap-6{gap:6px} .gap-8{gap:8px} .gap-10{gap:10px}
     .mt-4{margin-top:4px} .mt-8{margin-top:8px} .mt-10{margin-top:10px} .mt-12{margin-top:12px} .mt-16{margin-top:16px}
     .mb-8{margin-bottom:8px} .mb-12{margin-bottom:12px} .mb-16{margin-bottom:16px}
     .stock-track { background: #f0eee9; border-radius: 4px; height: 8px; }
@@ -66,16 +65,8 @@
     h2 { color: #1a1a1a; margin-bottom: 16px; } h3 { color: #1a1a1a; margin-bottom: 12px; }
     .empty { text-align: center; color: #999; padding: 40px 20px; }
     .empty .icon { font-size: 36px; margin-bottom: 8px; }
-    .report-bar-track { background: #f0eee9; border-radius: 3px; height: 6px; width: 80px; }
-    .report-bar-fill { border-radius: 3px; height: 6px; }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 24px; z-index: 100; }
     .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 440px; box-shadow: 0 4px 24px rgba(0,0,0,0.15); margin: auto; border: 1px solid #e8e6e1; }
-    .collapsible-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
-    .collapsible-arrow { font-size: 16px; color: #666; font-weight: 700; }
-    .chart-wrap { display: flex; align-items: flex-end; gap: 4px; height: 100px; overflow-x: auto; padding-bottom: 4px; }
-    .chart-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 44px; flex: 1; }
-    .chart-bar { background: #1a1a1a; border-radius: 3px 3px 0 0; width: 100%; transition: height 0.3s; }
-    .chart-val { font-size: 10px; color: #666; } .chart-lbl { font-size: 9px; color: #999; white-space: nowrap; }
     .mono { font-family: monospace; }
     .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
     .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
@@ -94,12 +85,6 @@
 <body>
 <div id="app"></div>
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-// ROASTERY TRACE — vanilla JS single-page app
-// Note: the QR shop-confirm flow is intentionally public —
-// shops do not need to log in to confirm a delivery.
-// ─────────────────────────────────────────────────────────────────────────────
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ROASTERY TRACE — vanilla JS single-page app
 // Shop scans (?scan=...) are intercepted in the <head> and redirected to
@@ -122,7 +107,7 @@ const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },
 
 const state = {
   tab: 0, containers: [], roast_sessions: [], dispatches: [],
-  coffees: [], fp_codes: [], shop_mappings: [], buckets: [], base_url: "",
+  coffees: [], fp_codes: [], shop_mappings: [], buckets: [],
   user_role: null,
   loading: true, saving: false, scan_id: null,
   ui: {
@@ -172,8 +157,6 @@ function stop_qr_scanner() {
 }
 
 const BAG_SIZE_KG = { "100g":0.1, "200g":0.2, "500g":0.5, "1kg":1, "Bar 5kg":5 };
-function calc_kg(bags, bag_size) { return (Number(bags)||0)*(BAG_SIZE_KG[bag_size]||Number(bag_size)||0); }
-function to_upper(s) { return (s||"").trim().toUpperCase(); }
 function gen_id(prefix) {
   const r = crypto.randomUUID().split("-")[0].toUpperCase();
   return `${prefix}-${today().replace(/-/g,"")}-${r}`;
@@ -213,20 +196,6 @@ async function send_to_samples(container_id) {
   render();
 }
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-const PALETTE = ["#1a1a1a","#666","#16a34a","#dc2626","#4a7c4e","#d97706","#666","#1a1a1a"];
-function color_for(i) { return PALETTE[i%PALETTE.length]; }
-async function load_pdf_js() {
-  if (window.pdfjsLib) return window.pdfjsLib;
-  await new Promise((res,rej) => { const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"; s.onload=res; s.onerror=()=>rej(new Error("Could not load PDF reader.")); document.head.appendChild(s); });
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-  return window.pdfjsLib;
-}
-async function extract_pdf_text(file) {
-  const lib=await load_pdf_js(), buf=await file.arrayBuffer(), pdf=await lib.getDocument({data:buf}).promise;
-  let full="";
-  for (let p=1;p<=pdf.numPages;p++) { const page=await pdf.getPage(p), tc=await page.getTextContent(); const items=tc.items.slice().sort((a,b)=>{ const dy=Math.round(b.transform[5])-Math.round(a.transform[5]); return dy!==0?dy:a.transform[4]-b.transform[4]; }); full+=items.map(i=>i.str).join("\n")+"\n"; }
-  return full;
-}
 async function render_qr(el, value, size=140) {
   if (!window.QRCode) { await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
   el.innerHTML="";
@@ -234,8 +203,6 @@ async function render_qr(el, value, size=140) {
 }
 
 async function load_data() {
-  const { data: settings } = await supabaseClient.from("settings").select("base_url").eq("id",1).single();
-  state.base_url = settings?.base_url || "";
   const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
   state.coffees = (coffees_data||[]).map(c => c.name);
   const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code");
@@ -326,31 +293,6 @@ async function load_data() {
   });
 }
 
-
-
-async function update_order(order_id, shop_name, po_number, items) {
-  state.saving=true; render();
-  await supabaseClient.from("orders").update({shop_name,po_number}).eq("id",order_id);
-  await supabaseClient.from("order_items").delete().eq("order_id",order_id);
-  await supabaseClient.from("order_items").insert(items.map((item,i)=>({id:`${order_id}-I${i+1}-${Date.now()}`,order_id,code:item.code||null,description:item.description,quantity:item.quantity,unit:item.unit||"EACH",unit_cost:item.unit_cost||0,total:item.total||0})));
-  state.saving=false; await load_data(); render();
-}
-
-async function save_dispatch(container_id, shop, lines, total_kg) {
-  state.saving=true; render();
-  // Ensure the container row exists (FK requirement) — upsert is a no-op if it already does
-  await supabaseClient.from("containers").upsert({ id: container_id }, { onConflict: "id" });
-  // Resolve current fill_id for this container (most recent roast session)
-  const container = state.containers.find(c => c.id === container_id);
-  const fill_id = container?.fill_id || null;
-  const dispatch_id=gen_id("DSP");
-  const { error: d_err } = await supabaseClient.from("dispatches").insert({id:dispatch_id,container_id,fill_id,date:today(),shop,total_kg,confirmed_at:null});
-  if (d_err) { state.saving=false; alert("Failed to save dispatch: "+d_err.message); return null; }
-  await supabaseClient.from("dispatch_lines").insert(lines.map((l,i)=>({id:`${dispatch_id}-L${i+1}`,dispatch_id,type:l.type,kg:l.kg,bags:l.bags||null,bag_size:l.bag_size||null})));
-  state.saving=false; await load_data(); render();
-  return dispatch_id;
-}
-
 // New dispatch save with per-line container/fill tagging (FIFO mode)
 async function save_dispatch_v2(primary_container_id, primary_fill_id, shop, lines, total_kg) {
   state.saving = true; render();
@@ -394,9 +336,6 @@ async function confirm_delivery(dispatch_id) {
 }
 
 async function init() {
-  const params=new URLSearchParams(window.location.search);
-  const scan_id=params.get("scan");
-  if (scan_id) state.scan_id=scan_id;
   await load_data();
   state.loading=false;
   render();
@@ -412,7 +351,7 @@ function build_app() {
   if (state.scan_id) return build_scan_overlay();
   if (state.ui.fill_bucket_container) return build_fill_buckets_overlay();
   if (state.ui.bucket_return_open) return build_bucket_return_overlay();
-  const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Roastery</div></div></div><button class="btn-logout" id="logout-btn">Log Out</button></div>`;
+  const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Mrkt</div></div></div><button class="btn-logout" id="logout-btn">Log Out</button></div>`;
   if (state.loading) return header+`<div class="loading">Loading…</div>`;
   const badges={Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
   return header+`
@@ -434,11 +373,6 @@ function build_scan_overlay() {
     return build_packing_page(fake_container, fake_fill);
   }
 
-  // SHOP QR scan — confirm pending deliveries for that shop
-  if (cid && cid.startsWith("SHOP-")) {
-    return build_shop_deliveries_page(cid);
-  }
-
   // Legacy: scanned a specific container's QR
   const container=state.containers.find(c=>c.id===cid);
   if (!container) return `<div class="overlay"><div class="modal" style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⚠️</div><h2 style="margin-bottom:8px">Container Not Found</h2><p class="hint">No container found with ID <strong>${esc(cid)}</strong>.</p><button class="btn btn-dark mt-16" id="close-scan">Go Back</button></div></div>`;
@@ -447,74 +381,6 @@ function build_scan_overlay() {
   const pending=state.dispatches.find(d=>d.container_id===cid&&!d.confirmed_at);
   if (pending) return build_shop_confirm_page(container,fill,pending);
   return build_packing_page(container,fill);
-}
-
-// Shop QR scan flow — list of pending deliveries for that shop, with confirm buttons
-function build_shop_deliveries_page(shop_qr_id) {
-  // Find the shop by qr_id (use first matching mapping)
-  const mapping = state.shop_mappings.find(m => m.shop_qr_id === shop_qr_id);
-  if (!mapping) {
-    return `<div class="overlay"><div class="modal" style="text-align:center">
-      <div style="font-size:40px;margin-bottom:12px">⚠️</div>
-      <h2 style="margin-bottom:8px">Shop Not Found</h2>
-      <p class="hint">No shop is registered with this QR code.</p>
-      <button class="btn btn-dark mt-16" id="close-scan">Close</button>
-    </div></div>`;
-  }
-  const shop = mapping.master_name;
-  // Find all unconfirmed dispatches for this shop
-  const pending = state.dispatches.filter(d => d.shop === shop && !d.confirmed_at).sort((a,b) => (a.date||"").localeCompare(b.date||""));
-
-  if (packing_state.step === "shop_done") {
-    return `<div class="overlay"><div class="modal" style="text-align:center">
-      <div style="font-size:64px">✅</div>
-      <h2 style="margin:12px 0 8px">Confirmed!</h2>
-      <p style="color:#555;font-size:15px">Deliveries marked as received for <strong>${esc(shop)}</strong>.</p>
-      <p class="hint" style="font-size:13px;margin-top:8px">Thank you!</p>
-      <button class="btn btn-dark mt-16" style="padding:12px 32px" id="close-scan">Close</button>
-    </div></div>`;
-  }
-
-  if (pending.length === 0) {
-    return `<div class="overlay"><div class="modal" style="text-align:center">
-      <div style="font-size:48px">📭</div>
-      <h2 style="margin:8px 0">${esc(shop)}</h2>
-      <p class="hint" style="font-size:14px;margin-top:8px">No pending deliveries to confirm.</p>
-      <button class="btn btn-dark mt-16" id="close-scan">Close</button>
-    </div></div>`;
-  }
-
-  const dispatch_rows = pending.map(d => {
-    const lines = (d.lines || []).map(l => {
-      const size_label = l.bag_size === "Bar 5kg" ? "Bar" : l.bag_size;
-      return `<div style="display:flex;justify-content:space-between;font-size:13px;color:#666;margin:2px 0">
-        <span>🛍️ ${l.bags||"—"} × ${esc(size_label||"?")}</span>
-        <span style="font-weight:600">${Number(l.kg).toFixed(1)}kg</span>
-      </div>`;
-    }).join("");
-    return `<div style="background:#fff;border:2px solid #e8e6e1;border-radius:10px;padding:14px;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:10px">
-        <div>
-          <div style="font-weight:700;font-size:15px">${d.date}</div>
-          <div class="hint" style="font-size:12px;margin-top:2px">${Number(d.total_kg).toFixed(1)}kg total</div>
-        </div>
-        <button class="btn btn-green btn-sm" data-confirm-dispatch="${esc(d.id)}" style="padding:8px 14px">✓ Confirm</button>
-      </div>
-      ${lines}
-    </div>`;
-  }).join("");
-
-  return `<div class="overlay"><div class="modal" style="max-width:480px">
-    <div style="text-align:center;margin-bottom:18px">
-      <div style="font-size:40px">📦</div>
-      <h2 style="margin:8px 0 2px">Deliveries</h2>
-      <div style="font-weight:700;font-size:18px;color:#1a1a1a;margin-top:4px">${esc(shop)}</div>
-      <p class="hint" style="font-size:13px;margin-top:6px">${pending.length} pending delivery${pending.length>1?" — confirm what arrived":""}</p>
-    </div>
-    ${dispatch_rows}
-    ${pending.length > 1 ? `<button class="btn btn-dark" style="width:100%;padding:14px;font-size:15px;border-radius:10px;margin-top:8px" id="confirm-all-dispatches">✓ Confirm All (${pending.length})</button>` : ""}
-    <button class="btn btn-muted btn-full mt-10" id="close-scan">Cancel</button>
-  </div></div>`;
 }
 
 // ── BUCKET FILL WORKFLOW ─────────────────────────────────────────────────────
@@ -2021,36 +1887,6 @@ function attach_listeners() {
     await load_data();
     render();
   }));
-
-  // Shop QR confirm flow — confirm one dispatch at a time
-  app.querySelectorAll("[data-confirm-dispatch]").forEach(btn => btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    btn.textContent = "Confirming…";
-    await supabaseClient.from("dispatches").update({ confirmed_at: new Date().toISOString() }).eq("id", btn.dataset.confirmDispatch);
-    await load_data();
-    // Check if any dispatches remain for this shop; if not, show "all done" screen
-    const shop_qr_id = state.scan_id;
-    const mapping = state.shop_mappings.find(m => m.shop_qr_id === shop_qr_id);
-    const remaining = mapping ? state.dispatches.filter(d => d.shop === mapping.master_name && !d.confirmed_at) : [];
-    if (remaining.length === 0) packing_state.step = "shop_done";
-    render();
-  }));
-
-  // Confirm All for the shop
-  app.querySelector("#confirm-all-dispatches")?.addEventListener("click", async () => {
-    const shop_qr_id = state.scan_id;
-    const mapping = state.shop_mappings.find(m => m.shop_qr_id === shop_qr_id);
-    if (!mapping) return;
-    const pending = state.dispatches.filter(d => d.shop === mapping.master_name && !d.confirmed_at);
-    const ids = pending.map(d => d.id);
-    if (ids.length === 0) return;
-    const btn = document.getElementById("confirm-all-dispatches");
-    if (btn) { btn.disabled = true; btn.textContent = "Confirming…"; }
-    await supabaseClient.from("dispatches").update({ confirmed_at: new Date().toISOString() }).in("id", ids);
-    await load_data();
-    packing_state.step = "shop_done";
-    render();
-  });
 }
 </script>
 </body>

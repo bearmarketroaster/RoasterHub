@@ -1,6 +1,9 @@
-<meta charset="UTF-8">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bear Roastery</title>
+  <title>Bear Mrkt</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <style>
@@ -8,10 +11,8 @@
     body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
     .header { background: #1a1a1a; color: #fff; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
     .header-left { display: flex; align-items: center; gap: 14px; }
-    .header-logo { font-size: 28px; }
     .header-wordmark { height: 26px; width: auto; display: block; }
     .header-brand { display: flex; flex-direction: column; }
-    .header-title { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
     .header-sub   { font-size: 12px; color: #999; margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
     .header-right { display: flex; align-items: center; gap: 14px; }
     .header-user  { font-size: 13px; color: #999; }
@@ -22,21 +23,19 @@
     .module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-bottom: 48px; }
     .module-card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-decoration: none; color: inherit; display: flex; flex-direction: column; gap: 12px; border: 1px solid #e8e6e1; transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s; cursor: pointer; }
     .module-card:hover { border-color: #1a1a1a; box-shadow: 0 4px 16px rgba(0,0,0,0.08); transform: translateY(-2px); }
-    .module-card.coming-soon { opacity: 0.5; cursor: default; pointer-events: none; }
     .module-icon { font-size: 32px; width: 56px; height: 56px; background: #f4f2ed; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
     .module-name { font-size: 16px; font-weight: 700; color: #1a1a1a; }
     .module-desc { font-size: 13px; color: #666; line-height: 1.5; }
     .module-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 12px; border-top: 1px solid #f0eee9; }
     .module-status { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
     .status-active { background: #e7f5ec; color: #16a34a; }
-    .status-soon   { background: #f4f2ed; color: #999; }
     .module-arrow  { font-size: 18px; color: #999; transition: color 0.15s; }
     .module-card:hover .module-arrow { color: #1a1a1a; }
     .footer { text-align: center; padding: 32px; font-size: 12px; color: #999; border-top: 1px solid #e8e6e1; margin-top: 16px; }
     @media (max-width: 600px) { .header { padding: 16px 20px; } .main { padding: 24px 16px; } .module-grid { grid-template-columns: 1fr; } }
   </style>
-
-
+</head>
+<body>
   <div class="header">
     <div class="header-left">
       <img src="wordmark.png" alt="Bear Mrkt" class="header-wordmark" />
@@ -55,7 +54,7 @@
     <div class="module-grid">
       <a class="module-card" href="stock.html">
         <div class="module-icon">📦</div>
-        <div><div class="module-name">Stock &amp; Inventory</div><div class="module-desc">Monitor green bean stock, log deliveries, and track usage across roast sessions.</div></div>
+        <div><div class="module-name">Stock &amp; Inventory</div><div class="module-desc">Monitor green bean stock, log deliveries, manage adjustments, and track staff takeaways.</div></div>
         <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
       </a>
       <a class="module-card" href="roasts.html">
@@ -75,12 +74,12 @@
       </a>
       <a class="module-card" href="settings.html">
         <div class="module-icon">⚙️</div>
-        <div><div class="module-name">Settings</div><div class="module-desc">Manage coffees, FP code mappings, QR base URL, and supplier templates across all modules.</div></div>
+        <div><div class="module-name">Settings</div><div class="module-desc">Manage coffees, FP codes, shops, suppliers, containers, buckets, and users.</div></div>
         <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
       </a>
     </div>
   </div>
-  <div class="footer">Bear Roastery · Operations Platform</div>
+  <div class="footer">Bear Mrkt · Operations Platform</div>
   <script>
     const d = new Date();
     document.getElementById("header-date").textContent = d.toLocaleDateString("en-IE", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
@@ -115,3 +114,5 @@
     }
     updateAuthUI();
   </script>
+</body>
+</html>

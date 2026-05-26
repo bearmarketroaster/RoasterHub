@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dispatch Report — Bear Roastery</title>
+  <title>Dispatch Report — Bear Mrkt</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <style>
@@ -27,7 +27,7 @@
     .card.empty .icon { font-size: 36px; margin-bottom: 8px; }
     .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
     .flex { display: flex; } .flex-between { display: flex; justify-content: space-between; align-items: center; }
-    .gap-6 { gap: 6px; } .gap-8 { gap: 8px; } .gap-10 { gap: 10px; } .gap-12 { gap: 12px; }
+    .gap-6 { gap: 6px; } .gap-8 { gap: 8px; } .gap-12 { gap: 12px; }
     .mb-10 { margin-bottom: 10px; } .mb-12 { margin-bottom: 12px; } .mb-16 { margin-bottom: 16px; }
     .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
     .btn-dark { background: #1a1a1a; }
@@ -64,7 +64,6 @@ const color_for = i => PALETTE[i%PALETTE.length];
 const state = {
   containers: [],
   dispatches: [],
-  shop_mappings: [],
   shop_kind_map: {},   // shop master_name → kind
   fill_coffee_map: {},
   loading: true,
@@ -98,9 +97,8 @@ async function load_data() {
   state.dispatches = (dispatches||[]).map(d => ({ ...d, lines: d.dispatch_lines||[] }));
 
   const { data: shop_mappings } = await supabaseClient.from("shop_mappings").select("master_name, kind");
-  state.shop_mappings = shop_mappings || [];
   state.shop_kind_map = {};
-  state.shop_mappings.forEach(m => { state.shop_kind_map[m.master_name] = m.kind || "shop"; });
+  (shop_mappings || []).forEach(m => { state.shop_kind_map[m.master_name] = m.kind || "shop"; });
 }
 
 function shop_kind(shop) {
@@ -118,7 +116,7 @@ function build_app() {
       <div class="header-left">
         <button class="header-back" id="go-reports">← Reports</button>
         <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
-        <div><div class="header-title">🚚 Dispatch Report</div><div class="header-sub">Bear Roastery</div></div>
+        <div><div class="header-title">🚚 Dispatch Report</div><div class="header-sub">Bear Mrkt</div></div>
       </div>
       <button class="btn-logout" id="logout-btn">Log Out</button>
     </div>`;

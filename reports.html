@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Reports — Bear Roastery</title>
+  <title>Reports — Bear Mrkt</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <style>
@@ -26,14 +26,12 @@
     .module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-bottom: 48px; }
     .module-card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-decoration: none; color: inherit; display: flex; flex-direction: column; gap: 12px; border: 1px solid #e8e6e1; transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s; cursor: pointer; }
     .module-card:hover { border-color: #1a1a1a; box-shadow: 0 4px 16px rgba(0,0,0,0.08); transform: translateY(-2px); }
-    .module-card.coming-soon { opacity: 0.5; cursor: default; pointer-events: none; }
     .module-icon { font-size: 32px; width: 56px; height: 56px; background: #f4f2ed; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
     .module-name { font-size: 16px; font-weight: 700; color: #1a1a1a; }
     .module-desc { font-size: 13px; color: #666; line-height: 1.5; }
     .module-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 12px; border-top: 1px solid #f0eee9; }
     .module-status { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
     .status-active { background: #e7f5ec; color: #16a34a; }
-    .status-soon   { background: #f4f2ed; color: #999; }
     .module-arrow  { font-size: 18px; color: #999; transition: color 0.15s; }
     .module-card:hover .module-arrow { color: #1a1a1a; }
     @media (max-width: 600px) { .header { padding: 16px 20px; } .main { padding: 24px 16px; } .module-grid { grid-template-columns: 1fr; } }
@@ -47,7 +45,7 @@
       <div class="header-logo">📊</div>
       <div class="header-brand">
         <div class="header-title">Reports</div>
-        <div class="header-sub">Bear Roastery</div>
+        <div class="header-sub">Bear Mrkt</div>
       </div>
     </div>
     <div class="header-right">
@@ -58,11 +56,6 @@
   <div class="main">
     <div class="section-label">Available Reports</div>
     <div class="module-grid">
-      <div class="module-card coming-soon">
-        <div class="module-icon">📦</div>
-        <div><div class="module-name">Suppliers</div><div class="module-desc">Green coffee deliveries, costs over time, lead times by supplier.</div></div>
-        <div class="module-footer"><span class="module-status status-soon">Coming Soon</span></div>
-      </div>
       <a class="module-card" href="reports-stock.html">
         <div class="module-icon">🌱</div>
         <div><div class="module-name">Green Stock Movement</div><div class="module-desc">Stock in/out, manual adjustments, write-offs, broken down by coffee and reason.</div></div>
