@@ -9,28 +9,29 @@
   <script src="config.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
-    .toolbar { background: #1a1008; color: #e8d5b0; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; position: sticky; top: 0; z-index: 10; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    .toolbar { background: #1a1a1a; color: #fff; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; position: sticky; top: 0; z-index: 10; }
     .toolbar-left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-    .toolbar-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; }
-    .toolbar-back:hover { color: #e8d5b0; }
+    .toolbar-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; }
+    .toolbar-back:hover { color: #fff; }
     .toolbar-title { font-weight: 700; font-size: 16px; }
     .toolbar-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .toolbar label { font-size: 12px; color: #c8a96e; margin-right: 4px; }
-    .toolbar select, .toolbar input { background: #2d1e0f; color: #e8d5b0; border: 1px solid #5a3e1b; border-radius: 4px; padding: 4px 8px; font-size: 13px; font-family: inherit; }
-    .toolbar select option { background: #1a1008; color: #e8d5b0; }
-    .btn-print { background: #c8a96e; color: #1a1008; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
-    .btn-print:hover { background: #d4b88a; }
-    .size-preset { background: #2d1e0f; color: #c8a96e; border: 1px solid #5a3e1b; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
-    .size-preset:hover { background: #c8a96e; color: #1a1008; }
-    .picker { background: #fff; padding: 16px 24px; border-bottom: 1px solid #e0d5c5; }
-    .picker h3 { font-size: 14px; margin-bottom: 10px; }
-    .pick-item { display: inline-flex; align-items: center; gap: 6px; background: #f5f0eb; border-radius: 4px; padding: 4px 10px; margin: 2px; cursor: pointer; font-size: 12px; user-select: none; border: 1px solid #e0d5c5; }
-    .pick-item.selected { background: #1a1008; color: #e8d5b0; border-color: #1a1008; }
+    .toolbar label { font-size: 12px; color: #999; margin-right: 4px; }
+    .toolbar select, .toolbar input { background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font-size: 13px; font-family: inherit; }
+    .toolbar select option { background: #1a1a1a; color: #fff; }
+    .btn-print { background: #fff; color: #1a1a1a; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; }
+    .btn-print:hover { background: #e8e6e1; }
+    .size-preset { background: #2a2a2a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; transition: all 0.15s; }
+    .size-preset:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .picker { background: #fff; padding: 16px 24px; border-bottom: 1px solid #e8e6e1; }
+    .picker h3 { font-size: 14px; margin-bottom: 10px; color: #1a1a1a; }
+    .pick-item { display: inline-flex; align-items: center; gap: 6px; background: #f4f2ed; border-radius: 4px; padding: 4px 10px; margin: 2px; cursor: pointer; font-size: 12px; user-select: none; border: 1px solid #e8e6e1; transition: all 0.1s; }
+    .pick-item:hover { border-color: #1a1a1a; }
+    .pick-item.selected { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
     .sheet { padding: 20px; max-width: 1100px; margin: 0 auto; }
     .qr-grid { display: grid; gap: var(--gap, 10px); grid-template-columns: repeat(auto-fill, minmax(var(--qr-size, 140px), max-content)); justify-content: center; }
-    .qr-tile { background: #fff; border: 1px dashed #ddd; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; transition: border-color 0.15s, transform 0.1s; cursor: pointer; }
-    .qr-tile:hover { border-color: #c8a96e; border-style: solid; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .qr-tile { background: #fff; border: 1px dashed #d4d1ca; padding: 10px; text-align: center; border-radius: 4px; break-inside: avoid; transition: border-color 0.15s, transform 0.1s; cursor: pointer; }
+    .qr-tile:hover { border-color: #1a1a1a; border-style: solid; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
     .qr-tile.printing-only { /* added during single-tile print */ }
     body.print-single .qr-tile:not(.printing-only) { display: none !important; }
     .qr-tile .qr-canvas { width: var(--qr-size, 140px); height: var(--qr-size, 140px); margin: 0 auto; }
@@ -44,10 +45,9 @@
     .qr-label { margin-top: 6px; line-height: 1.2; }
     .qr-label-primary { font-weight: 700; font-size: var(--qr-label-primary-size, 11pt); color: #1a1a1a; word-break: break-word; }
     .qr-label-secondary { font-size: var(--qr-label-secondary-size, 8pt); color: #666; margin-top: 2px; word-break: break-word; }
-    .empty { text-align: center; padding: 60px 20px; color: #888; }
+    .empty { text-align: center; padding: 60px 20px; color: #999; }
     @media print {
       p { display: none !important; }
-      
       .toolbar, .picker { display: none !important; }
       body { background: #fff; }
       .sheet { padding: 0; max-width: none; }
@@ -180,7 +180,7 @@
         ? state.shops
         : state.fp_codes;
       if (all_items.length === 0) {
-        el.innerHTML = `<p style="color:#888;font-size:13px;font-style:italic">No ${type_label} available.</p>`;
+        el.innerHTML = `<p style="color:#999;font-size:13px;font-style:italic">No ${type_label} available.</p>`;
         return;
       }
 
@@ -190,7 +190,7 @@
         const coffees = [...new Set(state.fp_codes.map(f => f.coffee_name).filter(Boolean))].sort();
         if (coffees.length > 1) {
           coffee_filter_html = `
-            <select id="coffee-filter" style="font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid #ddd;background:#fff;color:#1a1008;min-width:200px">
+            <select id="coffee-filter" style="font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid #e8e6e1;background:#fff;color:#1a1a1a;min-width:200px">
               <option value="all" ${state.coffee_filter==="all"?"selected":""}>All coffees</option>
               ${coffees.map(c => `<option value="${c.replace(/"/g,'&quot;')}" ${state.coffee_filter===c?"selected":""}>${c}</option>`).join("")}
             </select>`;
@@ -206,7 +206,7 @@
       el.innerHTML = `
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
           ${coffee_filter_html}
-          <span style="font-size:12px;color:#888">${items.length} ${type_label.slice(0, -1)}${items.length!==1?"s":""} shown</span>
+          <span style="font-size:12px;color:#666">${items.length} ${type_label.slice(0, -1)}${items.length!==1?"s":""} shown</span>
         </div>`;
 
       el.querySelector("#coffee-filter")?.addEventListener("change", e => {

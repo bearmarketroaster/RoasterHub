@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bear Roastery — Operations Flow</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #fafaf8; color: #1a1a1a; margin: 0; padding: 40px 24px; }
+  .wrap { max-width: 1100px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 36px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); border: 1px solid #e8e6e1; }
+  h1 { margin: 0 0 4px; font-size: 26px; color: #1a1a1a; }
+  .sub { color: #666; font-size: 14px; margin-bottom: 32px; }
+  .mermaid { text-align: center; margin: 20px 0; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 30px; padding-top: 24px; border-top: 1px solid #e8e6e1; font-size: 13px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 16px; height: 16px; border-radius: 3px; border: 2px solid; }
+  .sw-roaster { background: #fff7ed; border-color: #d97706; }
+  .sw-packer  { background: #e7f5ec; border-color: #16a34a; }
+  .sw-admin   { background: #f0e9f7; border-color: #7e57c2; }
+  .notes { margin-top: 28px; background: #fafaf8; border: 1px solid #e8e6e1; border-radius: 8px; padding: 18px 22px; font-size: 14px; line-height: 1.6; }
+  .notes strong { color: #1a1a1a; }
+  .notes ul { margin: 8px 0 0 18px; padding: 0; }
+  .notes li { margin-bottom: 4px; }
+  @media print { body { padding: 12px; background: #fff; } .wrap { box-shadow: none; padding: 16px; border: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🐻 Bear Roastery — Operations Flow</h1>
+  <div class="sub">End-to-end traceability: green delivery → roast → pack → dispatch → delivery → return</div>
+
+  <div class="mermaid">
+flowchart TD
+    Start([Green coffee arrives]) --> Stock[<b>Admin</b><br/>Log delivery in Stock<br/>Upload invoice PDF]
+    Stock --> Ready{Green stock<br/>available?}
+    Ready -->|Yes| RoastStart
+
+    RoastStart["<b>Roaster</b><br/>Pick coffee + container<br/>from Settings list"]
+    RoastStart --> LogBatches[<b>Roaster</b><br/>Log each batch:<br/>Cropster ID + green weight]
+    LogBatches --> WeighOut[<b>Roaster</b><br/>Weigh full container<br/>after roasting]
+    WeighOut --> SaveRoast[<b>Roaster</b><br/>Save roast<br/>Container = WAITING]
+
+    SaveRoast --> Cool([Coffee rests / degasses])
+    Cool --> PackTrigger{Order to pack?}
+    PackTrigger -->|Yes| PackStart
+
+    PackStart[<b>Packer</b><br/>Open Traceability<br/>Set container ACTIVE]
+    PackStart --> ScanLoop[<b>Packer</b><br/>Scan bag QR<br/>or bucket QR]
+    ScanLoop --> Match[System auto-picks<br/>oldest container FIFO]
+    Match --> MoreBags{More items<br/>to pack?}
+    MoreBags -->|Yes| ScanLoop
+    MoreBags -->|No| PickShop[<b>Packer</b><br/>Pick destination:<br/>Shop / Wholesale / Online]
+    PickShop --> Confirm[<b>Packer</b><br/>Confirm dispatch]
+
+    Confirm --> Route{Destination<br/>kind?}
+    Route -->|Shop| Transit[Status: IN TRANSIT<br/>Courier delivers]
+    Route -->|Wholesale or Online| AutoConfirm[Auto-confirmed<br/>at pack time]
+
+    Transit --> ShopScan[<b>Shop manager</b><br/>scans shop QR<br/>on arrival]
+    ShopScan --> Delivered[Status: DELIVERED]
+    AutoConfirm --> Delivered
+
+    Delivered --> BucketReturn{Buckets<br/>involved?}
+    BucketReturn -->|Yes| Return[<b>Packer</b><br/>scan returned buckets<br/>+ note condition]
+    BucketReturn -->|No| Done([Done — visible in Reports])
+    Return --> Done
+
+    Ready -->|No| Wait([Wait for next delivery])
+
+    classDef roasterClass fill:#fff7ed,stroke:#d97706,stroke-width:2px,color:#1a1a1a
+    classDef packerClass fill:#e7f5ec,stroke:#16a34a,stroke-width:2px,color:#1a1a1a
+    classDef adminClass fill:#f0e9f7,stroke:#7e57c2,stroke-width:1px,color:#1a1a1a
+    classDef sysClass fill:#f4f2ed,stroke:#666,color:#1a1a1a
+
+    class RoastStart,LogBatches,WeighOut,SaveRoast roasterClass
+    class PackStart,ScanLoop,PickShop,Confirm,Return packerClass
+    class Stock adminClass
+    class ShopScan packerClass
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="swatch sw-admin"></span> Admin actions</div>
+    <div class="legend-item"><span class="swatch sw-roaster"></span> Roaster actions</div>
+    <div class="legend-item"><span class="swatch sw-packer"></span> Packer / Shop manager actions</div>
+  </div>
+
+  <div class="notes">
+    <strong>Key features that protect us:</strong>
+    <ul>
+      <li><strong>FIFO automation</strong> — packers can't accidentally pick the wrong container; the system picks the oldest active one for them.</li>
+      <li><strong>Bucket traceability</strong> — every 5kg bar bucket is uniquely identified, tracked through every dispatch, and audited on return.</li>
+      <li><strong>Shop QR confirmation</strong> — drivers / shop managers confirm receipt with a single scan. No paperwork.</li>
+      <li><strong>Wholesale &amp; online</strong> — auto-confirmed at pack time. Same flow, no QR overhead.</li>
+      <li><strong>Full audit trail</strong> — from green delivery (with invoice) to shop confirmation. Every kg accounted for.</li>
+      <li><strong>Roaster attribution</strong> — every roast is tagged to the logged-in roaster. Reports show consistency per roaster.</li>
+      <li><strong>Bucket condition tracking</strong> — clean / dirty / damaged / lost on return. Reports flag shops mistreating buckets.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: "base", themeVariables: {
+    fontFamily: "system-ui, sans-serif",
+    primaryColor: "#fff",
+    primaryTextColor: "#1a1a1a",
+    primaryBorderColor: "#666",
+    lineColor: "#666",
+    secondaryColor: "#f4f2ed",
+    tertiaryColor: "#fff",
+  }});
+</script>
+</body>
+</html>
