@@ -6,29 +6,40 @@
   <title>Roastery Trace</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
     input, select, button { font-family: inherit; font-size: 14px; }
     button { cursor: pointer; }
     #app { min-height: 100vh; }
-    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
     .header span.logo { font-size: 22px; }
     .header span.title { font-weight: 700; font-size: 18px; letter-spacing: 1px; }
-    .tabs { display: flex; border-bottom: 2px solid #c8a96e; background: #fff; overflow-x: auto; }
-    .tab-btn { padding: 12px 20px; border: none; background: #fff; color: #555; font-weight: 400; font-size: 14px; white-space: nowrap; transition: background 0.15s; cursor: pointer; }
-    .tab-btn.active { background: #1a1008; color: #e8d5b0; font-weight: 700; }
+    .tabs { display: flex; border-bottom: 1px solid #e8e6e1; background: #fff; overflow-x: auto; }
+    .tab-btn { padding: 12px 20px; border: none; background: #fff; color: #666; font-weight: 500; font-size: 14px; white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+    .tab-btn:hover { color: #1a1a1a; }
+    .tab-btn.active { color: #1a1a1a; font-weight: 700; border-bottom-color: #1a1a1a; }
     .content { padding: 24px; max-width: 900px; margin: 0 auto; }
-    .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; }
     .card + .card { margin-top: 12px; }
-    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; color: #1a1008; }
-    input:focus, select:focus, textarea:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; box-shadow: none; }
-    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #e8e6e1; font-size: 14px; background: #fff; color: #1a1a1a; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
+    label.lbl { display: block; font-size: 12px; color: #666; margin-bottom: 4px; font-weight: 500; }
     .field { margin-bottom: 0; }
-    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
-    .btn-dark { background: #1a1008; } .btn-green { background: #4a9e6b; } .btn-dkgreen { background: #4a7c4e; }
-    .btn-amber { background: #c8a96e; } .btn-grey { background: #888; } .btn-muted { background: #aaa; }
-    .btn-ghost { background: #e8d5b0; color: #5a3e1b; }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; } .btn-lg { padding: 12px 24px; font-size: 15px; }
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
+    .btn-dark { background: #1a1a1a; }
+    .btn-dark:hover:not(:disabled) { background: #000; }
+    .btn-green { background: #16a34a; }
+    .btn-green:hover:not(:disabled) { background: #15803d; }
+    .btn-dkgreen { background: #15803d; }
+    .btn-dkgreen:hover:not(:disabled) { background: #166534; }
+    .btn-amber { background: #d97706; }
+    .btn-amber:hover:not(:disabled) { background: #b45309; }
+    .btn-grey { background: #666; }
+    .btn-muted { background: #999; }
+    .btn-ghost { background: #f4f2ed; color: #1a1a1a; border: 1px solid #e8e6e1; }
+    .btn-ghost:hover:not(:disabled) { background: #e8e6e1; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-lg { padding: 12px 24px; font-size: 15px; }
     .btn-full { width: 100%; padding: 12px; border-radius: 10px; }
     .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -39,29 +50,29 @@
     .gap-6{gap:6px} .gap-8{gap:8px} .gap-10{gap:10px} .gap-12{gap:12px}
     .mt-4{margin-top:4px} .mt-8{margin-top:8px} .mt-10{margin-top:10px} .mt-12{margin-top:12px} .mt-16{margin-top:16px}
     .mb-8{margin-bottom:8px} .mb-12{margin-bottom:12px} .mb-16{margin-bottom:16px}
-    .stock-track { background: #e0d5c5; border-radius: 4px; height: 8px; }
+    .stock-track { background: #f0eee9; border-radius: 4px; height: 8px; }
     .stock-fill { border-radius: 4px; height: 8px; transition: width 0.3s; }
-    h2 { color: #1a1008; margin-bottom: 16px; } h3 { color: #1a1008; margin-bottom: 12px; }
-    .empty { text-align: center; color: #aaa; padding: 40px 20px; }
+    h2 { color: #1a1a1a; margin-bottom: 16px; } h3 { color: #1a1a1a; margin-bottom: 12px; }
+    .empty { text-align: center; color: #999; padding: 40px 20px; }
     .empty .icon { font-size: 36px; margin-bottom: 8px; }
-    .report-bar-track { background: #f0ebe4; border-radius: 3px; height: 6px; width: 80px; }
+    .report-bar-track { background: #f0eee9; border-radius: 3px; height: 6px; width: 80px; }
     .report-bar-fill { border-radius: 3px; height: 6px; }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 24px; z-index: 100; }
-    .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 440px; box-shadow: 0 4px 24px rgba(0,0,0,0.15); margin: auto; }
+    .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 440px; box-shadow: 0 4px 24px rgba(0,0,0,0.15); margin: auto; border: 1px solid #e8e6e1; }
     .collapsible-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
-    .collapsible-arrow { font-size: 16px; color: #c8a96e; font-weight: 700; }
+    .collapsible-arrow { font-size: 16px; color: #666; font-weight: 700; }
     .chart-wrap { display: flex; align-items: flex-end; gap: 4px; height: 100px; overflow-x: auto; padding-bottom: 4px; }
     .chart-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 44px; flex: 1; }
-    .chart-bar { background: #1a1008; border-radius: 3px 3px 0 0; width: 100%; transition: height 0.3s; }
-    .chart-val { font-size: 10px; color: #888; } .chart-lbl { font-size: 9px; color: #aaa; white-space: nowrap; }
+    .chart-bar { background: #1a1a1a; border-radius: 3px 3px 0 0; width: 100%; transition: height 0.3s; }
+    .chart-val { font-size: 10px; color: #666; } .chart-lbl { font-size: 9px; color: #999; white-space: nowrap; }
     .mono { font-family: monospace; }
-    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
-    .btn-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
-    .btn-back:hover { color: #e8d5b0; }
-    .err { color: #e05c2a; font-size: 13px; margin-top: 8px; } .hint { color: #888; font-size: 13px; }
-    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
-    details summary { font-size: 12px; color: #aaa; cursor: pointer; list-style: none; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .btn-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .btn-back:hover { color: #fff; }
+    .err { color: #dc2626; font-size: 13px; margin-top: 8px; } .hint { color: #999; font-size: 13px; }
+    .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+    details summary { font-size: 12px; color: #999; cursor: pointer; list-style: none; }
     details summary::-webkit-details-marker { display: none; }
     @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .grid-4 { grid-template-columns: 1fr 1fr; } .content { padding: 16px; } }
   </style>
@@ -188,7 +199,7 @@ async function send_to_samples(container_id) {
   render();
 }
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-const PALETTE = ["#1a1008","#c8a96e","#4a9e6b","#e05c2a","#4a7c4e","#e0a82a","#888","#5a3e1b"];
+const PALETTE = ["#1a1a1a","#666","#16a34a","#dc2626","#4a7c4e","#d97706","#666","#1a1a1a"];
 function color_for(i) { return PALETTE[i%PALETTE.length]; }
 async function load_pdf_js() {
   if (window.pdfjsLib) return window.pdfjsLib;
@@ -205,7 +216,7 @@ async function extract_pdf_text(file) {
 async function render_qr(el, value, size=140) {
   if (!window.QRCode) { await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
   el.innerHTML="";
-  new window.QRCode(el,{text:value,width:size,height:size,colorDark:"#1a1008",colorLight:"#fff",correctLevel:window.QRCode.CorrectLevel.M});
+  new window.QRCode(el,{text:value,width:size,height:size,colorDark:"#1a1a1a",colorLight:"#fff",correctLevel:window.QRCode.CorrectLevel.M});
 }
 
 async function load_data() {
@@ -387,11 +398,11 @@ function build_app() {
   if (state.scan_id) return build_scan_overlay();
   if (state.ui.fill_bucket_container) return build_fill_buckets_overlay();
   if (state.ui.bucket_return_open) return build_bucket_return_overlay();
-  const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#c8a96e;margin-top:1px">Bear Roastery</div></div></div><button class="btn-logout" id="logout-btn">Log Out</button></div>`;
+  const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Roastery</div></div></div><button class="btn-logout" id="logout-btn">Log Out</button></div>`;
   if (state.loading) return header+`<div class="loading">Loading…</div>`;
   const badges={Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
   return header+`
-    <div class="tabs">${TABS.map((t,i)=>`<button class="tab-btn${state.tab===i?" active":""}" data-tab="${i}">${esc(t)}${badges[t]>0?`<span class="tag" style="background:#e05c2a;color:#fff;margin-left:6px">${badges[t]}</span>`:""}</button>`).join("")}</div>
+    <div class="tabs">${TABS.map((t,i)=>`<button class="tab-btn${state.tab===i?" active":""}" data-tab="${i}">${esc(t)}${badges[t]>0?`<span class="tag" style="background:#dc2626;color:#fff;margin-left:6px">${badges[t]}</span>`:""}</button>`).join("")}</div>
     <div class="content">${[build_containers_tab,build_deliveries_tab][state.tab]()}</div>`;
 }
 
@@ -467,7 +478,7 @@ function build_shop_deliveries_page(shop_qr_id) {
         <span style="font-weight:600">${Number(l.kg).toFixed(1)}kg</span>
       </div>`;
     }).join("");
-    return `<div style="background:#fff;border:2px solid #e0d5c5;border-radius:10px;padding:14px;margin-bottom:10px">
+    return `<div style="background:#fff;border:2px solid #e8e6e1;border-radius:10px;padding:14px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:10px">
         <div>
           <div style="font-weight:700;font-size:15px">${d.date}</div>
@@ -483,7 +494,7 @@ function build_shop_deliveries_page(shop_qr_id) {
     <div style="text-align:center;margin-bottom:18px">
       <div style="font-size:40px">📦</div>
       <h2 style="margin:8px 0 2px">Deliveries</h2>
-      <div style="font-weight:700;font-size:18px;color:#1a1008;margin-top:4px">${esc(shop)}</div>
+      <div style="font-weight:700;font-size:18px;color:#1a1a1a;margin-top:4px">${esc(shop)}</div>
       <p class="hint" style="font-size:13px;margin-top:6px">${pending.length} pending delivery${pending.length>1?" — confirm what arrived":""}</p>
     </div>
     ${dispatch_rows}
@@ -563,7 +574,7 @@ function flash_fill_scan(msg, type) {
   const flash = document.getElementById("fill-flash");
   if (flash) {
     flash.style.display = "block";
-    flash.style.background = type === "success" ? "#4a9e6b" : type === "error" ? "#e05c2a" : "#1a1008";
+    flash.style.background = type === "success" ? "#16a34a" : type === "error" ? "#dc2626" : "#1a1a1a";
     flash.textContent = msg;
   }
   if (_flash_fill_timer) clearTimeout(_flash_fill_timer);
@@ -582,12 +593,12 @@ function update_fill_panel() {
   const remaining_after = container ? (container.remaining - session_kg).toFixed(1) : "?";
   const list = fill_state.filled.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
     <div><div style="font-weight:600;font-size:14px">🪣 5kg ${esc(b.coffee||"?")}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
-    <button data-unfill="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
+    <button data-unfill="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <div style="font-weight:700;font-size:13px">FILLING (${fill_state.filled.length})</div>
-      <div style="font-size:13px;color:#1a1008;font-weight:700">${session_kg}kg used · ${remaining_after}kg left</div>
+      <div style="font-size:13px;color:#1a1a1a;font-weight:700">${session_kg}kg used · ${remaining_after}kg left</div>
     </div>
     ${fill_state.filled.length ? list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets filled yet — scan empty bucket QRs</p>'}
   `;
@@ -605,7 +616,7 @@ function build_fill_buckets_overlay() {
     state.ui.fill_bucket_container = null;
     return `<div class="overlay"><div class="modal" style="text-align:center"><p>Container not found.</p><button class="btn btn-dark mt-16" id="fill-cancel">Close</button></div></div>`;
   }
-  const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${fill_state.scanner_msg ? `background:${fill_state.scanner_msg_type==="success"?"#4a9e6b":fill_state.scanner_msg_type==="error"?"#e05c2a":"#1a1008"}` : "display:none"}`;
+  const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${fill_state.scanner_msg ? `background:${fill_state.scanner_msg_type==="success"?"#16a34a":fill_state.scanner_msg_type==="error"?"#dc2626":"#1a1a1a"}` : "display:none"}`;
   return `<div class="overlay"><div class="modal" style="max-width:480px">
     <div style="text-align:center;margin-bottom:14px">
       <div style="font-size:40px">🪣</div>
@@ -613,7 +624,7 @@ function build_fill_buckets_overlay() {
       <div class="hint" style="font-size:13px;margin-top:4px">From ${esc(container.id)} · ${esc(container.coffee||"?")} · ${container.remaining.toFixed(1)}kg available</div>
     </div>
 
-    <div style="position:relative;background:#1a1008;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
+    <div style="position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
       <div id="fill-flash" style="${flash_style}">${esc(fill_state.scanner_msg||"")}</div>
       <div id="fill-qr-scanner" style="width:100%;min-height:240px"></div>
     </div>
@@ -623,10 +634,10 @@ function build_fill_buckets_overlay() {
         <input id="fill-manual-input" placeholder="Search empty buckets by name or ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
         <button class="btn btn-dark btn-sm" id="fill-manual-btn">Add</button>
       </div>
-      <div id="fill-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e0d5c5;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
+      <div id="fill-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e8e6e1;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
     </div>
 
-    <div id="fill-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
+    <div id="fill-panel" style="background:#f4f2ed;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
       <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets filled yet — scan empty bucket QRs</p>
     </div>
 
@@ -714,7 +725,7 @@ function flash_return_scan(msg, type) {
   const flash = document.getElementById("return-flash");
   if (flash) {
     flash.style.display = "block";
-    flash.style.background = type === "success" ? "#4a9e6b" : type === "error" ? "#e05c2a" : "#1a1008";
+    flash.style.background = type === "success" ? "#16a34a" : type === "error" ? "#dc2626" : "#1a1a1a";
     flash.textContent = msg;
   }
   if (_flash_return_timer) clearTimeout(_flash_return_timer);
@@ -730,7 +741,7 @@ function update_return_panel() {
   if (!panel) { render(); return; }
   const list = return_state.returned.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
     <div><div style="font-weight:600;font-size:14px">🪣 ${esc(b.id)}</div><div class="hint" style="font-size:11px">Previously: ${esc(b.prev_status||"?")}${b.prev_coffee?` · ${esc(b.prev_coffee)}`:""}</div></div>
-    <button data-unreturn="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
+    <button data-unreturn="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -748,7 +759,7 @@ function update_return_panel() {
 
 function build_bucket_return_overlay() {
   const condition = state.ui.bucket_return_condition || "clean";
-  const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${return_state.scanner_msg ? `background:${return_state.scanner_msg_type==="success"?"#4a9e6b":return_state.scanner_msg_type==="error"?"#e05c2a":"#1a1008"}` : "display:none"}`;
+  const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${return_state.scanner_msg ? `background:${return_state.scanner_msg_type==="success"?"#16a34a":return_state.scanner_msg_type==="error"?"#dc2626":"#1a1a1a"}` : "display:none"}`;
   return `<div class="overlay"><div class="modal" style="max-width:480px">
     <div style="text-align:center;margin-bottom:14px">
       <div style="font-size:40px">↩️</div>
@@ -759,11 +770,11 @@ function build_bucket_return_overlay() {
     <div style="margin-bottom:14px">
       <label class="lbl" style="font-size:13px;margin-bottom:6px;display:block">Condition for these buckets</label>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
-        ${["clean","dirty","damaged","lost"].map(c => `<button class="btn ${condition===c?"btn-dark":"btn-ghost"} btn-sm" data-set-condition="${c}" style="${condition===c?"color:#e8d5b0":""};text-transform:capitalize">${c}</button>`).join("")}
+        ${["clean","dirty","damaged","lost"].map(c => `<button class="btn ${condition===c?"btn-dark":"btn-ghost"} btn-sm" data-set-condition="${c}" style="${condition===c?"color:#fff":""};text-transform:capitalize">${c}</button>`).join("")}
       </div>
     </div>
 
-    <div style="position:relative;background:#1a1008;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
+    <div style="position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
       <div id="return-flash" style="${flash_style}">${esc(return_state.scanner_msg||"")}</div>
       <div id="return-qr-scanner" style="width:100%;min-height:240px"></div>
     </div>
@@ -773,10 +784,10 @@ function build_bucket_return_overlay() {
         <input id="return-manual-input" placeholder="Search dispatched buckets by name or ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
         <button class="btn btn-dark btn-sm" id="return-manual-btn">Add</button>
       </div>
-      <div id="return-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e0d5c5;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
+      <div id="return-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e8e6e1;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
     </div>
 
-    <div id="return-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
+    <div id="return-panel" style="background:#f4f2ed;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
       <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets scanned — scan returning bucket QRs</p>
     </div>
 
@@ -858,7 +869,7 @@ function build_containers_tab() {
   const render_container_card = (c, mode) => {
     const in_transit = state.dispatches.find(d => d.container_id===c.id && !d.confirmed_at);
     const remaining = c.remaining || 0;
-    const bar_color = remaining < 10 ? "#e05c2a" : "#4a9e6b";
+    const bar_color = remaining < 10 ? "#dc2626" : "#16a34a";
     const pct = c.total_roasted > 0 ? Math.min(100, Math.round((remaining / c.total_roasted) * 100)) : 0;
     const latest_session = c.roast_sessions[0];
 
@@ -879,12 +890,12 @@ function build_containers_tab() {
       : "";
 
     return `
-      <div class="card" style="border-left:4px solid ${mode==="active"?"#4a9e6b":mode==="waiting"?"#c8a96e":"#ccc"};margin-bottom:10px;${mode==="empty"?"opacity:0.7":""}">
+      <div class="card" style="border-left:4px solid ${mode==="active"?"#16a34a":mode==="waiting"?"#d97706":"#ccc"};margin-bottom:10px;${mode==="empty"?"opacity:0.7":""}">
         <div class="flex-between flex-wrap">
           <div class="flex-wrap gap-6">
             <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>
-            ${c.fill_id ? `<span class="mono" style="background:#f0ebe4;color:#888;padding:2px 8px;border-radius:4px;font-size:11px">${esc(c.fill_id)}</span>` : ""}
-            ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#e0a82a;border-radius:4px">⏳ Has Pending Dispatch</span>` : ""}
+            ${c.fill_id ? `<span class="mono" style="background:#f0eee9;color:#666;padding:2px 8px;border-radius:4px;font-size:11px">${esc(c.fill_id)}</span>` : ""}
+            ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#d97706;border-radius:4px">⏳ Has Pending Dispatch</span>` : ""}
           </div>
           <div class="flex-wrap gap-6">
             ${fill_buckets_button}
@@ -893,7 +904,7 @@ function build_containers_tab() {
           </div>
         </div>
         ${c.coffee ? `<div style="margin-top:10px;font-weight:600;font-size:15px">${esc(c.coffee)}</div>` : ""}
-        <div style="font-size:13px;color:#888;margin-top:2px">${c.coffee ? `Last roast: ${latest_session?.date || "—"} · ` : ""}Total roasted: ${c.total_roasted.toFixed(1)}kg</div>
+        <div style="font-size:13px;color:#666;margin-top:2px">${c.coffee ? `Last roast: ${latest_session?.date || "—"} · ` : ""}Total roasted: ${c.total_roasted.toFixed(1)}kg</div>
         ${mode !== "empty" ? `
           <div style="margin-top:10px">
             <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
@@ -951,25 +962,25 @@ function build_containers_tab() {
 
   const filled_html = Object.entries(filled_by_coffee).map(([coffee, buckets]) => `
     <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#1a1008;margin-bottom:4px">${esc(coffee)} <span class="hint" style="font-weight:400">(${buckets.length} × 5kg = ${(buckets.length*5).toFixed(0)}kg)</span></div>
+      <div style="font-weight:700;font-size:13px;color:#1a1a1a;margin-bottom:4px">${esc(coffee)} <span class="hint" style="font-weight:400">(${buckets.length} × 5kg = ${(buckets.length*5).toFixed(0)}kg)</span></div>
       ${buckets.map(fmt_bucket_row).join("")}
     </div>`).join("");
 
   const in_transit_html = in_transit_buckets.length === 0 ? "" : `
     <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#e0a82a;margin-bottom:4px">⏳ In transit <span class="hint" style="font-weight:400;color:#888">(${in_transit_buckets.length}) — packed, awaiting delivery confirmation</span></div>
+      <div style="font-weight:700;font-size:13px;color:#d97706;margin-bottom:4px">⏳ In transit <span class="hint" style="font-weight:400;color:#666">(${in_transit_buckets.length}) — packed, awaiting delivery confirmation</span></div>
       ${in_transit_buckets.map(fmt_bucket_row).join("")}
     </div>`;
 
   const at_shop_html = at_shop_buckets.length === 0 ? "" : `
     <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#4a9e6b;margin-bottom:4px">✓ At shops <span class="hint" style="font-weight:400;color:#888">(${at_shop_buckets.length}) — confirmed delivered</span></div>
+      <div style="font-weight:700;font-size:13px;color:#16a34a;margin-bottom:4px">✓ At shops <span class="hint" style="font-weight:400;color:#666">(${at_shop_buckets.length}) — confirmed delivered</span></div>
       ${at_shop_buckets.map(fmt_bucket_row).join("")}
     </div>`;
 
   const empty_html = empty_buckets.length === 0 ? "" : `
     <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#1a1008;margin-bottom:4px">Empty at roastery <span class="hint" style="font-weight:400">(${empty_buckets.length})</span></div>
+      <div style="font-weight:700;font-size:13px;color:#1a1a1a;margin-bottom:4px">Empty at roastery <span class="hint" style="font-weight:400">(${empty_buckets.length})</span></div>
       <div class="hint" style="font-size:12px">Ready to fill from any active container.</div>
     </div>`;
 
@@ -983,13 +994,13 @@ function build_containers_tab() {
     </div>
 
     ${(buckets_filled + buckets_empty + buckets_out) > 0 ? `
-      <details style="background:#fff8ee;border-radius:10px;margin-bottom:14px;border:1px solid #e8d5b0">
-        <summary style="padding:12px 14px;cursor:pointer;font-size:13px;color:#1a1008;list-style:none;font-weight:600">
+      <details style="background:#fff7ed;border-radius:10px;margin-bottom:14px;border:1px solid #fde4c2">
+        <summary style="padding:12px 14px;cursor:pointer;font-size:13px;color:#1a1a1a;list-style:none;font-weight:600">
           🪣 Bucket Fleet · <span style="font-weight:400">${buckets_filled} filled · ${buckets_empty} empty · ${buckets_transit} in transit · ${buckets_atshop} at shops</span>
-          <span style="float:right;color:#c8a96e">▾</span>
+          <span style="float:right;color:#666">▾</span>
         </summary>
-        <div style="padding:0 14px 14px;border-top:1px solid #f0ebe4;background:#fdfaf5">
-          ${buckets_filled > 0 ? `<div style="font-size:11px;color:#c8a96e;font-weight:700;letter-spacing:1px;margin:10px 0 6px">FILLED — READY TO PACK</div>${filled_html}` : `<p class="hint" style="font-size:12px;margin:10px 0">No filled buckets — fill from an active container with the 🪣 button.</p>`}
+        <div style="padding:0 14px 14px;border-top:1px solid #f0eee9;background:#fafaf8">
+          ${buckets_filled > 0 ? `<div style="font-size:11px;color:#666;font-weight:700;letter-spacing:1px;margin:10px 0 6px">FILLED — READY TO PACK</div>${filled_html}` : `<p class="hint" style="font-size:12px;margin:10px 0">No filled buckets — fill from an active container with the 🪣 button.</p>`}
           ${in_transit_html}
           ${at_shop_html}
           ${empty_html}
@@ -997,7 +1008,7 @@ function build_containers_tab() {
       </details>` : ""}
 
     <div style="margin-bottom:18px">
-      <div style="font-weight:700;color:#4a9e6b;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+      <div style="font-weight:700;color:#16a34a;margin-bottom:8px;display:flex;align-items:center;gap:6px">
         <span>✅ ACTIVE FOR PACKING</span>
         <span class="hint" style="font-weight:400;font-size:12px">(${active.length})</span>
       </div>
@@ -1008,7 +1019,7 @@ function build_containers_tab() {
 
     ${waiting.length > 0 ? `
     <div style="margin-bottom:18px">
-      <div style="font-weight:700;color:#c8a96e;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+      <div style="font-weight:700;color:#666;margin-bottom:8px;display:flex;align-items:center;gap:6px">
         <span>⏳ WAITING</span>
         <span class="hint" style="font-weight:400;font-size:12px">(${waiting.length}) · ready to activate when you start packing from them</span>
       </div>
@@ -1017,7 +1028,7 @@ function build_containers_tab() {
 
     ${empty.length > 0 ? `
     <details style="margin-top:16px">
-      <summary style="font-size:13px;color:#aaa;cursor:pointer;font-weight:600">⭕ EMPTY (${empty.length}) · ready for next roast</summary>
+      <summary style="font-size:13px;color:#999;cursor:pointer;font-weight:600">⭕ EMPTY (${empty.length}) · ready for next roast</summary>
       <div style="margin-top:10px">
         ${empty.map(c => `<div class="card" style="border-left:4px solid #ccc;opacity:0.6;padding:10px 14px;margin-bottom:6px">
           <div style="display:flex;justify-content:space-between;align-items:center">
@@ -1036,12 +1047,12 @@ function build_coffee_select(id, value) {
 }
 
 function build_order_editor(order) {
-  const items_html=order.items.map((item,i)=>`<div style="background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#888">${esc(item.code)}</span><button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px" data-remove-edit-item="${i}">✕</button></div><div class="grid-2"><div><label class="lbl">Description</label><input data-edit-desc="${i}" value="${esc(item.description)}" /></div><div class="grid-2"><div><label class="lbl">Qty</label><input type="number" data-edit-qty="${i}" value="${item.quantity}" /></div><div><label class="lbl">Unit</label><select data-edit-unit="${i}"><option ${item.unit==="EACH"?"selected":""}>EACH</option><option ${item.unit==="KGS"?"selected":""}>KGS</option></select></div></div></div></div>`).join("");
+  const items_html=order.items.map((item,i)=>`<div style="background:#f4f2ed;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#666">${esc(item.code)}</span><button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px" data-remove-edit-item="${i}">✕</button></div><div class="grid-2"><div><label class="lbl">Description</label><input data-edit-desc="${i}" value="${esc(item.description)}" /></div><div class="grid-2"><div><label class="lbl">Qty</label><input type="number" data-edit-qty="${i}" value="${item.quantity}" /></div><div><label class="lbl">Unit</label><select data-edit-unit="${i}"><option ${item.unit==="EACH"?"selected":""}>EACH</option><option ${item.unit==="KGS"?"selected":""}>KGS</option></select></div></div></div></div>`).join("");
   return `<h2>Edit Order</h2><div class="card mb-16"><div class="grid-2"><div><label class="lbl">Shop Name *</label><input id="edit-shop" value="${esc(order.shop_name)}" /></div><div><label class="lbl">PO Number</label><input id="edit-po" value="${esc(order.po_number||"")}" /></div></div></div><div class="card mb-16"><h3>Line Items</h3><div id="edit-items-list">${items_html}</div></div><div class="flex gap-10"><button class="btn btn-dark btn-lg" id="save-edit-order" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Changes"}</button><button class="btn btn-grey btn-lg" id="cancel-edit-order">Cancel</button></div>`;
 }
 
 function build_manual_order_entry() {
-  return `<h2>Add Order Manually</h2><div class="card mb-16"><h3>Order Details</h3><div class="grid-2"><div><label class="lbl">Shop Name *</label><input id="mo-shop" placeholder="e.g. Bearmarket Stillorgan" /></div><div><label class="lbl">PO Number</label><input id="mo-po" placeholder="e.g. PO008108" /></div><div><label class="lbl">Order Date</label><input id="mo-date" placeholder="e.g. 21 March 2026" /></div></div></div><div class="card mb-16"><h3>Line Items</h3><div id="mo-items"><div class="mo-item" style="background:#f5f0eb;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#888">Item 1</span></div><div class="grid-2"><div><label class="lbl">Description *</label><input class="mo-desc" placeholder="e.g. House Roast 1kg" /></div><div><label class="lbl">Product Code</label><input class="mo-code" placeholder="e.g. FP0030" /></div><div><label class="lbl">Quantity *</label><input type="number" class="mo-qty" placeholder="0" /></div><div><label class="lbl">Unit</label><select class="mo-unit"><option>EACH</option><option>KGS</option></select></div></div></div></div><button class="btn btn-amber" style="width:100%;padding:10px" id="add-mo-item">+ Add Item</button></div><p id="mo-err" class="err" style="display:none;margin-bottom:12px"></p><div class="flex gap-10"><button class="btn btn-dark btn-lg" id="save-manual-order" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Order"}</button><button class="btn btn-grey btn-lg" id="cancel-manual-order">Cancel</button></div>`;
+  return `<h2>Add Order Manually</h2><div class="card mb-16"><h3>Order Details</h3><div class="grid-2"><div><label class="lbl">Shop Name *</label><input id="mo-shop" placeholder="e.g. Bearmarket Stillorgan" /></div><div><label class="lbl">PO Number</label><input id="mo-po" placeholder="e.g. PO008108" /></div><div><label class="lbl">Order Date</label><input id="mo-date" placeholder="e.g. 21 March 2026" /></div></div></div><div class="card mb-16"><h3>Line Items</h3><div id="mo-items"><div class="mo-item" style="background:#f4f2ed;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#666">Item 1</span></div><div class="grid-2"><div><label class="lbl">Description *</label><input class="mo-desc" placeholder="e.g. House Roast 1kg" /></div><div><label class="lbl">Product Code</label><input class="mo-code" placeholder="e.g. FP0030" /></div><div><label class="lbl">Quantity *</label><input type="number" class="mo-qty" placeholder="0" /></div><div><label class="lbl">Unit</label><select class="mo-unit"><option>EACH</option><option>KGS</option></select></div></div></div></div><button class="btn btn-amber" style="width:100%;padding:10px" id="add-mo-item">+ Add Item</button></div><p id="mo-err" class="err" style="display:none;margin-bottom:12px"></p><div class="flex gap-10"><button class="btn btn-dark btn-lg" id="save-manual-order" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Order"}</button><button class="btn btn-grey btn-lg" id="cancel-manual-order">Cancel</button></div>`;
 }
 
 function build_deliveries_tab() {
@@ -1050,29 +1061,29 @@ function build_deliveries_tab() {
   const in_transit = state.dispatches.filter(d => !d.confirmed_at);
   const delivered  = state.dispatches.filter(d => d.confirmed_at);
   return `<h2>Deliveries</h2>
-    ${in_transit.length>0?`<h3 style="color:#e0a82a;margin-top:0">⏳ In Transit (${in_transit.length})</h3>${in_transit.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,false); }).join("")}`:""}
-    ${delivered.length>0?`<h3 style="color:#4a9e6b;margin-top:${in_transit.length?24:0}px">✓ Delivered (${delivered.length})</h3>${delivered.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,true); }).join("")}`:""}`;
+    ${in_transit.length>0?`<h3 style="color:#d97706;margin-top:0">⏳ In Transit (${in_transit.length})</h3>${in_transit.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,false); }).join("")}`:""}
+    ${delivered.length>0?`<h3 style="color:#16a34a;margin-top:${in_transit.length?24:0}px">✓ Delivered (${delivered.length})</h3>${delivered.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,true); }).join("")}`:""}`;
 }
 
 function build_order_delivery_card(order, dispatches, get_ref) {
   const all_confirmed=dispatches.every(d=>d.confirmed_at), some_confirmed=dispatches.some(d=>d.confirmed_at);
-  const border_color=all_confirmed?"#4a9e6b":some_confirmed?"#c8a96e":"#e0a82a";
+  const border_color=all_confirmed?"#16a34a":some_confirmed?"#666":"#d97706";
   const total_kg=dispatches.reduce((s,d)=>s+d.total_kg,0);
   const expanded=state.ui.expanded_deliveries["ord_"+order.id];
-  const breakdown_html=expanded?dispatches.map(d=>{ const{c,fill}=get_ref(d); const b_line=d.lines.find(l=>l.type==="bulk"); const r_lines=d.lines.filter(l=>l.type==="retail"); return `<div style="background:#f5f0eb;border-radius:8px;padding:12px"><div class="flex-between flex-wrap mb-8"><span style="font-weight:600;font-size:13px">${esc(fill?.coffee??"—")}</span>${d.confirmed_at?`<span class="tag" style="background:#edf7f0;color:#4a9e6b;font-size:11px">✓ Shop confirmed</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">⏳ Awaiting confirmation</span>`}</div><div style="font-size:12px;color:#888;margin-bottom:6px">${esc(c?.id??"")}${d.fill_id?` <span class="mono" style="background:#f0ebe4;color:#888;padding:1px 6px;border-radius:3px;font-size:10px">${esc(d.fill_id)}</span>`:""} · ${d.date}${d.confirmed_at?` · Confirmed ${new Date(d.confirmed_at).toLocaleDateString()}`:""}</div><div style="font-size:13px;color:#555">${b_line?`<span>⚖️ ${b_line.kg}kg bulk &nbsp;</span>`:""}${r_lines.map(l=>`<span>🛍️ ${l.bags} × ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label} &nbsp;</span>`).join("")}</div></div>`; }).join(""):"";
+  const breakdown_html=expanded?dispatches.map(d=>{ const{c,fill}=get_ref(d); const b_line=d.lines.find(l=>l.type==="bulk"); const r_lines=d.lines.filter(l=>l.type==="retail"); return `<div style="background:#f4f2ed;border-radius:8px;padding:12px"><div class="flex-between flex-wrap mb-8"><span style="font-weight:600;font-size:13px">${esc(fill?.coffee??"—")}</span>${d.confirmed_at?`<span class="tag" style="background:#e7f5ec;color:#16a34a;font-size:11px">✓ Shop confirmed</span>`:`<span class="tag" style="background:#fff3e0;color:#d97706;font-size:11px">⏳ Awaiting confirmation</span>`}</div><div style="font-size:12px;color:#666;margin-bottom:6px">${esc(c?.id??"")}${d.fill_id?` <span class="mono" style="background:#f0eee9;color:#666;padding:1px 6px;border-radius:3px;font-size:10px">${esc(d.fill_id)}</span>`:""} · ${d.date}${d.confirmed_at?` · Confirmed ${new Date(d.confirmed_at).toLocaleDateString()}`:""}</div><div style="font-size:13px;color:#555">${b_line?`<span>⚖️ ${b_line.kg}kg bulk &nbsp;</span>`:""}${r_lines.map(l=>`<span>🛍️ ${l.bags} × ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label} &nbsp;</span>`).join("")}</div></div>`; }).join(""):"";
   return `
     <div class="card" style="border-left:4px solid ${border_color};margin-bottom:12px">
       <div class="flex-between flex-wrap mb-8">
-        <div class="flex-wrap gap-10"><span style="font-weight:700;font-size:15px">${esc(order.shop_name)}</span>${all_confirmed?`<span class="tag" style="background:#edf7f0;color:#4a9e6b">✓ Delivered</span>`:some_confirmed?`<span class="tag" style="background:#fff8ee;color:#c8a96e">⚡ Partially Delivered</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a">⏳ In Transit</span>`}</div>
+        <div class="flex-wrap gap-10"><span style="font-weight:700;font-size:15px">${esc(order.shop_name)}</span>${all_confirmed?`<span class="tag" style="background:#e7f5ec;color:#16a34a">✓ Delivered</span>`:some_confirmed?`<span class="tag" style="background:#fff7ed;color:#d97706">⚡ Partially Delivered</span>`:`<span class="tag" style="background:#fff3e0;color:#d97706">⏳ In Transit</span>`}</div>
       </div>
-      <div class="flex gap-10 mb-12" style="font-size:13px;color:#888;flex-wrap:wrap">
-        ${order.po_number?`<span>PO: <strong style="color:#1a1008">${esc(order.po_number)}</strong></span>`:""}
+      <div class="flex gap-10 mb-12" style="font-size:13px;color:#666;flex-wrap:wrap">
+        ${order.po_number?`<span>PO: <strong style="color:#1a1a1a">${esc(order.po_number)}</strong></span>`:""}
         ${order.order_date?`<span>Date: <strong>${esc(order.order_date)}</strong></span>`:""}
         <span>Dispatched: <strong>${total_kg}kg</strong></span>
         <span>${dispatches.length} dispatch${dispatches.length>1?"es":""}</span>
       </div>
-      <div style="padding-top:8px;border-top:1px solid #f0ebe4">
-        <button style="background:none;border:none;cursor:pointer;font-size:13px;color:#c8a96e;font-weight:600;padding:0;display:flex;align-items:center;gap:6px" data-toggle-delivery="ord_${esc(order.id)}">
+      <div style="padding-top:8px;border-top:1px solid #f0eee9">
+        <button style="background:none;border:none;cursor:pointer;font-size:13px;color:#666;font-weight:600;padding:0;display:flex;align-items:center;gap:6px" data-toggle-delivery="ord_${esc(order.id)}">
           <span>${expanded?"▾":"▸"}</span> ${expanded?"Hide":"Show"} dispatch breakdown
         </button>
       </div>
@@ -1083,15 +1094,15 @@ function build_order_delivery_card(order, dispatches, get_ref) {
 function build_dispatch_card(d, c, fill, confirmed, show_scan=true) {
   const b_line=d.lines.find(l=>l.type==="bulk"), r_lines=d.lines.filter(l=>l.type==="retail");
   return `
-    <div class="card" style="border-left:4px solid ${confirmed?"#4a9e6b":"#e0a82a"};margin-bottom:12px">
-      <div class="flex-between flex-wrap mb-10"><span style="font-weight:700;font-size:15px">${esc(d.shop)}</span>${confirmed?`<span class="tag" style="background:#edf7f0;color:#4a9e6b">✓ Delivered</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a">⏳ In Transit</span>`}</div>
+    <div class="card" style="border-left:4px solid ${confirmed?"#16a34a":"#d97706"};margin-bottom:12px">
+      <div class="flex-between flex-wrap mb-10"><span style="font-weight:700;font-size:15px">${esc(d.shop)}</span>${confirmed?`<span class="tag" style="background:#e7f5ec;color:#16a34a">✓ Delivered</span>`:`<span class="tag" style="background:#fff3e0;color:#d97706">⏳ In Transit</span>`}</div>
       <div class="grid-2 mb-10" style="font-size:13px">
         ${info_row("Coffee",fill?.coffee)}${info_row("Container",d.fill_id||d.container_id)}
         ${info_row("Roast Date",fill?.date)}${info_row("Dispatch Date",d.date)}
         ${info_row("Total",`${d.total_kg}kg`)}${confirmed?info_row("Confirmed",new Date(d.confirmed_at).toLocaleString()):""}
       </div>
-      <div style="background:#f5f0eb;border-radius:8px;padding:10px;margin-bottom:${confirmed?0:10}px">
-        <div style="font-size:12px;color:#888;margin-bottom:6px;font-weight:600">BREAKDOWN</div>
+      <div style="background:#f4f2ed;border-radius:8px;padding:10px;margin-bottom:${confirmed?0:10}px">
+        <div style="font-size:12px;color:#666;margin-bottom:6px;font-weight:600">BREAKDOWN</div>
         ${b_line?`<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>🪣 Bar</span><span style="font-weight:600">${b_line.kg}kg</span></div>`:""}
         ${r_lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>🛍️ ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label||l.bag_size}</span><span style="font-weight:600">${l.bags} bags (${l.kg}kg)</span></div>`).join("")}
       </div>
@@ -1100,7 +1111,7 @@ function build_dispatch_card(d, c, fill, confirmed, show_scan=true) {
 }
 
 function info_row(label, value) {
-  return `<div><span style="color:#888;font-size:12px">${esc(label)}</span><br/><span style="font-weight:500">${esc(value??"—")}</span></div>`;
+  return `<div><span style="color:#666;font-size:12px">${esc(label)}</span><br/><span style="font-weight:500">${esc(value??"—")}</span></div>`;
 }
 
 // Scan-to-pack state
@@ -1284,17 +1295,17 @@ function update_scan_panel() {
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🛍️ ${esc(label)}</div>
           <div style="display:flex;gap:6px;align-items:center;margin-top:2px">
-            <span style="background:#1a1008;color:#e8d5b0;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace">${esc(line.container_id || "?")}</span>
+            <span style="background:#1a1a1a;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace">${esc(line.container_id || "?")}</span>
             <span class="hint" style="font-size:11px;font-family:monospace">${esc(code)}</span>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:4px">
-          <button data-decrement-line="${esc(code)}|${idx}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">−</button>
+          <button data-decrement-line="${esc(code)}|${idx}" style="background:#f4f2ed;border:1px solid #e8e6e1;color:#1a1a1a;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">−</button>
           ${single_line
-            ? `<input type="number" min="1" inputmode="numeric" data-set-line="${esc(code)}|${idx}" value="${line.count}" style="font-weight:700;font-size:16px;color:#1a1008;width:54px;text-align:center;padding:6px 4px;border:1px solid #e0d5c5;border-radius:6px;background:#fff" />`
-            : `<span style="font-weight:700;font-size:16px;color:#1a1008;width:54px;text-align:center;padding:6px 4px">× ${line.count}</span>`}
-          <button data-increment-line="${esc(code)}|${idx}" style="background:#f5f0eb;border:1px solid #e0d5c5;color:#1a1008;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">+</button>
-          <button data-remove-line="${esc(code)}|${idx}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px;margin-left:4px" title="Remove this line">✕</button>
+            ? `<input type="number" min="1" inputmode="numeric" data-set-line="${esc(code)}|${idx}" value="${line.count}" style="font-weight:700;font-size:16px;color:#1a1a1a;width:54px;text-align:center;padding:6px 4px;border:1px solid #e8e6e1;border-radius:6px;background:#fff" />`
+            : `<span style="font-weight:700;font-size:16px;color:#1a1a1a;width:54px;text-align:center;padding:6px 4px">× ${line.count}</span>`}
+          <button data-increment-line="${esc(code)}|${idx}" style="background:#f4f2ed;border:1px solid #e8e6e1;color:#1a1a1a;cursor:pointer;font-size:18px;line-height:1;padding:4px 10px;border-radius:6px;font-weight:700;min-width:32px">+</button>
+          <button data-remove-line="${esc(code)}|${idx}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px;margin-left:4px" title="Remove this line">✕</button>
         </div>
       </div>`);
     });
@@ -1302,13 +1313,13 @@ function update_scan_panel() {
 
   const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
     <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bar 5kg${b.coffee?` — ${esc(b.coffee)}`:""}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
-    <button data-remove-bucket="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
+    <button data-remove-bucket="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
 
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <div style="font-weight:700;font-size:13px">SCANNED</div>
-      <div style="font-size:13px;color:#1a1008;font-weight:700">Total: ${total_kg.toFixed(1)}kg</div>
+      <div style="font-size:13px;color:#1a1a1a;font-weight:700">Total: ${total_kg.toFixed(1)}kg</div>
     </div>
     ${has_items ? item_rows.join("") + bucket_list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>'}
   `;
@@ -1381,7 +1392,7 @@ function update_scan_panel() {
   if (flash) {
     if (ps.scanner_msg) {
       flash.style.display = "block";
-      flash.style.background = ps.scanner_msg_type === "success" ? "#4a9e6b" : ps.scanner_msg_type === "error" ? "#e05c2a" : "#1a1008";
+      flash.style.background = ps.scanner_msg_type === "success" ? "#16a34a" : ps.scanner_msg_type === "error" ? "#dc2626" : "#1a1a1a";
       flash.textContent = ps.scanner_msg;
     } else {
       flash.style.display = "none";
@@ -1397,7 +1408,7 @@ function flash_scan(msg, type) {
   const flash = document.getElementById("scan-flash");
   if (flash) {
     flash.style.display = "block";
-    flash.style.background = type === "success" ? "#4a9e6b" : type === "error" ? "#e05c2a" : "#1a1008";
+    flash.style.background = type === "success" ? "#16a34a" : type === "error" ? "#dc2626" : "#1a1a1a";
     flash.textContent = msg;
   }
   if (_flash_timer) clearTimeout(_flash_timer);
@@ -1418,7 +1429,7 @@ function build_packing_page(container, fill) {
       <div style="font-size:64px">✅</div>
       <h2 style="margin:12px 0 8px">All done!</h2>
       <p style="color:#555;font-size:15px"><strong>${total_kg.toFixed(1)}kg</strong> packed for <strong>${esc(ps.shop)}</strong></p>
-      <p style="color:#888;font-size:13px;margin-top:8px">${item_count} bag${item_count!==1?"s":""}${ps.scanned_buckets.length?` · ${ps.scanned_buckets.length} bucket${ps.scanned_buckets.length!==1?"s":""}`:""}</p>
+      <p style="color:#666;font-size:13px;margin-top:8px">${item_count} bag${item_count!==1?"s":""}${ps.scanned_buckets.length?` · ${ps.scanned_buckets.length} bucket${ps.scanned_buckets.length!==1?"s":""}`:""}</p>
       <button class="btn btn-dark mt-16" style="padding:12px 32px" id="packing-done">Done</button>
     </div></div>`;
   }
@@ -1434,12 +1445,12 @@ function build_packing_page(container, fill) {
       (entry.lines || []).forEach(line => {
         const kg = line.count * bag_kg;
         item_rows.push(`<div style="display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:6px;gap:8px">
-          <span>🛍️ ${esc(label)} <span style="background:#1a1008;color:#e8d5b0;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace;margin-left:4px">${esc(line.container_id||"?")}</span></span>
+          <span>🛍️ ${esc(label)} <span style="background:#1a1a1a;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace;margin-left:4px">${esc(line.container_id||"?")}</span></span>
           <span style="font-weight:600;white-space:nowrap">× ${line.count} (${kg.toFixed(1)}kg)</span>
         </div>`);
       });
     }
-    const bucket_rows = ps.scanned_buckets.length ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;padding-top:6px;border-top:1px solid #eee"><span>🪣 Buckets (5kg each)</span><span style="font-weight:600">× ${ps.scanned_buckets.length} (${(ps.scanned_buckets.length*5).toFixed(1)}kg)</span></div><div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${ps.scanned_buckets.map(b => esc(b.id)).join(" · ")}</div>` : "";
+    const bucket_rows = ps.scanned_buckets.length ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;padding-top:6px;border-top:1px solid #eee"><span>🪣 Buckets (5kg each)</span><span style="font-weight:600">× ${ps.scanned_buckets.length} (${(ps.scanned_buckets.length*5).toFixed(1)}kg)</span></div><div style="font-size:11px;color:#666;font-family:monospace;margin-top:2px">${ps.scanned_buckets.map(b => esc(b.id)).join(" · ")}</div>` : "";
 
     // Also show summary by container
     const by_container = {};
@@ -1452,23 +1463,23 @@ function build_packing_page(container, fill) {
       });
     }
     const container_summary = Object.keys(by_container).length > 1
-      ? `<div style="background:#fff8ee;border-radius:6px;padding:10px;margin-top:10px;font-size:12px"><div style="font-weight:600;margin-bottom:4px">From ${Object.keys(by_container).length} containers:</div>${Object.entries(by_container).map(([cid, kg]) => `<div>📦 ${esc(cid)}: ${kg.toFixed(1)}kg</div>`).join("")}</div>`
+      ? `<div style="background:#fff7ed;border-radius:6px;padding:10px;margin-top:10px;font-size:12px"><div style="font-weight:600;margin-bottom:4px">From ${Object.keys(by_container).length} containers:</div>${Object.entries(by_container).map(([cid, kg]) => `<div>📦 ${esc(cid)}: ${kg.toFixed(1)}kg</div>`).join("")}</div>`
       : "";
 
     return `<div class="overlay"><div class="modal">
       <div style="text-align:center;margin-bottom:20px">
         <div style="font-size:36px">🔍</div>
         <h2 style="margin:8px 0 4px">Check your entry</h2>
-        <p style="color:#888;font-size:14px">Make sure everything looks right</p>
+        <p style="color:#666;font-size:14px">Make sure everything looks right</p>
       </div>
-      <div style="background:#f5f0eb;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="background:#f4f2ed;border-radius:12px;padding:16px;margin-bottom:16px">
         <div class="grid-2 mb-12">
           ${info_row("Shop", ps.shop)}
           ${info_row("Total", `${total_kg.toFixed(1)}kg`)}
         </div>
         <div style="background:#fff;border-radius:8px;padding:12px">
-          <div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600">BREAKDOWN</div>
-          ${item_rows.length ? item_rows.join("") : '<p class="hint" style="font-size:13px;color:#888">No bags scanned</p>'}
+          <div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:600">BREAKDOWN</div>
+          ${item_rows.length ? item_rows.join("") : '<p class="hint" style="font-size:13px;color:#666">No bags scanned</p>'}
           ${bucket_rows}
         </div>
         ${container_summary}
@@ -1483,27 +1494,27 @@ function build_packing_page(container, fill) {
   if (ps.step === "scan") {
     const has_items = Object.values(ps.scanned_items).some(e => (e.lines||[]).length > 0) || ps.scanned_buckets.length > 0;
 
-    const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${ps.scanner_msg ? `background:${ps.scanner_msg_type==="success"?"#4a9e6b":ps.scanner_msg_type==="error"?"#e05c2a":"#1a1008"}` : "display:none"}`;
+    const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${ps.scanner_msg ? `background:${ps.scanner_msg_type==="success"?"#16a34a":ps.scanner_msg_type==="error"?"#dc2626":"#1a1a1a"}` : "display:none"}`;
     const flash = `<div id="scan-flash" style="${flash_style}">${esc(ps.scanner_msg||"")}</div>`;
 
     // Show active container summary at the top so packer knows what's available
     const active_containers = state.containers.filter(c => c.status === "active" && c.remaining > 0);
     const summary = active_containers.length === 0
-      ? `<div style="background:#fff0ee;border:1px solid #e05c2a;color:#e05c2a;padding:10px;border-radius:8px;font-size:13px;text-align:center;margin-bottom:14px">⚠️ No active containers. Activate one in the Containers tab first.</div>`
-      : `<div style="background:#f5f0eb;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
+      ? `<div style="background:#fdecea;border:1px solid #dc2626;color:#dc2626;padding:10px;border-radius:8px;font-size:13px;text-align:center;margin-bottom:14px">⚠️ No active containers. Activate one in the Containers tab first.</div>`
+      : `<div style="background:#f4f2ed;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
           <div style="font-weight:600;margin-bottom:4px">Available (FIFO):</div>
           ${active_containers.sort((a,b) => (a.latest_roast_date||"").localeCompare(b.latest_roast_date||"")).map(c => `<div>📦 ${esc(c.id)} · ${esc(c.coffee||"?")} · ${c.remaining.toFixed(1)}kg</div>`).join("")}
         </div>`;
 
     return `<div class="overlay"><div class="modal" style="max-width:480px">
       <div style="text-align:center;margin-bottom:14px">
-        <div style="font-weight:600;font-size:13px;color:#888">Packing for</div>
+        <div style="font-weight:600;font-size:13px;color:#666">Packing for</div>
         <h2 style="margin:2px 0 0">${esc(ps.shop)}</h2>
       </div>
 
       ${summary}
 
-      <div style="position:relative;background:#1a1008;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
+      <div style="position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
         ${flash}
         <div id="qr-scanner" style="width:100%;min-height:240px"></div>
       </div>
@@ -1513,10 +1524,10 @@ function build_packing_page(container, fill) {
           <input id="manual-scan-input" placeholder="Search by name or type FP/BKT ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
           <button class="btn btn-dark btn-sm" id="manual-scan-btn">Add</button>
         </div>
-        <div id="manual-scan-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e0d5c5;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
+        <div id="manual-scan-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e8e6e1;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
       </div>
 
-      <div id="scan-panel" style="background:#f5f0eb;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
+      <div id="scan-panel" style="background:#f4f2ed;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
         <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>
       </div>
 
@@ -1539,27 +1550,27 @@ function build_packing_page(container, fill) {
   const wholesale_only = all_entries.filter(e => e.kind === "wholesale");
   const online_only    = all_entries.filter(e => e.kind === "online");
 
-  const render_btn = (e, badge_color, badge_label) => `<button data-pick-shop="${esc(e.master_name)}" style="background:#f5f0eb;border:2px solid #e0d5c5;border-radius:10px;padding:14px 16px;cursor:pointer;text-align:left;width:100%;font-weight:700;font-size:15px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+  const render_btn = (e, badge_color, badge_label) => `<button data-pick-shop="${esc(e.master_name)}" style="background:#f4f2ed;border:2px solid #e8e6e1;border-radius:10px;padding:14px 16px;cursor:pointer;text-align:left;width:100%;font-weight:700;font-size:15px;display:flex;justify-content:space-between;align-items:center;gap:8px">
     <span>${esc(e.master_name)}</span>
     ${badge_label ? `<span style="background:${badge_color};color:#fff;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700">${badge_label}</span>` : ""}
   </button>`;
 
   const group = (title, list, badge_color, badge_label) => list.length === 0 ? "" : `
-    <div style="font-size:11px;color:#888;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:14px 0 6px">${title}</div>
+    <div style="font-size:11px;color:#666;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:14px 0 6px">${title}</div>
     <div style="display:grid;gap:8px">${list.map(e => render_btn(e, badge_color, badge_label)).join("")}</div>`;
 
   return `<div class="overlay"><div class="modal">
     <div style="text-align:center;margin-bottom:24px">
       <div style="font-size:40px">📦</div>
       <h2 style="margin:8px 0 2px">${esc(fill.coffee)}</h2>
-      <div class="mono" style="color:#c8a96e;font-size:15px;font-weight:700">${esc(container.id)}</div>
-      <div style="color:#4a9e6b;font-size:14px;margin-top:4px">${fill.remaining.toFixed(1)}kg available</div>
+      <div class="mono" style="color:#666;font-size:15px;font-weight:700">${esc(container.id)}</div>
+      <div style="color:#16a34a;font-size:14px;margin-top:4px">${fill.remaining.toFixed(1)}kg available</div>
     </div>
     <h3 style="font-size:16px;margin-bottom:4px">Where is this going?</h3>
-    ${group("Shops", shops_only, "#4a9e6b", "")}
+    ${group("Shops", shops_only, "#16a34a", "")}
     ${group("Wholesale", wholesale_only, "#7e57c2", "WHOLESALE")}
-    ${group("Online", online_only, "#c8a96e", "ONLINE")}
-    <div style="background:#fff8ee;border-radius:8px;padding:12px;margin-top:14px;margin-bottom:14px">
+    ${group("Online", online_only, "#666", "ONLINE")}
+    <div style="background:#fff7ed;border-radius:8px;padding:12px;margin-top:14px;margin-bottom:14px">
       <label class="lbl" style="font-size:13px">Or type a custom destination</label>
       <input id="pack-shop-custom" placeholder="e.g. Stillorgan" style="font-size:15px;padding:10px 12px" />
       <button class="btn btn-dark btn-sm mt-8" id="pack-shop-custom-go" style="width:100%">Use this →</button>
@@ -1571,7 +1582,7 @@ function build_packing_page(container, fill) {
 
 function build_shop_confirm_page(container, fill, dispatch) {
   const b_line=dispatch.lines.find(l=>l.type==="bulk"), r_lines=dispatch.lines.filter(l=>l.type==="retail");
-  return `<div class="overlay"><div class="modal"><div style="text-align:center;margin-bottom:24px"><div style="font-size:40px">☕</div><h2 style="margin:8px 0 2px">Your Coffee is Here</h2><p style="color:#888;font-size:14px;margin:0">Delivery for <strong>${esc(dispatch.shop)}</strong></p></div><div style="background:#f5f0eb;border-radius:12px;padding:18px;margin-bottom:16px"><div style="font-weight:700;font-size:16px;margin-bottom:12px">${esc(fill?.coffee)}</div><div class="grid-2 mb-12">${info_row("Container",container.id)} ${info_row("Roast Date",fill?.date)}${info_row("Dispatch Date",dispatch.date)} ${info_row("Total",`${dispatch.total_kg}kg`)}</div><div style="background:#fff;border-radius:8px;padding:12px"><div style="font-size:12px;color:#888;margin-bottom:8px;font-weight:600">WHAT'S IN THIS DELIVERY</div>${b_line?`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>⚖️ Bulk</span><span style="font-weight:600">${b_line.kg}kg</span></div>`:""}${r_lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>${l.bag_size==="Bar 5kg"?"🪣":"🛍️"} ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label}</span><span style="font-weight:600">${l.bags} ${l.bag_size==="Bar 5kg"?"":"bags "}(${l.kg}kg)</span></div>`).join("")}</div></div><button class="btn btn-green" style="width:100%;padding:18px;font-size:18px;border-radius:12px" id="confirm-delivery">✓ Confirm Receipt</button><button class="btn btn-muted btn-full mt-10" id="close-scan">Back</button></div></div>`;
+  return `<div class="overlay"><div class="modal"><div style="text-align:center;margin-bottom:24px"><div style="font-size:40px">☕</div><h2 style="margin:8px 0 2px">Your Coffee is Here</h2><p style="color:#666;font-size:14px;margin:0">Delivery for <strong>${esc(dispatch.shop)}</strong></p></div><div style="background:#f4f2ed;border-radius:12px;padding:18px;margin-bottom:16px"><div style="font-weight:700;font-size:16px;margin-bottom:12px">${esc(fill?.coffee)}</div><div class="grid-2 mb-12">${info_row("Container",container.id)} ${info_row("Roast Date",fill?.date)}${info_row("Dispatch Date",dispatch.date)} ${info_row("Total",`${dispatch.total_kg}kg`)}</div><div style="background:#fff;border-radius:8px;padding:12px"><div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:600">WHAT'S IN THIS DELIVERY</div>${b_line?`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>⚖️ Bulk</span><span style="font-weight:600">${b_line.kg}kg</span></div>`:""}${r_lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>${l.bag_size==="Bar 5kg"?"🪣":"🛍️"} ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label}</span><span style="font-weight:600">${l.bags} ${l.bag_size==="Bar 5kg"?"":"bags "}(${l.kg}kg)</span></div>`).join("")}</div></div><button class="btn btn-green" style="width:100%;padding:18px;font-size:18px;border-radius:12px" id="confirm-delivery">✓ Confirm Receipt</button><button class="btn btn-muted btn-full mt-10" id="close-scan">Back</button></div></div>`;
 }
 
 function attach_listeners() {
@@ -1654,11 +1665,11 @@ function attach_listeners() {
       return hay.includes(q);
     }).slice(0, 8);
     if (matches.length === 0) {
-      sug.innerHTML = `<div style="padding:10px 14px;color:#888;font-size:13px;font-style:italic">No empty buckets match</div>`;
+      sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No empty buckets match</div>`;
     } else {
-      sug.innerHTML = matches.map(b => `<div data-suggest-bucket="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px">
+      sug.innerHTML = matches.map(b => `<div data-suggest-bucket="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0eee9;font-size:14px">
         <div style="font-weight:600">🪣 ${esc(b.name||b.id)}</div>
-        ${b.name ? `<div style="font-size:11px;color:#aaa;font-family:monospace">${esc(b.id)}</div>` : ""}
+        ${b.name ? `<div style="font-size:11px;color:#999;font-family:monospace">${esc(b.id)}</div>` : ""}
       </div>`).join("");
     }
     sug.style.display = "block";
@@ -1739,11 +1750,11 @@ function attach_listeners() {
       return hay.includes(q);
     }).slice(0, 8);
     if (matches.length === 0) {
-      sug.innerHTML = `<div style="padding:10px 14px;color:#888;font-size:13px;font-style:italic">No matching buckets out</div>`;
+      sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No matching buckets out</div>`;
     } else {
-      sug.innerHTML = matches.map(b => `<div data-suggest-bucket="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px">
-        <div style="font-weight:600">🪣 ${esc(b.name||b.id)}${b.coffee?` <span style="color:#888;font-weight:400">— ${esc(b.coffee)}</span>`:""}</div>
-        <div style="font-size:11px;color:#aaa;font-family:monospace">${esc(b.id)} · ${esc(b.status||"")}</div>
+      sug.innerHTML = matches.map(b => `<div data-suggest-bucket="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0eee9;font-size:14px">
+        <div style="font-weight:600">🪣 ${esc(b.name||b.id)}${b.coffee?` <span style="color:#666;font-weight:400">— ${esc(b.coffee)}</span>`:""}</div>
+        <div style="font-size:11px;color:#999;font-family:monospace">${esc(b.id)} · ${esc(b.status||"")}</div>
       </div>`).join("");
     }
     sug.style.display = "block";
@@ -1851,15 +1862,15 @@ function attach_listeners() {
     });
     const total = fp_matches.length + bucket_matches.length;
     if (total === 0) {
-      sug.innerHTML = `<div style="padding:10px 14px;color:#888;font-size:13px;font-style:italic">No matches</div>`;
+      sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No matches</div>`;
     } else {
-      const fp_html = fp_matches.slice(0, 6).map(f => `<div data-suggest-code="${esc(f.fp_code)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px">
-        <div style="font-weight:600">${esc(f.coffee_name)} <span style="color:#888;font-weight:400">— ${esc(f.bag_size)}</span></div>
-        <div style="font-size:11px;color:#aaa;font-family:monospace">${esc(f.fp_code)}</div>
+      const fp_html = fp_matches.slice(0, 6).map(f => `<div data-suggest-code="${esc(f.fp_code)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0eee9;font-size:14px">
+        <div style="font-weight:600">${esc(f.coffee_name)} <span style="color:#666;font-weight:400">— ${esc(f.bag_size)}</span></div>
+        <div style="font-size:11px;color:#999;font-family:monospace">${esc(f.fp_code)}</div>
       </div>`).join("");
-      const bucket_html = bucket_matches.slice(0, 6).map(b => `<div data-suggest-code="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0ebe4;font-size:14px;background:#fff8ee">
-        <div style="font-weight:600">🪣 ${esc(b.name||b.id)} <span style="color:#888;font-weight:400">— ${esc(b.coffee||"?")} (5kg)</span></div>
-        <div style="font-size:11px;color:#aaa;font-family:monospace">${esc(b.id)}</div>
+      const bucket_html = bucket_matches.slice(0, 6).map(b => `<div data-suggest-code="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0eee9;font-size:14px;background:#fff7ed">
+        <div style="font-weight:600">🪣 ${esc(b.name||b.id)} <span style="color:#666;font-weight:400">— ${esc(b.coffee||"?")} (5kg)</span></div>
+        <div style="font-size:11px;color:#999;font-family:monospace">${esc(b.id)}</div>
       </div>`).join("");
       sug.innerHTML = bucket_html + fp_html;
     }
