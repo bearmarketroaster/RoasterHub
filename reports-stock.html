@@ -8,54 +8,55 @@
   <script src="config.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
     input, select, button { font-family: inherit; font-size: 14px; } button { cursor: pointer; }
-    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; color: #1a1008; }
-    input:focus, select:focus, textarea:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; box-shadow: none; }
-    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #e8e6e1; font-size: 14px; background: #fff; color: #1a1a1a; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
     .header-left { display: flex; align-items: center; gap: 12px; }
-    .header-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
-    .header-back:hover { color: #e8d5b0; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
     .header-title { font-weight: 700; font-size: 18px; }
-    .header-sub { font-size: 12px; color: #c8a96e; margin-top: 1px; }
-    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
     .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
-    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
-    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
-    .card.empty { text-align: center; padding: 48px 16px; color: #888; }
+    label.lbl { display: block; font-size: 12px; color: #666; margin-bottom: 4px; font-weight: 500; }
+    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; }
+    .card.empty { text-align: center; padding: 48px 16px; color: #999; }
     .card.empty .icon { font-size: 36px; margin-bottom: 8px; }
     .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
     .flex { display: flex; }
     .gap-6 { gap: 6px; } .gap-12 { gap: 12px; }
     .mb-16 { margin-bottom: 16px; }
-    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
-    .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
+    .btn-ghost { background: #f4f2ed; color: #1a1a1a; border: 1px solid #e8e6e1; }
+    .btn-ghost:hover:not(:disabled) { background: #e8e6e1; }
     .btn-sm { padding: 4px 10px; font-size: 12px; }
     .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
-    .hint { color: #888; font-size: 13px; }
-    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
-    .section-title { font-weight: 700; color: #1a1008; margin-bottom: 12px; font-size: 15px; }
-    .supplier-card { border: 1px solid #f0ebe4; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+    .hint { color: #999; font-size: 13px; }
+    .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+    .section-title { font-weight: 700; color: #1a1a1a; margin-bottom: 12px; font-size: 15px; }
+    .supplier-card { border: 1px solid #e8e6e1; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
     .supplier-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
     .supplier-name { font-weight: 700; font-size: 15px; }
     .supplier-flag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
-    .supplier-flag-active { background: #edf7f0; color: #4a9e6b; }
-    .supplier-flag-watch { background: #fff8ee; color: #c8a96e; }
-    .supplier-flag-stale { background: #fbeae5; color: #e05c2a; }
+    .supplier-flag-active { background: #e7f5ec; color: #16a34a; }
+    .supplier-flag-watch  { background: #fff7ed; color: #d97706; }
+    .supplier-flag-stale  { background: #fdecea; color: #dc2626; }
     .supplier-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; font-size: 13px; }
-    .supplier-stat-label { font-size: 11px; color: #888; }
-    .supplier-stat-val { font-weight: 700; color: #1a1008; }
-    .supplier-coffees { margin-top: 8px; font-size: 12px; color: #555; }
-    .pill { display: inline-block; background: #f5f0eb; color: #5a3e1b; padding: 2px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px; font-size: 11px; }
+    .supplier-stat-label { font-size: 11px; color: #666; }
+    .supplier-stat-val { font-weight: 700; color: #1a1a1a; }
+    .supplier-coffees { margin-top: 8px; font-size: 12px; color: #666; }
+    .pill { display: inline-block; background: #f4f2ed; color: #1a1a1a; padding: 2px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px; font-size: 11px; border: 1px solid #e8e6e1; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; padding: 10px 8px; background: #f5f0eb; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e0d5c5; }
-    td { padding: 10px 8px; border-bottom: 1px solid #f0ebe4; vertical-align: middle; }
-    tr:hover td { background: #fdfaf5; }
+    th { text-align: left; padding: 10px 8px; background: #f4f2ed; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e8e6e1; }
+    td { padding: 10px 8px; border-bottom: 1px solid #f0eee9; vertical-align: middle; }
+    tr:hover td { background: #fafaf8; }
     .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
     .filters select, .filters input { max-width: 220px; padding: 6px 10px; font-size: 13px; }
-    .invoice-link { background: #fff8ee; color: #c8a96e; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; text-decoration: none; cursor: pointer; border: none; }
-    .invoice-link:hover { background: #c8a96e; color: #fff; }
+    .invoice-link { background: #f4f2ed; color: #1a1a1a; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; text-decoration: none; cursor: pointer; border: 1px solid #e8e6e1; transition: all 0.15s; }
+    .invoice-link:hover { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
     @media (max-width: 600px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .content { padding: 16px; } table { font-size: 12px; } th, td { padding: 8px 6px; } }
   </style>
 </head>
@@ -186,12 +187,12 @@ function build_stock_report() {
 
   const recent = filtered_adj.slice(0, 50);
   const recent_html = recent.map(a => `
-    <div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #f0ebe4;font-size:13px">
-      <span class="tag" style="background:${a.change_kg>0?"#edf7f0":"#fff0ee"};color:${a.change_kg>0?"#4a9e6b":"#e05c2a"};min-width:70px;text-align:center;font-weight:600">${a.change_kg>0?"+":""}${Number(a.change_kg).toFixed(1)}kg</span>
+    <div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #f0eee9;font-size:13px">
+      <span class="tag" style="background:${a.change_kg>0?"#e7f5ec":"#fdecea"};color:${a.change_kg>0?"#16a34a":"#dc2626"};min-width:70px;text-align:center;font-weight:600">${a.change_kg>0?"+":""}${Number(a.change_kg).toFixed(1)}kg</span>
       <span style="font-weight:500">${esc(a.coffee)}</span>
-      <span style="color:#888">${esc(reason_labels[a.reason]||a.reason)}</span>
-      <span style="color:#888">${a.date}</span>
-      ${a.auto?'<span class="tag" style="background:#f5f0eb;color:#aaa;font-size:10px">auto</span>':'<span class="tag" style="background:#fff8ee;color:#c8a96e;font-size:10px;font-weight:600">MANUAL</span>'}
+      <span style="color:#666">${esc(reason_labels[a.reason]||a.reason)}</span>
+      <span style="color:#666">${a.date}</span>
+      ${a.auto?'<span class="tag" style="background:#f4f2ed;color:#999;font-size:10px">auto</span>':'<span class="tag" style="background:#fff7ed;color:#d97706;font-size:10px;font-weight:600">MANUAL</span>'}
     </div>`).join("");
 
   return `
@@ -206,10 +207,10 @@ function build_stock_report() {
     </div></div>
 
     <div class="grid-4 mb-16">
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📥</div><div style="font-size:22px;font-weight:700;color:#4a9e6b">+${total_in.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Stock In</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📤</div><div style="font-size:22px;font-weight:700;color:#e05c2a">-${total_out.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Stock Out</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">⚖️</div><div style="font-size:22px;font-weight:700;color:${net>=0?"#1a1008":"#e05c2a"}">${net>=0?"+":""}${net.toFixed(1)}kg</div><div style="font-size:11px;color:#888;margin-top:2px">Net Change</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📦</div><div style="font-size:22px;font-weight:700;color:#1a1008">${filtered_deliveries.length}</div><div style="font-size:11px;color:#888;margin-top:2px">Deliveries</div></div>
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📥</div><div style="font-size:22px;font-weight:700;color:#16a34a">+${total_in.toFixed(1)}kg</div><div style="font-size:11px;color:#666;margin-top:2px">Stock In</div></div>
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📤</div><div style="font-size:22px;font-weight:700;color:#dc2626">-${total_out.toFixed(1)}kg</div><div style="font-size:11px;color:#666;margin-top:2px">Stock Out</div></div>
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">⚖️</div><div style="font-size:22px;font-weight:700;color:${net>=0?"#1a1a1a":"#dc2626"}">${net>=0?"+":""}${net.toFixed(1)}kg</div><div style="font-size:11px;color:#666;margin-top:2px">Net Change</div></div>
+      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📦</div><div style="font-size:22px;font-weight:700;color:#1a1a1a">${filtered_deliveries.length}</div><div style="font-size:11px;color:#666;margin-top:2px">Deliveries</div></div>
     </div>
 
     <div class="card mb-16">
@@ -307,22 +308,22 @@ function build_stock_report() {
     <div class="card mb-16">
       <div class="section-title">By Reason</div>
       ${reason_rows.length===0?'<p class="hint">No movements in this range.</p>':reason_rows.map(([r,d]) => `
-        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0ebe4;font-size:13px">
+        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0eee9;font-size:13px">
           <span style="font-weight:500">${esc(reason_labels[r]||r)}</span>
-          <span style="color:#4a9e6b;font-weight:600">+${d.in.toFixed(1)}kg</span>
-          <span style="color:#e05c2a;font-weight:600">-${d.out.toFixed(1)}kg</span>
-          <span style="color:#888;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
+          <span style="color:#16a34a;font-weight:600">+${d.in.toFixed(1)}kg</span>
+          <span style="color:#dc2626;font-weight:600">-${d.out.toFixed(1)}kg</span>
+          <span style="color:#666;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
         </div>`).join("")}
     </div>
 
     <div class="card mb-16">
       <div class="section-title">By Coffee</div>
       ${coffee_rows.length===0?'<p class="hint">No movements in this range.</p>':coffee_rows.map(([c,d]) => `
-        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0ebe4;font-size:13px">
+        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0eee9;font-size:13px">
           <span style="font-weight:500">${esc(c)}</span>
-          <span style="color:#4a9e6b;font-weight:600">+${d.in.toFixed(1)}kg</span>
-          <span style="color:#e05c2a;font-weight:600">-${d.out.toFixed(1)}kg</span>
-          <span style="color:#888;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
+          <span style="color:#16a34a;font-weight:600">+${d.in.toFixed(1)}kg</span>
+          <span style="color:#dc2626;font-weight:600">-${d.out.toFixed(1)}kg</span>
+          <span style="color:#666;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
         </div>`).join("")}
     </div>
 
