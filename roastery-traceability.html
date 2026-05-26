@@ -4,6 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Roastery Trace</title>
+  <script>
+    // Intercept shop QR scans BEFORE any other scripts load.
+    // Shop scans go to the dedicated delivery-confirm page (no auth UI flicker).
+    (function() {
+      const params = new URLSearchParams(window.location.search);
+      const scan_id = params.get("scan");
+      if (scan_id) {
+        window.location.replace("delivery-confirm.html?scan=" + encodeURIComponent(scan_id));
+      }
+    })();
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
@@ -89,12 +100,15 @@
 // shops do not need to log in to confirm a delivery.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ROASTERY TRACE — vanilla JS single-page app
+// Shop scans (?scan=...) are intercepted in the <head> and redirected to
+// delivery-confirm.html before this script runs.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
-  const is_shop_scan = window.location.search.includes("scan=");
-  // Shop scans are public — no login required
-  if (is_shop_scan) { init(); return; }
   if (!session) { window.location.href = "login.html"; return; }
   const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
   const role = role_row?.role;

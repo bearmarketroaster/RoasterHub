@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Confirm Delivery — Bear Mrkt</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; padding: 20px; }
+    .brand-bar { background: #1a1a1a; padding: 14px 20px; border-radius: 8px; max-width: 480px; margin: 0 auto 20px; text-align: center; }
+    .brand-bar img { height: 22px; width: auto; display: inline-block; }
+    .card { background: #fff; border-radius: 12px; padding: 28px 24px; max-width: 480px; margin: 0 auto; box-shadow: 0 2px 16px rgba(0,0,0,0.06); border: 1px solid #e8e6e1; }
+    .card-center { text-align: center; }
+    .icon-large { font-size: 56px; line-height: 1; margin-bottom: 10px; }
+    .icon-success { font-size: 72px; line-height: 1; margin-bottom: 10px; }
+    .shop-name { font-size: 22px; font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
+    .shop-sub  { color: #666; font-size: 14px; }
+    h2 { color: #1a1a1a; font-size: 20px; margin-bottom: 6px; }
+    .hint { color: #666; font-size: 13px; line-height: 1.5; }
+    .dispatch-card { background: #fff; border: 1px solid #e8e6e1; border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+    .dispatch-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; gap: 12px; }
+    .dispatch-date { font-weight: 700; font-size: 15px; color: #1a1a1a; }
+    .dispatch-meta { color: #666; font-size: 12px; margin-top: 2px; }
+    .line { display: flex; justify-content: space-between; font-size: 14px; color: #1a1a1a; margin: 6px 0; }
+    .line .qty { color: #666; }
+    .line .kg { font-weight: 600; }
+    .btn { color: #fff; border: none; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-green { background: #16a34a; }
+    .btn-green:hover:not(:disabled) { background: #15803d; }
+    .btn-dark { background: #1a1a1a; }
+    .btn-dark:hover:not(:disabled) { background: #000; }
+    .btn-ghost { background: #f4f2ed; color: #1a1a1a; border: 1px solid #e8e6e1; }
+    .btn-confirm-all { width: 100%; padding: 16px; font-size: 16px; margin-top: 12px; }
+    .btn-confirm-row { padding: 10px 16px; white-space: nowrap; }
+    .footer-msg { text-align: center; color: #999; font-size: 12px; margin-top: 24px; }
+    .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+    .err-card { background: #fdecea; border: 1px solid #dc2626; border-radius: 8px; padding: 14px; color: #dc2626; font-size: 13px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="brand-bar"><img src="wordmark.png" alt="Bear Mrkt" /></div>
+  <div id="app"><div class="loading">Loading…</div></div>
+
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+const state = {
+  loading: true,
+  shop_qr_id: null,
+  shop_name: null,
+  pending: [],     // unconfirmed dispatches for this shop
+  view: "list",    // "list" | "done" | "no-pending" | "not-found"
+  error: null,
+};
+
+const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+async function init() {
+  const params = new URLSearchParams(window.location.search);
+  const scan_id = params.get("scan");
+  if (!scan_id) {
+    state.view = "not-found";
+    state.error = "No delivery code in the link.";
+    state.loading = false;
+    render();
+    return;
+  }
+  state.shop_qr_id = scan_id;
+
+  // Look up the shop
+  const { data: mappings, error: mappings_err } = await supabaseClient
+    .from("shop_mappings")
+    .select("master_name, shop_qr_id")
+    .eq("shop_qr_id", scan_id);
+  if (mappings_err || !mappings || mappings.length === 0) {
+    state.view = "not-found";
+    state.loading = false;
+    render();
+    return;
+  }
+  state.shop_name = mappings[0].master_name;
+
+  // Load unconfirmed dispatches for that shop with their lines
+  const { data: dispatches } = await supabaseClient
+    .from("dispatches")
+    .select("id, shop, date, total_kg, confirmed_at, dispatch_lines(*)")
+    .eq("shop", state.shop_name)
+    .is("confirmed_at", null)
+    .order("date", { ascending: true });
+
+  state.pending = (dispatches || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
+  if (state.pending.length === 0) state.view = "no-pending";
+
+  state.loading = false;
+  render();
+}
+
+async function confirm_one(dispatch_id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "Confirming…"; }
+  const { error } = await supabaseClient
+    .from("dispatches")
+    .update({ confirmed_at: new Date().toISOString() })
+    .eq("id", dispatch_id);
+  if (error) {
+    if (btn) { btn.disabled = false; btn.textContent = "✓ Confirm"; }
+    alert("Couldn't confirm. Please try again or contact Bear Mrkt.");
+    return;
+  }
+  state.pending = state.pending.filter(d => d.id !== dispatch_id);
+  if (state.pending.length === 0) state.view = "done";
+  render();
+}
+
+async function confirm_all() {
+  const btn = document.getElementById("confirm-all-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Confirming…"; }
+  const ids = state.pending.map(d => d.id);
+  const { error } = await supabaseClient
+    .from("dispatches")
+    .update({ confirmed_at: new Date().toISOString() })
+    .in("id", ids);
+  if (error) {
+    if (btn) { btn.disabled = false; btn.textContent = `✓ Confirm All (${ids.length})`; }
+    alert("Couldn't confirm. Please try again or contact Bear Mrkt.");
+    return;
+  }
+  state.pending = [];
+  state.view = "done";
+  render();
+}
+
+function render() {
+  document.getElementById("app").innerHTML = build_app();
+  attach_listeners();
+}
+
+function build_app() {
+  if (state.loading) return `<div class="loading">Loading delivery details…</div>`;
+
+  if (state.view === "not-found") {
+    return `<div class="card card-center">
+      <div class="icon-large">⚠️</div>
+      <h2>Delivery Not Found</h2>
+      <p class="hint" style="margin-top:8px">This delivery link is invalid or has expired.</p>
+      <p class="hint" style="margin-top:12px;font-size:12px">If you think this is a mistake, please contact Bear Mrkt.</p>
+    </div>`;
+  }
+
+  if (state.view === "no-pending") {
+    return `<div class="card card-center">
+      <div class="icon-large">📭</div>
+      <div class="shop-name">${esc(state.shop_name)}</div>
+      <p class="hint" style="margin-top:12px">No pending deliveries to confirm.</p>
+      <p class="hint" style="margin-top:6px;font-size:12px">All caught up.</p>
+    </div>`;
+  }
+
+  if (state.view === "done") {
+    return `<div class="card card-center">
+      <div class="icon-success">✅</div>
+      <h2>Confirmed!</h2>
+      <p class="hint" style="margin-top:8px">Deliveries marked as received for <strong>${esc(state.shop_name)}</strong>.</p>
+      <p class="hint" style="margin-top:12px;font-size:12px">Thank you!</p>
+    </div>`;
+  }
+
+  // Default — list of pending deliveries
+  const rows = state.pending.map(d => {
+    const lines_html = (d.lines || []).map(l => {
+      const size_label = l.bag_size === "Bar 5kg" ? "Bar 5kg" : (l.bag_size || "?");
+      const icon = l.bag_size === "Bar 5kg" ? "🪣" : "🛍️";
+      return `<div class="line">
+        <span class="qty">${icon} ${l.bags||"—"} × ${esc(size_label)}${l.coffee?` <span style="color:#999">· ${esc(l.coffee)}</span>`:""}</span>
+        <span class="kg">${Number(l.kg).toFixed(1)}kg</span>
+      </div>`;
+    }).join("");
+    return `<div class="dispatch-card">
+      <div class="dispatch-header">
+        <div>
+          <div class="dispatch-date">${esc(d.date)}</div>
+          <div class="dispatch-meta">${Number(d.total_kg).toFixed(1)}kg total</div>
+        </div>
+        <button class="btn btn-green btn-confirm-row" data-confirm-dispatch="${esc(d.id)}">✓ Confirm</button>
+      </div>
+      ${lines_html}
+    </div>`;
+  }).join("");
+
+  return `<div class="card">
+    <div style="text-align:center;margin-bottom:18px">
+      <div style="font-size:36px;margin-bottom:6px">📦</div>
+      <div class="shop-name">${esc(state.shop_name)}</div>
+      <div class="shop-sub">${state.pending.length} pending delivery${state.pending.length !== 1 ? " — confirm what arrived" : ""}</div>
+    </div>
+    ${rows}
+    ${state.pending.length > 1 ? `<button class="btn btn-dark btn-confirm-all" id="confirm-all-btn">✓ Confirm All (${state.pending.length})</button>` : ""}
+  </div>
+  <div class="footer-msg">Bear Mrkt · Roastery Delivery Confirmation</div>`;
+}
+
+function attach_listeners() {
+  document.querySelectorAll("[data-confirm-dispatch]").forEach(btn => {
+    btn.addEventListener("click", () => confirm_one(btn.dataset.confirmDispatch, btn));
+  });
+  document.getElementById("confirm-all-btn")?.addEventListener("click", confirm_all);
+}
+
+init();
+</script>
+</body>
+</html>
