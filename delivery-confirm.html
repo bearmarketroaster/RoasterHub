@@ -54,6 +54,8 @@ const state = {
   pending: [],     // unconfirmed dispatches for this shop
   view: "list",    // "list" | "done" | "no-pending" | "not-found"
   error: null,
+  reporting_id: null,   // dispatch id currently showing the "missing items" form
+  report_note: "",      // text in that form
 };
 
 const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -110,6 +112,35 @@ async function confirm_one(dispatch_id, btn) {
     return;
   }
   state.pending = state.pending.filter(d => d.id !== dispatch_id);
+  if (state.pending.length === 0) state.view = "done";
+  render();
+}
+
+async function confirm_with_issue(dispatch_id) {
+  const note = state.report_note.trim();
+  if (!note) {
+    alert("Please describe what's missing.");
+    return;
+  }
+  const btn = document.getElementById("submit-issue-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
+  const now_iso = new Date().toISOString();
+  const { error } = await supabaseClient
+    .from("dispatches")
+    .update({
+      confirmed_at: now_iso,
+      issue_reported_at: now_iso,
+      issue_note: note,
+    })
+    .eq("id", dispatch_id);
+  if (error) {
+    if (btn) { btn.disabled = false; btn.textContent = "Submit & Confirm"; }
+    alert("Couldn't submit. Please try again or contact Bear Mrkt.");
+    return;
+  }
+  state.pending = state.pending.filter(d => d.id !== dispatch_id);
+  state.reporting_id = null;
+  state.report_note = "";
   if (state.pending.length === 0) state.view = "done";
   render();
 }
@@ -177,15 +208,35 @@ function build_app() {
         <span class="kg">${Number(l.kg).toFixed(1)}kg</span>
       </div>`;
     }).join("");
+    const is_reporting = state.reporting_id === d.id;
     return `<div class="dispatch-card">
       <div class="dispatch-header">
         <div>
           <div class="dispatch-date">${esc(d.date)}</div>
           <div class="dispatch-meta">${Number(d.total_kg).toFixed(1)}kg total</div>
         </div>
-        <button class="btn btn-green btn-confirm-row" data-confirm-dispatch="${esc(d.id)}">✓ Confirm</button>
+        <button class="btn btn-green btn-confirm-row" data-confirm-dispatch="${esc(d.id)}" ${is_reporting?"disabled":""}>✓ Confirm</button>
       </div>
       ${lines_html}
+      ${is_reporting ? `
+        <div style="background:#fff7ed;border:1px solid #fde4c2;border-radius:8px;padding:12px;margin-top:12px">
+          <div style="font-size:13px;font-weight:600;color:#d97706;margin-bottom:8px">⚠️ Report missing items</div>
+          <textarea
+            id="issue-note-${esc(d.id)}"
+            data-issue-note
+            placeholder="What's missing? e.g. 2× 500g Holy Roast bags, one bucket"
+            rows="3"
+            style="width:100%;padding:10px;border-radius:6px;border:1px solid #e8e6e1;font-size:14px;font-family:inherit;resize:vertical;background:#fff;color:#1a1a1a">${esc(state.report_note)}</textarea>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-dark" id="submit-issue-btn" data-submit-issue="${esc(d.id)}" style="flex:1">Submit &amp; Confirm</button>
+            <button class="btn btn-ghost" data-cancel-issue>Cancel</button>
+          </div>
+        </div>
+      ` : `
+        <div style="margin-top:10px;text-align:right">
+          <button data-open-issue="${esc(d.id)}" style="background:none;border:none;color:#d97706;font-size:13px;cursor:pointer;padding:4px 0;font-family:inherit;text-decoration:underline">⚠️ Report missing items</button>
+        </div>
+      `}
     </div>`;
   }).join("");
 
@@ -206,6 +257,37 @@ function attach_listeners() {
     btn.addEventListener("click", () => confirm_one(btn.dataset.confirmDispatch, btn));
   });
   document.getElementById("confirm-all-btn")?.addEventListener("click", confirm_all);
+
+  // Open the missing-items form for a specific dispatch
+  document.querySelectorAll("[data-open-issue]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.reporting_id = btn.dataset.openIssue;
+      state.report_note = "";
+      render();
+      // Focus the textarea once it's rendered
+      const ta = document.querySelector("[data-issue-note]");
+      ta?.focus();
+    });
+  });
+
+  // Cancel the form
+  document.querySelectorAll("[data-cancel-issue]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.reporting_id = null;
+      state.report_note = "";
+      render();
+    });
+  });
+
+  // Track textarea value
+  document.querySelectorAll("[data-issue-note]").forEach(ta => {
+    ta.addEventListener("input", e => { state.report_note = e.target.value; });
+  });
+
+  // Submit the issue
+  document.querySelectorAll("[data-submit-issue]").forEach(btn => {
+    btn.addEventListener("click", () => confirm_with_issue(btn.dataset.submitIssue));
+  });
 }
 
 init();

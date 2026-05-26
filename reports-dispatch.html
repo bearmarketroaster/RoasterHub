@@ -142,14 +142,19 @@ function build_reports() {
 
   // Build coffee + bag-size breakdown per shop using line-level data
   const shop_map = {};
+  const flagged_dispatches = [];  // dispatches with issue_reported_at set
   filtered.forEach(d => {
     const shop = d.shop || "Unknown";
     const k = shop_kind(shop);
     if (state.ui.report_kind !== "all" && state.ui.report_kind !== k) return;
-    if (!shop_map[shop]) shop_map[shop] = { total_kg:0, coffees:{}, dispatches:0, last_date:"", kind: k };
+    if (!shop_map[shop]) shop_map[shop] = { total_kg:0, coffees:{}, dispatches:0, last_date:"", kind: k, flagged: 0 };
     shop_map[shop].total_kg += d.total_kg;
     shop_map[shop].dispatches++;
     if (d.date > shop_map[shop].last_date) shop_map[shop].last_date = d.date;
+    if (d.issue_reported_at) {
+      shop_map[shop].flagged++;
+      flagged_dispatches.push(d);
+    }
 
     const dispatch_coffee_fallback = get_coffee_name(d);
     const lines = d.lines || [];
@@ -177,6 +182,7 @@ function build_reports() {
   });
   const shop_rows = Object.entries(shop_map).sort((a,b) => b[1].total_kg - a[1].total_kg);
   const max_shop_kg = shop_rows[0]?.[1].total_kg || 1;
+  flagged_dispatches.sort((a,b) => (b.issue_reported_at || "").localeCompare(a.issue_reported_at || ""));
 
   const week_map = {};
   filtered.forEach(d => {
@@ -228,7 +234,8 @@ function build_reports() {
     { label: "Dispatches", value: filtered.length, icon: "🚚" },
     { label: "Shops Served", value: unique_shops, icon: "🏪" },
     { label: "Coffees", value: unique_coffees, icon: "☕" },
-  ].map(({label,value,icon}) => `<div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">${icon}</div><div style="font-size:22px;font-weight:700;color:#1a1a1a">${value}</div><div style="font-size:11px;color:#666;margin-top:2px">${label}</div></div>`).join("");
+    ...(flagged_dispatches.length > 0 ? [{ label: "Flagged", value: flagged_dispatches.length, icon: "🚩", color: "#dc2626" }] : []),
+  ].map(({label,value,icon,color}) => `<div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">${icon}</div><div style="font-size:22px;font-weight:700;color:${color||'#1a1a1a'}">${value}</div><div style="font-size:11px;color:#666;margin-top:2px">${label}</div></div>`).join("");
 
   const weekly_chart = weeks.length > 1 ? `<div class="card mb-16"><div style="font-weight:700;color:#1a1a1a;margin-bottom:14px;font-size:15px">📅 Weekly Dispatch Volume (kg)</div><div class="chart-wrap">${weeks.map(([week,kg])=>{ const h=Math.round((kg/max_week_kg)*90); return `<div class="chart-col"><div class="chart-val">${kg.toFixed(0)}</div><div class="chart-bar" style="height:${h}px"></div><div class="chart-lbl">${week.slice(5)}</div></div>`; }).join("")}</div></div>` : "";
 
@@ -331,6 +338,31 @@ function build_reports() {
   return `
     <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end"><div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div><div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div><div class="flex gap-6"><button class="btn btn-ghost btn-sm" data-report-range="30">30d</button><button class="btn btn-ghost btn-sm" data-report-range="90">90d</button><button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button></div></div></div>
     <div class="grid-4 mb-16">${stats_html}</div>
+
+    ${flagged_dispatches.length > 0 ? `
+      <div class="card mb-16" style="border-left:3px solid #dc2626">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-weight:700;color:#1a1a1a;font-size:15px">🚩 Flagged Deliveries</div>
+          <div class="hint" style="font-size:12px">${flagged_dispatches.length} delivery${flagged_dispatches.length !== 1 ? "s" : ""} with reported issues</div>
+        </div>
+        <div style="display:grid;gap:8px">
+          ${flagged_dispatches.slice(0, 10).map(d => {
+            const reported_date = d.issue_reported_at ? new Date(d.issue_reported_at).toISOString().split("T")[0] : "";
+            const kind = shop_kind(d.shop);
+            return `<div style="background:#fdecea;border-radius:8px;padding:10px 14px;border:1px solid #f5b8b3">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px">
+                <div>
+                  <div style="font-weight:700;font-size:14px;color:#1a1a1a">${esc(d.shop)}${kind_badge_html(kind)}</div>
+                  <div style="font-size:11px;color:#666;margin-top:2px">Dispatched ${esc(d.date)} · ${Number(d.total_kg).toFixed(1)}kg${reported_date ? ` · Flagged ${reported_date}` : ""}</div>
+                </div>
+              </div>
+              ${d.issue_note ? `<div style="font-size:13px;color:#1a1a1a;margin-top:6px;padding:8px 10px;background:#fff;border-radius:6px;border:1px solid #f5b8b3"><strong style="color:#dc2626">Missing:</strong> ${esc(d.issue_note)}</div>` : ""}
+            </div>`;
+          }).join("")}
+        </div>
+        ${flagged_dispatches.length > 10 ? `<p class="hint" style="margin-top:10px;font-size:12px">Showing 10 most recent of ${flagged_dispatches.length}.</p>` : ""}
+      </div>
+    ` : ""}
 
     ${(channel_split.shop + channel_split.wholesale + channel_split.online + channel_split.samples + channel_split.staff) > 0 ? `
       <div class="card mb-16">
