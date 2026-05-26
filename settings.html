@@ -8,71 +8,81 @@
   <script src="config.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
     input, select, button { font-family: inherit; font-size: 14px; } button { cursor: pointer; }
-    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
     .header-left { display: flex; align-items: center; gap: 12px; }
-    .header-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
-    .header-back:hover { color: #e8d5b0; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
     .header-title { font-weight: 700; font-size: 18px; }
-    .header-sub { font-size: 12px; color: #c8a96e; margin-top: 1px; }
-    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
     .content { padding: 24px; max-width: 860px; margin: 0 auto; }
-    .section { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; overflow: hidden; }
-    .section-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #f0ebe4; cursor: pointer; user-select: none; }
-    .section-header:hover { background: #fdfaf7; }
-    .section-title { font-weight: 700; font-size: 16px; color: #1a1008; display: flex; align-items: center; gap: 10px; }
+    .section { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; margin-bottom: 20px; overflow: hidden; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid transparent; cursor: pointer; user-select: none; transition: background 0.15s; }
+    .section-header:hover { background: #fafaf8; }
+    .section-title { font-weight: 700; font-size: 16px; color: #1a1a1a; display: flex; align-items: center; gap: 10px; }
     .section-title .icon { font-size: 20px; }
-    .section-desc { font-size: 13px; color: #888; margin-top: 2px; }
-    .section-arrow { font-size: 16px; color: #c8a96e; font-weight: 700; }
-    .section-body { padding: 20px; }
-    .card { background: #f5f0eb; border-radius: 8px; padding: 14px; margin-bottom: 10px; }
-    .card-white { background: #fff; border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; }
-    label.lbl { display: block; font-size: 12px; color: #888; margin-bottom: 4px; font-weight: 500; }
-    input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; }
-    input:focus, select:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; }
+    .section-desc { font-size: 13px; color: #666; margin-top: 2px; }
+    .section-arrow { font-size: 16px; color: #666; font-weight: 700; }
+    .section-body { padding: 20px; border-top: 1px solid #f0eee9; }
+    .card { background: #f4f2ed; border-radius: 8px; padding: 14px; margin-bottom: 10px; }
+    .card-white { background: #fff; border: 1px solid #e8e6e1; border-radius: 8px; overflow: hidden; }
+    label.lbl { display: block; font-size: 12px; color: #666; margin-bottom: 4px; font-weight: 500; }
+    input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #e8e6e1; font-size: 14px; background: #fff; color: #1a1a1a; }
+    input:focus, select:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; }
-    .btn-dark { background: #1a1008; } .btn-amber { background: #c8a96e; } .btn-green { background: #4a9e6b; }
-    .btn-ghost { background: #f5f0eb; color: #5a3e1b; border: 1px solid #e0d5c5; }
-    .btn-red { background: #e05c2a; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; } .btn-lg { padding: 12px 24px; }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
+    .btn-dark { background: #1a1a1a; }
+    .btn-dark:hover:not(:disabled) { background: #000; }
+    .btn-amber { background: #d97706; }
+    .btn-amber:hover:not(:disabled) { background: #b45309; }
+    .btn-green { background: #16a34a; }
+    .btn-green:hover:not(:disabled) { background: #15803d; }
+    .btn-ghost { background: #f4f2ed; color: #1a1a1a; border: 1px solid #e8e6e1; }
+    .btn-ghost:hover:not(:disabled) { background: #e8e6e1; }
+    .btn-red { background: #dc2626; }
+    .btn-red:hover:not(:disabled) { background: #b91c1c; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-lg { padding: 12px 24px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .tag { border-radius: 10px; padding: 2px 8px; font-size: 12px; font-weight: 600; display: inline-block; }
 
     /* Coffee cards */
-    .coffee-card { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
-    .coffee-card-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
-    .coffee-card-header:hover { background: #fdfaf7; }
-    .coffee-card-header.open { background: #fff8ee; }
-    .coffee-card-body { padding: 16px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
+    .coffee-card { border: 1px solid #e8e6e1; border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+    .coffee-card-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; transition: background 0.15s; }
+    .coffee-card-header:hover { background: #fafaf8; }
+    .coffee-card-header.open { background: #f4f2ed; border-bottom: 1px solid #e8e6e1; }
+    .coffee-card-body { padding: 16px; background: #fafaf8; }
 
     /* FP code table */
-    .fp-table-header { display: grid; grid-template-columns: 1fr 1fr auto; background: #f5f0eb; padding: 8px 12px; border-bottom: 1px solid #e0d5c5; gap: 8px; }
+    .fp-table-header { display: grid; grid-template-columns: 1fr 1fr auto; background: #f4f2ed; padding: 8px 12px; border-bottom: 1px solid #e8e6e1; gap: 8px; }
     .fp-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
-    .fp-row + .fp-row { border-top: 1px solid #f0ebe4; }
+    .fp-row + .fp-row { border-top: 1px solid #f0eee9; }
 
     /* Supplier cards */
-    .supplier-card { border: 1px solid #e0d5c5; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
-    .supplier-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; }
-    .supplier-header:hover { background: #fdfaf7; }
-    .supplier-header.open { background: #fff8ee; }
-    .supplier-body { padding: 14px; background: #fffdf9; border-top: 1px solid #e0d5c5; }
+    .supplier-card { border: 1px solid #e8e6e1; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
+    .supplier-header { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fff; cursor: pointer; user-select: none; transition: background 0.15s; }
+    .supplier-header:hover { background: #fafaf8; }
+    .supplier-header.open { background: #f4f2ed; border-bottom: 1px solid #e8e6e1; }
+    .supplier-body { padding: 14px; background: #fafaf8; }
     .coffee-map-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; }
-    .coffee-map-row + .coffee-map-row { border-top: 1px solid #f0ebe4; }
+    .coffee-map-row + .coffee-map-row { border-top: 1px solid #f0eee9; }
 
-    .save-bar { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e0d5c5; padding: 14px 24px; display: flex; align-items: center; gap: 14px; box-shadow: 0 -2px 8px rgba(0,0,0,0.06); }
-    .mono { font-family: monospace; } .err { color: #e05c2a; font-size: 13px; margin-top: 6px; } .hint { color: #888; font-size: 13px; }
-    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #c8a96e; margin-bottom: 10px; }
+    .save-bar { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #e8e6e1; padding: 14px 24px; display: flex; align-items: center; gap: 14px; box-shadow: 0 -2px 8px rgba(0,0,0,0.06); }
+    .mono { font-family: monospace; }
+    .err { color: #dc2626; font-size: 13px; margin-top: 6px; }
+    .hint { color: #999; font-size: 13px; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #666; margin-bottom: 10px; }
     .flex-between { display: flex; justify-content: space-between; align-items: center; }
     .mt-8{margin-top:8px} .mt-12{margin-top:12px} .mt-16{margin-top:16px} .mb-8{margin-bottom:8px} .mb-12{margin-bottom:12px}
-    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
+    .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
     .parse-status { font-size: 13px; margin-top: 8px; padding: 8px 12px; border-radius: 6px; }
-    .parse-status.ok { background: #edf7f0; color: #4a9e6b; }
-    .parse-status.err { background: #fff0ee; color: #e05c2a; }
-    .parse-status.info { background: #fff8ee; color: #c8a96e; }
-    .inline-err { color: #e05c2a; font-size: 12px; margin-top: 4px; }
+    .parse-status.ok   { background: #e7f5ec; color: #16a34a; }
+    .parse-status.err  { background: #fdecea; color: #dc2626; }
+    .parse-status.info { background: #fff7ed; color: #d97706; }
+    .inline-err { color: #dc2626; font-size: 12px; margin-top: 4px; }
     @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } }
   </style>
 </head>
@@ -582,18 +592,18 @@ function build_buckets_section() {
   const buckets_html = filtered.map(b => {
     const retired = !!b.retired_at;
     return `
-      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4;${retired?"opacity:0.5":""}">
-        <span class="mono" style="background:#f0ebe4;color:#5a3e1b;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(b.id)}</span>
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0eee9;${retired?"opacity:0.5":""}">
+        <span class="mono" style="background:#f0eee9;color:#1a1a1a;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(b.id)}</span>
         <div>
-          <input type="text" data-bucket-name="${esc(b.id)}" value="${esc(b.name||"")}" placeholder="optional friendly name…" style="font-size:13px;padding:4px 8px;border:1px solid #e0d5c5;border-radius:5px;background:#fff;width:100%;max-width:220px" ${retired?"disabled":""} />
-          <div style="font-size:11px;color:#888;margin-top:3px">
+          <input type="text" data-bucket-name="${esc(b.id)}" value="${esc(b.name||"")}" placeholder="optional friendly name…" style="font-size:13px;padding:4px 8px;border:1px solid #e8e6e1;border-radius:5px;background:#fff;width:100%;max-width:220px" ${retired?"disabled":""} />
+          <div style="font-size:11px;color:#666;margin-top:3px">
             ${b.dispatch_count > 0 ? `${b.dispatch_count} dispatch${b.dispatch_count!==1?"es":""} · Last: ${esc(b.last_shop||"")} ${b.last_date||""}` : "Never used"}
-            ${retired?` · <span style="color:#e05c2a">retired</span>`:""}
+            ${retired?` · <span style="color:#dc2626">retired</span>`:""}
           </div>
         </div>
         ${retired
           ? `<button data-restore-bucket="${esc(b.id)}" class="btn btn-ghost btn-sm" style="font-size:11px">↻ Restore</button>`
-          : `<button data-retire-bucket="${esc(b.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:14px;line-height:1;padding:0 6px">✕</button>`}
+          : `<button data-retire-bucket="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;line-height:1;padding:0 6px">✕</button>`}
         <a href="print-qr.html?ids=${encodeURIComponent(b.id)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">🖨️</a>
       </div>`;
   }).join("");
@@ -603,15 +613,15 @@ function build_buckets_section() {
       <p class="hint mb-12">Manage 5kg bucket QR codes. Each bucket has a unique ID and can be tracked through dispatches.</p>
 
       <div class="card-white" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px;background:#f5f0eb;padding:10px 12px;border-bottom:1px solid #e0d5c5">
+        <div style="display:flex;align-items:center;gap:10px;background:#f4f2ed;padding:10px 12px;border-bottom:1px solid #e8e6e1">
           <div class="flex gap-6">
-            <button class="btn ${bucket_filter==="active"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="active" style="${bucket_filter==="active"?"color:#e8d5b0":""}">Active (${active_count})</button>
-            <button class="btn ${bucket_filter==="retired"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="retired" style="${bucket_filter==="retired"?"color:#e8d5b0":""}">Retired (${retired_count})</button>
-            <button class="btn ${bucket_filter==="all"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="all" style="${bucket_filter==="all"?"color:#e8d5b0":""}">All</button>
+            <button class="btn ${bucket_filter==="active"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="active" style="${bucket_filter==="active"?"color:#fff":""}">Active (${active_count})</button>
+            <button class="btn ${bucket_filter==="retired"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="retired" style="${bucket_filter==="retired"?"color:#fff":""}">Retired (${retired_count})</button>
+            <button class="btn ${bucket_filter==="all"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="all" style="${bucket_filter==="all"?"color:#fff":""}">All</button>
           </div>
           ${filtered.length > 0 ? `<a href="${print_url}" target="_blank" class="btn btn-amber btn-sm" style="margin-left:auto;text-decoration:none">🖨️ Print All Visible</a>` : ""}
         </div>
-        ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#aaa;font-style:italic">No buckets in this view.</div>' : buckets_html}
+        ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#999;font-style:italic">No buckets in this view.</div>' : buckets_html}
       </div>
 
       <div class="section-label">Generate New Buckets</div>
@@ -624,8 +634,8 @@ function build_buckets_section() {
           <div class="hint" style="font-size:12px;padding-bottom:8px">New buckets are created with random IDs (e.g. BKT-A3F2C918). Print and stick the QR labels onto your physical buckets.</div>
           <button class="btn btn-dark btn-sm" id="generate-buckets-btn">Generate</button>
         </div>
-        ${bucket_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:8px">${esc(bucket_err)}</p>` : ""}
-        ${bucket_msg ? `<p style="color:#4a9e6b;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(bucket_msg)}</p>` : ""}
+        ${bucket_err ? `<p style="color:#dc2626;font-size:12px;margin-top:8px">${esc(bucket_err)}</p>` : ""}
+        ${bucket_msg ? `<p style="color:#16a34a;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(bucket_msg)}</p>` : ""}
       </div>
 
       <div class="section-label" style="margin-top:16px">Print Bag Label QRs</div>
@@ -665,26 +675,26 @@ function build_containers_section() {
     : "print-qr.html?type=container";
 
   const status_badge = (status) => {
-    if (status === "active")  return '<span style="background:#edf7f0;color:#4a9e6b;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">ACTIVE</span>';
-    if (status === "waiting") return '<span style="background:#fff8ee;color:#c8a96e;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">WAITING</span>';
-    return '<span style="background:#f0ebe4;color:#888;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">EMPTY</span>';
+    if (status === "active")  return '<span style="background:#e7f5ec;color:#16a34a;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">ACTIVE</span>';
+    if (status === "waiting") return '<span style="background:#fff7ed;color:#d97706;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">WAITING</span>';
+    return '<span style="background:#f0eee9;color:#666;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700">EMPTY</span>';
   };
 
   const containers_html = filtered.map(c => {
     const retired = !!c.retired_at;
     return `
-      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4;${retired?"opacity:0.5":""}">
-        <span class="mono" style="background:#f0ebe4;color:#5a3e1b;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(c.id)}</span>
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0eee9;${retired?"opacity:0.5":""}">
+        <span class="mono" style="background:#f0eee9;color:#1a1a1a;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(c.id)}</span>
         <div>
-          <input type="text" data-container-name="${esc(c.id)}" value="${esc(c.name||"")}" placeholder="optional friendly name…" style="font-size:13px;padding:4px 8px;border:1px solid #e0d5c5;border-radius:5px;background:#fff;width:100%;max-width:220px" ${retired?"disabled":""} />
-          <div style="font-size:11px;color:#888;margin-top:3px">
+          <input type="text" data-container-name="${esc(c.id)}" value="${esc(c.name||"")}" placeholder="optional friendly name…" style="font-size:13px;padding:4px 8px;border:1px solid #e8e6e1;border-radius:5px;background:#fff;width:100%;max-width:220px" ${retired?"disabled":""} />
+          <div style="font-size:11px;color:#666;margin-top:3px">
             ${retired ? '' : status_badge(c.status||"empty") + ' · '}${c.roast_count > 0 ? `${c.roast_count} roast${c.roast_count!==1?"s":""}${c.last_roast_date?` · Last: ${c.last_roast_date}`:""}` : "Never used"}
-            ${retired?` · <span style="color:#e05c2a">retired</span>`:""}
+            ${retired?` · <span style="color:#dc2626">retired</span>`:""}
           </div>
         </div>
         ${retired
           ? `<button data-restore-container="${esc(c.id)}" class="btn btn-ghost btn-sm" style="font-size:11px">↻ Restore</button>`
-          : `<button data-retire-container="${esc(c.id)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:14px;line-height:1;padding:0 6px" title="Retire">✕</button>`}
+          : `<button data-retire-container="${esc(c.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;line-height:1;padding:0 6px" title="Retire">✕</button>`}
         <a href="print-qr.html?type=container&ids=${encodeURIComponent(c.id)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">🖨️</a>
       </div>`;
   }).join("");
@@ -694,15 +704,15 @@ function build_containers_section() {
       <p class="hint mb-12">Storage containers hold coffee from a single roast. Each has a unique ID and gets a QR sticker. The Roasts module will pick from this list.</p>
 
       <div class="card-white" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:10px;background:#f5f0eb;padding:10px 12px;border-bottom:1px solid #e0d5c5">
+        <div style="display:flex;align-items:center;gap:10px;background:#f4f2ed;padding:10px 12px;border-bottom:1px solid #e8e6e1">
           <div class="flex gap-6">
-            <button class="btn ${container_filter==="active"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="active" style="${container_filter==="active"?"color:#e8d5b0":""}">Active (${active_count})</button>
-            <button class="btn ${container_filter==="retired"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="retired" style="${container_filter==="retired"?"color:#e8d5b0":""}">Retired (${retired_count})</button>
-            <button class="btn ${container_filter==="all"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="all" style="${container_filter==="all"?"color:#e8d5b0":""}">All</button>
+            <button class="btn ${container_filter==="active"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="active" style="${container_filter==="active"?"color:#fff":""}">Active (${active_count})</button>
+            <button class="btn ${container_filter==="retired"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="retired" style="${container_filter==="retired"?"color:#fff":""}">Retired (${retired_count})</button>
+            <button class="btn ${container_filter==="all"?"btn-dark":"btn-ghost"} btn-sm" data-container-filter="all" style="${container_filter==="all"?"color:#fff":""}">All</button>
           </div>
           ${filtered.length > 0 ? `<a href="${print_url}" target="_blank" class="btn btn-amber btn-sm" style="margin-left:auto;text-decoration:none">🖨️ Print All Visible</a>` : ""}
         </div>
-        ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#aaa;font-style:italic">No containers in this view.</div>' : containers_html}
+        ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#999;font-style:italic">No containers in this view.</div>' : containers_html}
       </div>
 
       <div class="section-label">Add Container</div>
@@ -719,8 +729,8 @@ function build_containers_section() {
           <button class="btn btn-dark btn-sm" id="add-container-btn">+ Add</button>
         </div>
         <p class="hint" style="font-size:12px;margin-top:8px">Letters, numbers, dashes, underscores only. Use whatever convention works for your physical containers (XL01, BIN-A, etc.).</p>
-        ${container_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:8px">${esc(container_err)}</p>` : ""}
-        ${container_msg ? `<p style="color:#4a9e6b;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(container_msg)}</p>` : ""}
+        ${container_err ? `<p style="color:#dc2626;font-size:12px;margin-top:8px">${esc(container_err)}</p>` : ""}
+        ${container_msg ? `<p style="color:#16a34a;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(container_msg)}</p>` : ""}
       </div>
     </div>` : "";
   return `
@@ -746,10 +756,10 @@ function build_users_section() {
   const users_html = users.map(u => {
     const is_self = state.current_user?.id === u.user_id;
     return `
-      <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4">
+      <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #f0eee9">
         <div>
           <div style="font-size:13px;font-weight:600">${esc(u.email)}${is_self?` <span class="hint" style="font-size:11px;font-weight:400">(you)</span>`:""}</div>
-          <div style="font-size:11px;color:#aaa">Joined ${u.created_at?new Date(u.created_at).toLocaleDateString():"—"}</div>
+          <div style="font-size:11px;color:#999">Joined ${u.created_at?new Date(u.created_at).toLocaleDateString():"—"}</div>
         </div>
         <input type="text" data-user-name="${u.user_id}" value="${esc(u.display_name||"")}" placeholder="Display name…" style="font-size:12px;padding:4px 8px" />
         <select class="user-role-select" data-uid="${u.user_id}" ${is_self?"disabled":""} style="font-size:12px;width:110px">
@@ -757,7 +767,7 @@ function build_users_section() {
           <option value="packer" ${u.role==="packer"?"selected":""}>Packer</option>
           <option value="viewer" ${u.role==="viewer"?"selected":""}>Viewer</option>
         </select>
-        ${is_self?'<span style="width:24px"></span>':`<button data-remove-user="${u.user_id}__${esc(u.email)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>`}
+        ${is_self?'<span style="width:24px"></span>':`<button data-remove-user="${u.user_id}__${esc(u.email)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>`}
       </div>`;
   }).join("");
 
@@ -765,13 +775,13 @@ function build_users_section() {
     <div class="section-label" style="margin-top:16px;margin-bottom:8px">Pending Invites (${invites.length})</div>
     <div class="card-white">
       ${invites.map(i => `
-        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #f0ebe4">
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #f0eee9">
           <div>
             <div style="font-size:13px;font-weight:600">${esc(i.email)}</div>
-            <div style="font-size:11px;color:#aaa">Invited ${i.created_at?new Date(i.created_at).toLocaleDateString():"—"} as ${i.role}</div>
+            <div style="font-size:11px;color:#999">Invited ${i.created_at?new Date(i.created_at).toLocaleDateString():"—"} as ${i.role}</div>
           </div>
-          <span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">⏳ Pending</span>
-          <button data-cancel-invite="${esc(i.email)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>
+          <span class="tag" style="background:#fff3e0;color:#d97706;font-size:11px">⏳ Pending</span>
+          <button data-cancel-invite="${esc(i.email)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;padding:0 2px">✕</button>
         </div>`).join("")}
     </div>` : "";
 
@@ -781,13 +791,13 @@ function build_users_section() {
 
       <div class="section-label">Active Users</div>
       <div class="card-white" style="margin-bottom:0">
-        <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;background:#f5f0eb;padding:8px 12px;border-bottom:1px solid #e0d5c5">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;background:#f4f2ed;padding:8px 12px;border-bottom:1px solid #e8e6e1">
           <span class="lbl" style="margin:0">Email</span>
           <span class="lbl" style="margin:0">Display Name</span>
           <span class="lbl" style="margin:0">Role</span>
           <span></span>
         </div>
-        ${users.length === 0 ? '<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No active users.</div>' : users_html}
+        ${users.length === 0 ? '<div style="padding:10px 12px;font-size:12px;color:#999;font-style:italic">No active users.</div>' : users_html}
       </div>
 
       ${invites_html}
@@ -809,8 +819,8 @@ function build_users_section() {
           </div>
           <button class="btn btn-dark btn-sm" id="invite-user-btn">Send Invite</button>
         </div>
-        ${user_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:8px">${esc(user_err)}</p>` : ""}
-        ${user_msg ? `<p style="color:#4a9e6b;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(user_msg)}</p>` : ""}
+        ${user_err ? `<p style="color:#dc2626;font-size:12px;margin-top:8px">${esc(user_err)}</p>` : ""}
+        ${user_msg ? `<p style="color:#16a34a;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(user_msg)}</p>` : ""}
       </div>
     </div>` : "";
 
@@ -865,18 +875,18 @@ function build_coffees_section() {
 
     const fp_rows = c.fp_codes.map(f => `
       <div class="fp-row">
-        <span class="mono" style="font-size:13px;font-weight:600;color:#1a1008">${esc(f.fp_code)}</span>
-        <span class="tag" style="background:#f0ebe4;color:#5a3e1b;font-size:11px">${esc(f.bag_size)}</span>
-        <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 2px" data-delete-fp="${c.id}__${f.id}" title="Remove FP code">✕</button>
+        <span class="mono" style="font-size:13px;font-weight:600;color:#1a1a1a">${esc(f.fp_code)}</span>
+        <span class="tag" style="background:#f0eee9;color:#1a1a1a;font-size:11px">${esc(f.bag_size)}</span>
+        <button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;padding:0 2px" data-delete-fp="${c.id}__${f.id}" title="Remove FP code">✕</button>
       </div>`).join("");
 
     return `
       <div class="coffee-card">
         <div class="coffee-card-header ${is_open?"open":""}" data-toggle-coffee="${c.id}">
-          <span style="font-size:15px;color:#c8a96e">${is_open?"▾":"▸"}</span>
-          <span style="flex:1;font-weight:600;font-size:14px;color:#1a1008">${esc(c.name)}</span>
+          <span style="font-size:15px;color:#666">${is_open?"▾":"▸"}</span>
+          <span style="flex:1;font-weight:600;font-size:14px;color:#1a1a1a">${esc(c.name)}</span>
           <span class="hint" style="font-size:12px;margin-right:8px">${c.fp_codes.length} FP code${c.fp_codes.length!==1?"s":""}</span>
-          <button data-delete-coffee="${c.id}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" onclick="event.stopPropagation()">✕</button>
+          <button data-delete-coffee="${c.id}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" onclick="event.stopPropagation()">✕</button>
         </div>
         ${is_open ? `
           <div class="coffee-card-body">
@@ -896,9 +906,9 @@ function build_coffees_section() {
                 <span class="lbl" style="margin:0">Size</span>
                 <span></span>
               </div>
-              ${c.fp_codes.length===0?'<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No FP codes yet. Add one below.</div>':""}
+              ${c.fp_codes.length===0?'<div style="padding:10px 12px;font-size:12px;color:#999;font-style:italic">No FP codes yet. Add one below.</div>':""}
               ${fp_rows}
-              <div style="padding:10px 12px;border-top:1px solid #f0ebe4;background:#fdfaf7">
+              <div style="padding:10px 12px;border-top:1px solid #f0eee9;background:#fafaf8">
                 <div style="display:grid;grid-template-columns:1.2fr 1.5fr 1fr auto;gap:8px;align-items:flex-end">
                   <div>
                     <label class="lbl">FP Code *</label>
@@ -965,9 +975,9 @@ function build_traceability_section() {
           <button class="btn btn-dark btn-sm" id="check-url">🔍 Check</button>
           <button class="btn btn-green btn-sm" id="save-url" ${state.saving?"disabled":""}>💾 Save URL</button>
         </div>
-        ${url_status==="ok"?'<p style="margin-top:8px;font-size:13px;color:#4a9e6b;font-weight:600">✓ Valid URL format.</p>':""}
-        ${url_status==="unreachable"?'<p style="margin-top:8px;font-size:13px;color:#e05c2a;font-weight:600">⚠️ Invalid URL format.</p>':""}
-        ${state.saved?'<p style="margin-top:8px;font-size:13px;color:#4a9e6b;font-weight:600">✓ Saved.</p>':""}
+        ${url_status==="ok"?'<p style="margin-top:8px;font-size:13px;color:#16a34a;font-weight:600">✓ Valid URL format.</p>':""}
+        ${url_status==="unreachable"?'<p style="margin-top:8px;font-size:13px;color:#dc2626;font-weight:600">⚠️ Invalid URL format.</p>':""}
+        ${state.saved?'<p style="margin-top:8px;font-size:13px;color:#16a34a;font-weight:600">✓ Saved.</p>':""}
       </div>
     </div>` : "";
 
@@ -1001,7 +1011,7 @@ function build_shops_section() {
   const entries = Object.values(by_master).sort((a,b) => a.master_name.localeCompare(b.master_name));
 
   const kind_badge = (kind) => {
-    if (kind === "online")    return '<span style="background:#fff8ee;color:#c8a96e;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">ONLINE</span>';
+    if (kind === "online")    return '<span style="background:#fff7ed;color:#d97706;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">ONLINE</span>';
     if (kind === "wholesale") return '<span style="background:#f0e9f7;color:#7e57c2;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">WHOLESALE</span>';
     return "";
   };
@@ -1009,21 +1019,21 @@ function build_shops_section() {
   const render_row = (s) => {
     const has_qr = s.kind === "shop";
     return `
-      <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:12px;border-top:1px solid #f0ebe4">
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:12px;border-top:1px solid #f0eee9">
         <div>
           <div style="font-weight:700;font-size:14px">${esc(s.master_name)}${kind_badge(s.kind)}</div>
           ${!has_qr
-            ? `<div style="font-size:11px;color:#888;margin-top:2px">${s.kind === "wholesale" ? "Wholesale customer — auto-confirmed on dispatch, no QR" : "Online — auto-confirmed on dispatch, no QR"}</div>`
+            ? `<div style="font-size:11px;color:#666;margin-top:2px">${s.kind === "wholesale" ? "Wholesale customer — auto-confirmed on dispatch, no QR" : "Online — auto-confirmed on dispatch, no QR"}</div>`
             : s.shop_qr_id
-            ? `<div style="font-size:11px;color:#888;font-family:monospace;margin-top:2px">${esc(s.shop_qr_id)}</div>`
-            : '<div style="font-size:11px;color:#e05c2a;margin-top:2px">No QR yet</div>'}
+            ? `<div style="font-size:11px;color:#666;font-family:monospace;margin-top:2px">${esc(s.shop_qr_id)}</div>`
+            : '<div style="font-size:11px;color:#dc2626;margin-top:2px">No QR yet</div>'}
         </div>
         ${!has_qr
           ? '<span></span>'
           : s.shop_qr_id
           ? `<a href="print-qr.html?type=shop&ids=${encodeURIComponent(s.shop_qr_id)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">🖨️</a>`
           : `<button data-generate-shop-qr="${esc(s.master_name)}" class="btn btn-dark btn-sm" style="font-size:11px">+ QR</button>`}
-        <button data-delete-shop-master="${esc(s.master_name)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remove">✕</button>
+        <button data-delete-shop-master="${esc(s.master_name)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remove">✕</button>
       </div>`;
   };
 
@@ -1041,7 +1051,7 @@ function build_shops_section() {
     <div class="section-body">
       <p class="hint mb-12">Three types of destinations: <strong>Shops</strong> (Bearmarket — QR-confirmed on delivery), <strong>Wholesale</strong> (third-party customers — auto-confirmed at pack), <strong>Online</strong> (web orders — auto-confirmed at pack).</p>
 
-      ${entries.length === 0 ? '<div class="card-white" style="padding:14px 12px;font-size:13px;color:#aaa;font-style:italic">Nothing here yet — add an entry below.</div>' : ""}
+      ${entries.length === 0 ? '<div class="card-white" style="padding:14px 12px;font-size:13px;color:#999;font-style:italic">Nothing here yet — add an entry below.</div>' : ""}
       ${group("Shops", shops_list)}
       ${group("Wholesale", wholesale_list)}
       ${group("Online", online_list)}
@@ -1060,7 +1070,7 @@ function build_shops_section() {
           <button class="btn btn-dark btn-sm" id="add-shop-mapping">+ Add</button>
         </div>
         <p class="hint" style="font-size:12px;margin-top:8px">Shops get an auto-generated QR for delivery confirmation. Wholesale and Online auto-confirm at pack time.</p>
-        ${shop_err ? `<p style="color:#e05c2a;font-size:12px;margin-top:4px">${esc(shop_err)}</p>` : ""}
+        ${shop_err ? `<p style="color:#dc2626;font-size:12px;margin-top:4px">${esc(shop_err)}</p>` : ""}
       </div>
     </div>` : "";
   return `
@@ -1094,16 +1104,16 @@ function build_suppliers_section() {
           <option value="">— Our coffee —</option>
           ${state.coffees.map(c=>`<option value="${c.id}" ${String(m.our_coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
         </select>
-        <button style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:18px;line-height:1" data-remove-coffee-map="${i}-${j}">✕</button>
+        <button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1" data-remove-coffee-map="${i}-${j}">✕</button>
       </div>`).join("");
 
     return `
       <div class="supplier-card">
         <div class="supplier-header ${is_open?"open":""}" data-toggle-supplier="${i}">
-          <span style="font-size:15px;color:#c8a96e">${is_open?"▾":"▸"}</span>
-          <span style="flex:1;font-weight:600;font-size:14px;color:#1a1008">${esc(s.supplier_name)}</span>
-          ${s.template?`<span class="tag" style="background:#edf7f0;color:#4a9e6b;font-size:11px">✓ Template saved</span>`:`<span class="tag" style="background:#fff3e0;color:#e0a82a;font-size:11px">No template yet</span>`}
-          <button data-delete-supplier="${esc(s.supplier_name)}" style="background:none;border:none;color:#e05c2a;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" onclick="event.stopPropagation()">✕</button>
+          <span style="font-size:15px;color:#666">${is_open?"▾":"▸"}</span>
+          <span style="flex:1;font-weight:600;font-size:14px;color:#1a1a1a">${esc(s.supplier_name)}</span>
+          ${s.template?`<span class="tag" style="background:#e7f5ec;color:#16a34a;font-size:11px">✓ Template saved</span>`:`<span class="tag" style="background:#fff3e0;color:#d97706;font-size:11px">No template yet</span>`}
+          <button data-delete-supplier="${esc(s.supplier_name)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" onclick="event.stopPropagation()">✕</button>
         </div>
         ${is_open ? `
           <div class="supplier-body">
@@ -1134,19 +1144,19 @@ function build_suppliers_section() {
               <input type="file" id="sup-pdf-${i}" accept=".pdf" style="display:none" />
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <button class="btn btn-dark btn-sm sup-upload-btn" data-si="${i}" ${parsing_supplier?"disabled":""}>${parsing_supplier?"⏳ Parsing…":"📄 Upload Sample PDF"}</button>
-                ${s.sample_text?`<span style="font-size:12px;color:#4a9e6b">✓ Sample loaded</span>`:`<span class="hint">No sample uploaded yet</span>`}
+                ${s.sample_text?`<span style="font-size:12px;color:#16a34a">✓ Sample loaded</span>`:`<span class="hint">No sample uploaded yet</span>`}
               </div>
               ${parse_status&&open_supplier===i?`<div class="parse-status ${parse_status.type}">${parse_status.msg}</div>`:""}
             </div>
 
             <div class="section-label">Coffee Name Translations</div>
             <div class="card-white" style="margin-bottom:12px">
-              <div style="display:grid;grid-template-columns:1fr 1fr auto;background:#f5f0eb;padding:8px 12px;border-bottom:1px solid #e0d5c5">
+              <div style="display:grid;grid-template-columns:1fr 1fr auto;background:#f4f2ed;padding:8px 12px;border-bottom:1px solid #e8e6e1">
                 <span class="lbl" style="margin:0">Supplier's Description</span>
                 <span class="lbl" style="margin:0">Our Coffee</span>
                 <span></span>
               </div>
-              ${coffee_maps.length===0?'<div style="padding:10px 12px;font-size:12px;color:#aaa;font-style:italic">No translations yet. Upload a sample PDF or add manually.</div>':""}
+              ${coffee_maps.length===0?'<div style="padding:10px 12px;font-size:12px;color:#999;font-style:italic">No translations yet. Upload a sample PDF or add manually.</div>':""}
               ${coffee_map_rows}
               <div style="padding:8px 12px"><button class="btn btn-amber btn-sm" data-add-coffee-map="${i}">+ Add Translation</button></div>
             </div>
@@ -1299,14 +1309,21 @@ function attach_listeners() {
     restore_bucket(btn.dataset.restoreBucket);
   }));
   app.querySelectorAll("[data-bucket-name]").forEach(inp => {
-    inp.addEventListener("change", async e => {
+    const save = async () => {
       const id = inp.dataset.bucketName;
-      const name = e.target.value.trim() || null;
+      const name = inp.value.trim() || null;
+      const current = state.buckets.find(x => x.id === id);
+      if (current && current.name === name) return;  // no change
       const { error } = await supabaseClient.from("buckets").update({ name }).eq("id", id);
       if (error) { alert("Failed to save name: " + error.message); return; }
-      const b = state.buckets.find(x => x.id === id);
-      if (b) b.name = name;
-    });
+      if (current) current.name = name;
+      // Visual confirmation — brief green flash on the input
+      inp.style.borderColor = "#16a34a";
+      inp.style.boxShadow = "0 0 0 3px rgba(22,163,74,0.15)";
+      setTimeout(() => { inp.style.borderColor = ""; inp.style.boxShadow = ""; }, 800);
+    };
+    inp.addEventListener("change", save);
+    inp.addEventListener("blur", save);
   });
 
   // ── Containers
@@ -1330,9 +1347,20 @@ function attach_listeners() {
     restore_container(btn.dataset.restoreContainer);
   }));
   app.querySelectorAll("[data-container-name]").forEach(inp => {
-    inp.addEventListener("change", e => {
-      update_container_name(inp.dataset.containerName, e.target.value.trim());
-    });
+    const save = async () => {
+      const id = inp.dataset.containerName;
+      const name = inp.value.trim() || null;
+      const current = state.containers.find(x => x.id === id);
+      if (current && current.name === name) return;
+      const { error } = await supabaseClient.from("containers").update({ name }).eq("id", id);
+      if (error) { alert("Failed to save name: " + error.message); return; }
+      if (current) current.name = name;
+      inp.style.borderColor = "#16a34a";
+      inp.style.boxShadow = "0 0 0 3px rgba(22,163,74,0.15)";
+      setTimeout(() => { inp.style.borderColor = ""; inp.style.boxShadow = ""; }, 800);
+    };
+    inp.addEventListener("change", save);
+    inp.addEventListener("blur", save);
   });
 
   // ── Users
