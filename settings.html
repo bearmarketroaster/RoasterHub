@@ -140,6 +140,7 @@ const state = {
     bucket_msg: "",
     new_container_id: "",
     new_container_name: "",
+    new_container_empty: "",
     container_filter: "active",
     container_err: "",
     container_msg: "",
@@ -385,7 +386,7 @@ async function load_containers() {
   });
 }
 
-async function add_container(id, name) {
+async function add_container(id, name, empty_kg) {
   id = id.trim().toUpperCase();
   if (!id) { state.ui.container_err = "Please enter a container ID."; render(); return; }
   if (!/^[A-Z0-9_-]{1,32}$/.test(id)) { state.ui.container_err = "ID can only contain letters, numbers, dashes, underscores."; render(); return; }
@@ -393,13 +394,18 @@ async function add_container(id, name) {
     state.ui.container_err = "That ID already exists.";
     render(); return;
   }
+  const empty_val = (empty_kg === "" || empty_kg === null || empty_kg === undefined) ? null : Number(empty_kg);
+  if (empty_val !== null && (isNaN(empty_val) || empty_val < 0)) {
+    state.ui.container_err = "Empty weight must be a positive number or blank."; render(); return;
+  }
   const { error } = await supabaseClient.from("containers").insert({
-    id, name: name ? name.trim() : null, status: "empty"
+    id, name: name ? name.trim() : null, empty_kg: empty_val, status: "empty"
   });
   if (error) { state.ui.container_err = error.message; render(); return; }
   state.ui.container_err = "";
   state.ui.new_container_id = "";
   state.ui.new_container_name = "";
+  state.ui.new_container_empty = "";
   state.ui.container_msg = `Added container ${id}.`;
   await load_containers();
   render();
@@ -683,7 +689,7 @@ function build_containers_section() {
   const containers_html = filtered.map(c => {
     const retired = !!c.retired_at;
     return `
-      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0eee9;${retired?"opacity:0.5":""}">
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0eee9;${retired?"opacity:0.5":""}">
         <span class="mono" style="background:#f0eee9;color:#1a1a1a;padding:3px 8px;border-radius:4px;font-size:12px;font-weight:600">${esc(c.id)}</span>
         <div>
           <input type="text" data-container-name="${esc(c.id)}" value="${esc(c.name||"")}" placeholder="optional friendly name…" style="font-size:13px;padding:4px 8px;border:1px solid #e8e6e1;border-radius:5px;background:#fff;width:100%;max-width:220px" ${retired?"disabled":""} />
@@ -691,6 +697,10 @@ function build_containers_section() {
             ${retired ? '' : status_badge(c.status||"empty") + ' · '}${c.roast_count > 0 ? `${c.roast_count} roast${c.roast_count!==1?"s":""}${c.last_roast_date?` · Last: ${c.last_roast_date}`:""}` : "Never used"}
             ${retired?` · <span style="color:#dc2626">retired</span>`:""}
           </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <input type="number" step="0.01" data-container-empty="${esc(c.id)}" value="${c.empty_kg ?? ""}" placeholder="empty" style="font-size:13px;padding:4px 8px;border:1px solid #e8e6e1;border-radius:5px;background:#fff;width:80px;text-align:right" ${retired?"disabled":""} title="Empty container weight in kg" />
+          <span style="font-size:11px;color:#666">kg</span>
         </div>
         ${retired
           ? `<button data-restore-container="${esc(c.id)}" class="btn btn-ghost btn-sm" style="font-size:11px">↻ Restore</button>`
@@ -717,8 +727,8 @@ function build_containers_section() {
 
       <div class="section-label">Add Container</div>
       <div class="card">
-        <div style="display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:flex-end">
-          <div style="width:160px">
+        <div style="display:grid;grid-template-columns:140px 1fr 120px auto;gap:10px;align-items:flex-end">
+          <div>
             <label class="lbl">Container ID *</label>
             <input id="new-container-id" value="${esc(new_container_id)}" placeholder="e.g. XL01" style="font-size:13px;text-transform:uppercase" />
           </div>
@@ -726,9 +736,13 @@ function build_containers_section() {
             <label class="lbl">Friendly name (optional)</label>
             <input id="new-container-name" value="${esc(new_container_name)}" placeholder="e.g. Big silver one" style="font-size:13px" />
           </div>
+          <div>
+            <label class="lbl">Empty kg (optional)</label>
+            <input type="number" step="0.01" id="new-container-empty" value="${state.ui.new_container_empty || ""}" placeholder="0.00" style="font-size:13px;text-align:right" />
+          </div>
           <button class="btn btn-dark btn-sm" id="add-container-btn">+ Add</button>
         </div>
-        <p class="hint" style="font-size:12px;margin-top:8px">Letters, numbers, dashes, underscores only. Use whatever convention works for your physical containers (XL01, BIN-A, etc.).</p>
+        <p class="hint" style="font-size:12px;margin-top:8px">Letters, numbers, dashes, underscores only. Use whatever convention works for your physical containers (XL01, BIN-A, etc.). Empty weight lets roasters skip the scale-zero step.</p>
         ${container_err ? `<p style="color:#dc2626;font-size:12px;margin-top:8px">${esc(container_err)}</p>` : ""}
         ${container_msg ? `<p style="color:#16a34a;font-size:12px;margin-top:8px;font-weight:600">✓ ${esc(container_msg)}</p>` : ""}
       </div>
@@ -1329,12 +1343,15 @@ function attach_listeners() {
   // ── Containers
   app.querySelector("#new-container-id")?.addEventListener("input", e => { state.ui.new_container_id = e.target.value; });
   app.querySelector("#new-container-name")?.addEventListener("input", e => { state.ui.new_container_name = e.target.value; });
+  app.querySelector("#new-container-empty")?.addEventListener("input", e => { state.ui.new_container_empty = e.target.value; });
   app.querySelector("#new-container-id")?.addEventListener("keydown", e => { if (e.key==="Enter") app.querySelector("#add-container-btn")?.click(); });
   app.querySelector("#new-container-name")?.addEventListener("keydown", e => { if (e.key==="Enter") app.querySelector("#add-container-btn")?.click(); });
+  app.querySelector("#new-container-empty")?.addEventListener("keydown", e => { if (e.key==="Enter") app.querySelector("#add-container-btn")?.click(); });
   app.querySelector("#add-container-btn")?.addEventListener("click", () => {
     const id = document.getElementById("new-container-id")?.value;
     const name = document.getElementById("new-container-name")?.value;
-    add_container(id, name);
+    const empty_kg = document.getElementById("new-container-empty")?.value;
+    add_container(id, name, empty_kg);
   });
   app.querySelectorAll("[data-container-filter]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.container_filter = btn.dataset.containerFilter;
@@ -1355,6 +1372,28 @@ function attach_listeners() {
       const { error } = await supabaseClient.from("containers").update({ name }).eq("id", id);
       if (error) { alert("Failed to save name: " + error.message); return; }
       if (current) current.name = name;
+      inp.style.borderColor = "#16a34a";
+      inp.style.boxShadow = "0 0 0 3px rgba(22,163,74,0.15)";
+      setTimeout(() => { inp.style.borderColor = ""; inp.style.boxShadow = ""; }, 800);
+    };
+    inp.addEventListener("change", save);
+    inp.addEventListener("blur", save);
+  });
+
+  app.querySelectorAll("[data-container-empty]").forEach(inp => {
+    const save = async () => {
+      const id = inp.dataset.containerEmpty;
+      const raw = inp.value.trim();
+      const empty_kg = raw === "" ? null : Number(raw);
+      if (empty_kg !== null && (isNaN(empty_kg) || empty_kg < 0)) {
+        inp.style.borderColor = "#dc2626";
+        return;
+      }
+      const current = state.containers.find(x => x.id === id);
+      if (current && current.empty_kg === empty_kg) return;
+      const { error } = await supabaseClient.from("containers").update({ empty_kg }).eq("id", id);
+      if (error) { alert("Failed to save empty weight: " + error.message); return; }
+      if (current) current.empty_kg = empty_kg;
       inp.style.borderColor = "#16a34a";
       inp.style.boxShadow = "0 0 0 3px rgba(22,163,74,0.15)";
       setTimeout(() => { inp.style.borderColor = ""; inp.style.boxShadow = ""; }, 800);

@@ -105,7 +105,7 @@ const state = {
   loading:        true,
   saving:         false,
   session:        new_session(),
-  ui: { step: 1, err: "" },
+  ui: { step: 1, err: "", gross_weight: "" },
 };
 
 function new_session() {
@@ -130,7 +130,7 @@ async function load_data() {
   state.coffees = (coffees_data || []).map(c => c.name);
 
   // Load containers list (non-retired) so the user can pick from a dropdown
-  const { data: containers_data } = await supabaseClient.from("containers").select("id, name, status, retired_at").order("id");
+  const { data: containers_data } = await supabaseClient.from("containers").select("id, name, status, retired_at, empty_kg").order("id");
   state.containers = (containers_data || []).filter(c => !c.retired_at);
 
   const { data: sessions, error } = await supabaseClient.from("roast_sessions").select("*, roast_batches(*)").order("date", { ascending: false });
@@ -180,6 +180,7 @@ async function save_session() {
   state.saving = false;
   await load_data();
   state.ui.step = 4;
+  state.ui.gross_weight = "";
   render();
 }
 
@@ -340,14 +341,20 @@ function build_step3() {
   const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
   const yp = yield_pct(total_green, s.roasted_weight);
   const yp_class = yield_class(yp);
+  // Look up the selected container's empty weight (test roasts have no container)
+  const container = state.containers.find(c => c.id === s.container_id);
+  const empty_kg = container?.empty_kg;
+  const has_empty = empty_kg !== null && empty_kg !== undefined && empty_kg > 0;
   return `
     <div class="flex-between mb-16">
-      <div><h2>${esc(s.coffee)}</h2><div class="hint mt-4">${s.date} · ${esc(s.container_id)}</div></div>
+      <div><h2>${esc(s.coffee)}${s.is_test?' <span style="background:#fff7ed;color:#d97706;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:700;vertical-align:middle">🧪 TEST</span>':''}</h2><div class="hint mt-4">${s.date}${s.is_test?'':` · ${esc(s.container_id)}`}</div></div>
       <button class="btn btn-ghost" id="cancel-new">Cancel</button>
     </div>
     <div class="card">
-      <h3>Weigh the Container</h3>
-      <p class="hint mb-16">All batches are done. Weigh <strong>${esc(s.container_id)}</strong> and enter the total roasted weight below.</p>
+      <h3>${has_empty ? "Weigh It On The Scale" : "Weigh the Container"}</h3>
+      <p class="hint mb-16">${has_empty
+        ? `All batches are done. Place <strong>${esc(s.container_id)}</strong> on the scale and enter the <strong>gross weight</strong> (no need to zero — empty weight is on file).`
+        : `All batches are done. Weigh <strong>${esc(s.container_id || "the output")}</strong> and enter the total roasted weight below.`}</p>
       <div style="background:#f4f2ed;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px">
         <div style="font-weight:600;color:#1a1a1a;margin-bottom:6px">What went in</div>
         ${s.batches.map((b,i) => `
@@ -360,8 +367,16 @@ function build_step3() {
         </div>
       </div>
       <div style="margin-bottom:16px">
-        <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Roasted Weight of ${esc(s.container_id)} (kg)</label>
-        <input type="number" id="s3-roasted" class="big" value="${s.roasted_weight}" placeholder="0.0" step="0.1" />
+        ${has_empty ? `
+          <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Gross Weight on Scale (kg) — container + coffee</label>
+          <input type="number" id="s3-gross" class="big" value="${state.ui.gross_weight || ""}" placeholder="0.0" step="0.1" />
+          <div style="text-align:center;font-size:13px;color:#666;margin-top:8px">
+            Container empty: <strong>${Number(empty_kg).toFixed(2)}kg</strong>${state.ui.gross_weight ? ` · Net roasted: <strong style="color:#1a1a1a">${Math.max(0, Number(state.ui.gross_weight) - Number(empty_kg)).toFixed(2)}kg</strong>` : ""}
+          </div>
+        ` : `
+          <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Roasted Weight ${s.is_test ? "" : `of ${esc(s.container_id)}`} (kg)</label>
+          <input type="number" id="s3-roasted" class="big" value="${s.roasted_weight}" placeholder="0.0" step="0.1" />
+        `}
       </div>
       <div id="yield-display" style="text-align:center;font-size:15px;margin-bottom:16px;min-height:22px">
         ${yp!==null?`<span class="${yp_class}">Yield: ${yp}% ${yp>=80&&yp<=90?"✓":"⚠️ Check weights"}</span>`:""}
@@ -417,10 +432,10 @@ function attach_listeners() {
   const app = document.getElementById("app");
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
-  app.querySelector("#start-new")?.addEventListener("click", () => { state.session=new_session(); state.ui.step=1; state.view="new"; render(); });
+  app.querySelector("#start-new")?.addEventListener("click", () => { state.session=new_session(); state.ui.step=1; state.ui.gross_weight=""; state.view="new"; render(); });
   app.querySelector("#go-history")?.addEventListener("click", () => { state.view="history"; render(); });
   app.querySelector("#history-back")?.addEventListener("click", () => { state.view="home"; render(); });
-  app.querySelector("#cancel-new")?.addEventListener("click", () => { state.view="home"; state.ui.step=1; render(); });
+  app.querySelector("#cancel-new")?.addEventListener("click", () => { state.view="home"; state.ui.step=1; state.ui.gross_weight=""; render(); });
 
   app.querySelector("#s1-is-test")?.addEventListener("change", e => {
     state.session.is_test = e.target.checked;
@@ -482,15 +497,42 @@ function attach_listeners() {
     if (el) el.innerHTML=yp!==null?`<span class="${yield_class(yp)}">Yield: ${yp}% ${yp>=80&&yp<=90?"✓":"⚠️ Check weights"}</span>`:"";
   });
 
+  // Gross-weight path: user enters container + coffee weight; we compute net live + on save
+  app.querySelector("#s3-gross")?.addEventListener("input", e => {
+    state.ui.gross_weight = e.target.value;
+    const container = state.containers.find(c => c.id === state.session.container_id);
+    const empty_kg = Number(container?.empty_kg) || 0;
+    const net = Math.max(0, Number(e.target.value) - empty_kg);
+    state.session.roasted_weight = net > 0 ? String(net) : "";
+    // Re-render to update the "Net roasted" hint
+    render();
+  });
+
   app.querySelector("#s3-save")?.addEventListener("click", () => {
-    state.session.roasted_weight=document.getElementById("s3-roasted")?.value||state.session.roasted_weight;
-    const err_el=document.getElementById("s3-err");
-    if (!state.session.roasted_weight) { err_el.textContent="Please enter the roasted weight."; err_el.style.display="block"; return; }
+    const container = state.containers.find(c => c.id === state.session.container_id);
+    const empty_kg = Number(container?.empty_kg) || 0;
+    const has_empty = container && empty_kg > 0;
+    const err_el = document.getElementById("s3-err");
+
+    if (has_empty) {
+      const gross_raw = document.getElementById("s3-gross")?.value || state.ui.gross_weight || "";
+      const gross = Number(gross_raw);
+      if (!gross_raw || isNaN(gross) || gross <= 0) {
+        err_el.textContent = "Please enter the gross weight (scale reading)."; err_el.style.display = "block"; return;
+      }
+      if (gross <= empty_kg) {
+        err_el.textContent = `Gross weight (${gross}kg) is less than or equal to the container's empty weight (${empty_kg}kg) — check the scale.`; err_el.style.display = "block"; return;
+      }
+      state.session.roasted_weight = String(gross - empty_kg);
+    } else {
+      state.session.roasted_weight = document.getElementById("s3-roasted")?.value || state.session.roasted_weight;
+      if (!state.session.roasted_weight) { err_el.textContent = "Please enter the roasted weight."; err_el.style.display = "block"; return; }
+    }
     save_session();
   });
   app.querySelector("#s3-back")?.addEventListener("click", () => { state.ui.step=2; render(); });
-  app.querySelector("#done-home")?.addEventListener("click", () => { state.view="home"; state.ui.step=1; render(); });
-  app.querySelector("#done-another")?.addEventListener("click", () => { state.session=new_session(); state.ui.step=1; state.view="new"; render(); });
+  app.querySelector("#done-home")?.addEventListener("click", () => { state.view="home"; state.ui.step=1; state.ui.gross_weight=""; render(); });
+  app.querySelector("#done-another")?.addEventListener("click", () => { state.session=new_session(); state.ui.step=1; state.ui.gross_weight=""; state.view="new"; render(); });
 }
 </script>
 </body>
