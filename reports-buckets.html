@@ -8,60 +8,60 @@
   <script src="config.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #f5f0eb; min-height: 100vh; color: #1a1008; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
     input, select, button { font-family: inherit; font-size: 14px; } button { cursor: pointer; }
-    input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #ddd; font-size: 14px; background: #fff; color: #1a1008; }
-    input:focus, select:focus { outline: 2px solid #c8a96e; border-color: #c8a96e; box-shadow: none; }
-    .header { background: #1a1008; color: #e8d5b0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #e8e6e1; font-size: 14px; background: #fff; color: #1a1a1a; }
+    input:focus, select:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
     .header-left { display: flex; align-items: center; gap: 12px; }
-    .header-back { background: none; border: none; color: #c8a96e; font-size: 13px; cursor: pointer; padding: 4px 0; }
-    .header-back:hover { color: #e8d5b0; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
     .header-title { font-weight: 700; font-size: 18px; }
-    .header-sub { font-size: 12px; color: #c8a96e; margin-top: 1px; }
-    .btn-logout { background: none; border: 1px solid #c8a96e; color: #c8a96e; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
-    .btn-logout:hover { background: #c8a96e; color: #1a1008; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
     .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
-    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); margin-bottom: 16px; }
-    .section-title { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #c8a96e; margin-bottom: 12px; }
+    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; margin-bottom: 16px; }
+    .section-title { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #666; margin-bottom: 12px; }
     .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 14px; }
-    .stat { background: #f5f0eb; border-radius: 8px; padding: 12px 14px; }
-    .stat-label { font-size: 11px; color: #888; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
-    .stat-value { font-size: 22px; font-weight: 700; color: #1a1008; }
-    .stat-sub { font-size: 11px; color: #888; margin-top: 2px; }
+    .stat { background: #f4f2ed; border-radius: 8px; padding: 12px 14px; }
+    .stat-label { font-size: 11px; color: #666; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
+    .stat-value { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+    .stat-sub { font-size: 11px; color: #666; margin-top: 2px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; padding: 10px 8px; background: #f5f0eb; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e0d5c5; cursor: pointer; user-select: none; }
-    th:hover { color: #1a1008; }
-    th.sorted { color: #1a1008; }
-    td { padding: 10px 8px; border-bottom: 1px solid #f0ebe4; vertical-align: middle; }
-    tr:hover td { background: #fdfaf5; }
+    th { text-align: left; padding: 10px 8px; background: #f4f2ed; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e8e6e1; cursor: pointer; user-select: none; transition: color 0.15s; }
+    th:hover { color: #1a1a1a; }
+    th.sorted { color: #1a1a1a; }
+    td { padding: 10px 8px; border-bottom: 1px solid #f0eee9; vertical-align: middle; }
+    tr:hover td { background: #fafaf8; }
     .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-    .tag-empty   { background: #f0ebe4; color: #888; }
-    .tag-filled  { background: #fff8ee; color: #c8a96e; }
-    .tag-transit { background: #fff3e0; color: #e0a82a; }
-    .tag-atshop  { background: #edf7f0; color: #4a9e6b; }
-    .tag-retired { background: #fbeae5; color: #e05c2a; }
-    .tag-condition-clean   { background: #edf7f0; color: #4a9e6b; }
-    .tag-condition-dirty   { background: #fff8ee; color: #c8a96e; }
-    .tag-condition-damaged { background: #fbeae5; color: #e05c2a; }
-    .tag-condition-lost    { background: #1a1008; color: #e8d5b0; }
+    .tag-empty   { background: #f0eee9; color: #666; }
+    .tag-filled  { background: #fff7ed; color: #d97706; }
+    .tag-transit { background: #fff3e0; color: #d97706; }
+    .tag-atshop  { background: #e7f5ec; color: #16a34a; }
+    .tag-retired { background: #fdecea; color: #dc2626; }
+    .tag-condition-clean   { background: #e7f5ec; color: #16a34a; }
+    .tag-condition-dirty   { background: #fff7ed; color: #d97706; }
+    .tag-condition-damaged { background: #fdecea; color: #dc2626; }
+    .tag-condition-lost    { background: #1a1a1a; color: #fff; }
     .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
     .filters input, .filters select { max-width: 220px; padding: 6px 10px; font-size: 13px; }
-    .mono { font-family: monospace; font-size: 11px; color: #888; }
-    .shop-card { border: 1px solid #f0ebe4; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+    .mono { font-family: monospace; font-size: 11px; color: #999; }
+    .shop-card { border: 1px solid #e8e6e1; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
     .shop-card-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
     .shop-name { font-weight: 700; font-size: 15px; }
     .shop-flag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
-    .shop-flag-ok    { background: #edf7f0; color: #4a9e6b; }
-    .shop-flag-warn  { background: #fff8ee; color: #c8a96e; }
-    .shop-flag-bad   { background: #fbeae5; color: #e05c2a; }
+    .shop-flag-ok   { background: #e7f5ec; color: #16a34a; }
+    .shop-flag-warn { background: #fff7ed; color: #d97706; }
+    .shop-flag-bad  { background: #fdecea; color: #dc2626; }
     .shop-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; font-size: 13px; }
-    .shop-stat-label { font-size: 11px; color: #888; }
-    .shop-stat-val { font-weight: 700; color: #1a1008; }
-    .condition-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 4px; background: #f0ebe4; }
+    .shop-stat-label { font-size: 11px; color: #666; }
+    .shop-stat-val { font-weight: 700; color: #1a1a1a; }
+    .condition-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 4px; background: #f0eee9; }
     .condition-bar-seg { height: 100%; }
-    .condition-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: #888; }
-    .loading { text-align: center; padding: 60px 20px; color: #888; font-size: 15px; }
-    .hint { color: #888; font-size: 12px; }
+    .condition-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: #666; }
+    .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+    .hint { color: #999; font-size: 12px; }
     @media (max-width: 600px) { .content { padding: 16px; } table { font-size: 12px; } th, td { padding: 8px 6px; } }
   </style>
 </head>
@@ -343,16 +343,16 @@ function render() {
               </div>
               ${total_returned > 0 ? `
                 <div class="condition-bar">
-                  ${seg(cc.clean, "#4a9e6b")}
-                  ${seg(cc.dirty, "#c8a96e")}
-                  ${seg(cc.damaged, "#e05c2a")}
-                  ${seg(cc.lost, "#1a1008")}
+                  ${seg(cc.clean, "#16a34a")}
+                  ${seg(cc.dirty, "#d97706")}
+                  ${seg(cc.damaged, "#dc2626")}
+                  ${seg(cc.lost, "#1a1a1a")}
                 </div>
                 <div class="condition-legend">
-                  ${cc.clean ? `<span style="color:#4a9e6b">● ${cc.clean} clean</span>` : ""}
-                  ${cc.dirty ? `<span style="color:#c8a96e">● ${cc.dirty} dirty</span>` : ""}
-                  ${cc.damaged ? `<span style="color:#e05c2a">● ${cc.damaged} damaged</span>` : ""}
-                  ${cc.lost ? `<span style="color:#1a1008">● ${cc.lost} lost</span>` : ""}
+                  ${cc.clean ? `<span style="color:#16a34a">● ${cc.clean} clean</span>` : ""}
+                  ${cc.dirty ? `<span style="color:#d97706">● ${cc.dirty} dirty</span>` : ""}
+                  ${cc.damaged ? `<span style="color:#dc2626">● ${cc.damaged} damaged</span>` : ""}
+                  ${cc.lost ? `<span style="color:#1a1a1a">● ${cc.lost} lost</span>` : ""}
                 </div>` : '<p class="hint" style="margin-top:6px">No returns recorded yet.</p>'}
             </div>`;
         }).join("")}
