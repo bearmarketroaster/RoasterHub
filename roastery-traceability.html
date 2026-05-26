@@ -1005,6 +1005,7 @@ const packing_state = {
   scanner_active: false,
   scanner_msg: "",     // last scan feedback
   scanner_msg_type: "info", // info | success | error
+  scan_mode: "scanner", // "scanner" (HID/manual) | "camera" — per-session
 };
 
 function reset_packing_state() {
@@ -1014,6 +1015,7 @@ function reset_packing_state() {
   packing_state.scanned_buckets = [];
   packing_state.err = "";
   packing_state.scanner_msg = "";
+  packing_state.scan_mode = "scanner";
 }
 
 // Compute totals from scanned items + buckets
@@ -1394,10 +1396,21 @@ function build_packing_page(container, fill) {
 
       ${summary}
 
+      <div style="display:flex;gap:6px;margin-bottom:10px;background:#f4f2ed;padding:4px;border-radius:8px">
+        <button class="btn ${ps.scan_mode==="scanner"?"btn-dark":"btn-ghost"} btn-sm" data-scan-mode="scanner" style="flex:1;${ps.scan_mode==="scanner"?"color:#fff":""}">⌨️ Scanner / Manual</button>
+        <button class="btn ${ps.scan_mode==="camera"?"btn-dark":"btn-ghost"} btn-sm" data-scan-mode="camera" style="flex:1;${ps.scan_mode==="camera"?"color:#fff":""}">📷 Camera</button>
+      </div>
+
+      ${ps.scan_mode === "camera" ? `
       <div style="position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
         ${flash}
         <div id="qr-scanner" style="width:100%;min-height:240px"></div>
-      </div>
+      </div>` : `
+      <div style="position:relative;background:#f4f2ed;border-radius:12px;padding:18px;margin-bottom:14px;text-align:center;color:#666;font-size:13px;border:1px dashed #d4d1ca">
+        ${flash}
+        <div style="font-size:22px;margin-bottom:4px">⌨️</div>
+        Scan with your barcode scanner or type an ID below, then press Enter.
+      </div>`}
 
       <div style="position:relative;margin-bottom:14px">
         <div style="display:flex;gap:8px">
@@ -1408,7 +1421,7 @@ function build_packing_page(container, fill) {
       </div>
 
       <div id="scan-panel" style="background:#f4f2ed;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
-        <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — point the camera at a QR code</p>
+        <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — ${ps.scan_mode === "camera" ? "point the camera at a QR code" : "scan or type to begin"}</p>
       </div>
 
       ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
@@ -1779,12 +1792,26 @@ function attach_listeners() {
   app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {}));
   app.querySelectorAll("[data-remove-bucket]").forEach(btn => btn.addEventListener("click", () => {}));
 
-  // Start QR scanner if we're on the scan step
-  if (packing_state.step === "scan" && state.scan_id && !packing_state.scanner_active) {
+  // Scan-mode toggle (Scanner/Manual vs Camera) — per-session, defaults to Scanner
+  app.querySelectorAll("[data-scan-mode]").forEach(btn => btn.addEventListener("click", () => {
+    const new_mode = btn.dataset.scanMode;
+    if (new_mode === packing_state.scan_mode) return;
+    packing_state.scan_mode = new_mode;
+    // If switching away from camera, stop it
+    if (new_mode !== "camera" && packing_state.scanner_active) stop_qr_scanner();
+    render();
+  }));
+
+  // Start camera only when we're on the scan step AND camera mode is selected
+  if (packing_state.step === "scan" && state.scan_id && packing_state.scan_mode === "camera" && !packing_state.scanner_active) {
     setTimeout(() => { start_qr_scanner(); update_scan_panel(); }, 100);
   }
-  if (packing_state.step !== "scan" && packing_state.scanner_active) {
+  if ((packing_state.step !== "scan" || packing_state.scan_mode !== "camera") && packing_state.scanner_active) {
     stop_qr_scanner();
+  }
+  // Auto-focus the manual input in Scanner mode so HID scanners can fire immediately
+  if (packing_state.step === "scan" && packing_state.scan_mode === "scanner") {
+    setTimeout(() => document.getElementById("manual-scan-input")?.focus(), 50);
   }
 
   app.querySelector("#pack-review")?.addEventListener("click", () => {
