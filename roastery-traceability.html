@@ -352,7 +352,7 @@ async function save_dispatch_v2(primary_container_id, primary_fill_id, shop, lin
   // Samples is a special internal sink — also auto-confirmed.
   const mapping = state.shop_mappings.find(m => m.master_name === shop);
   const kind = mapping?.kind;
-  const auto_confirm = (kind === "wholesale" || kind === "online" || shop === "Samples");
+  const auto_confirm = (kind === "wholesale" || kind === "online" || kind === "staff" || shop === "Samples" || shop === "Staff");
   const confirmed_at = auto_confirm ? new Date().toISOString() : null;
   const { error: d_err } = await supabaseClient.from("dispatches").insert({
     id: dispatch_id,

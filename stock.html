@@ -86,6 +86,8 @@ const state = {
   stock_items: [],
   deliveries: [],
   adjustments: [],
+  containers: [],         // active containers for staff takeaway picker
+  staff_dispatches: [],   // recent staff takeaway log
   loading: true,
   saving: false,
   ui: {
@@ -98,6 +100,7 @@ const state = {
     delivery: new_delivery(),
     pending_invoice_file: null,   // File object staged for upload after delivery saves
     adj: { coffee: "", change_kg: "", reason: "roast", note: "" },
+    staff: { coffee: "", container_id: "", bag_size: "200g", err: "", saving: false },
   },
 };
 
@@ -130,6 +133,31 @@ async function load_data() {
 
   const { data: supplier_templates } = await supabaseClient.from("supplier_templates").select("supplier_name, template").order("supplier_name");
   state.supplier_templates = supplier_templates || [];
+
+  // Load active containers + their fills + dispatches, compute remaining for the staff picker
+  const [{ data: container_rows }, { data: roast_sessions }, { data: all_dispatches }, { data: all_buckets }] = await Promise.all([
+    supabaseClient.from("containers").select("id, name, status, retired_at").is("retired_at", null),
+    supabaseClient.from("roast_sessions").select("id, container_id, fill_id, coffee, date, roasted_weight").order("date", { ascending: false }),
+    supabaseClient.from("dispatches").select("id, shop, date, container_id, fill_id, dispatch_lines(kg, fill_id, container_id)"),
+    supabaseClient.from("buckets").select("id, container_id, fill_id, status"),
+  ]);
+  const containers = (container_rows || []).filter(c => c.status === "active" || c.status === "waiting");
+  containers.forEach(c => {
+    // Use the most-recent roast session for this container as its "current fill"
+    const latest_roast = (roast_sessions || []).find(s => s.container_id === c.id);
+    if (!latest_roast) { c.coffee = null; c.remaining = 0; return; }
+    c.coffee = latest_roast.coffee;
+    c.fill_id = latest_roast.fill_id;
+    // remaining = roasted - dispatched_kg (line-level) - held_in_buckets (5kg each)
+    const dispatched_kg = (all_dispatches || []).reduce((s, d) => s + (d.dispatch_lines || []).filter(l => l.fill_id === c.fill_id || (!l.fill_id && l.container_id === c.id)).reduce((ss, l) => ss + (Number(l.kg) || 0), 0), 0);
+    const held_in_buckets = (all_buckets || []).filter(b => b.fill_id === c.fill_id && b.status === "filled").length * 5;
+    c.remaining = Math.max(0, Number(latest_roast.roasted_weight || 0) - dispatched_kg - held_in_buckets);
+  });
+  state.containers = containers.filter(c => c.remaining > 0);
+
+  // Load recent staff takeaways for display in the staff tab
+  const { data: staff_disps } = await supabaseClient.from("dispatches").select("id, shop, date, total_kg, container_id, fill_id, dispatch_lines(*)").eq("shop", "Staff").order("date", { ascending: false }).limit(50);
+  state.staff_dispatches = (staff_disps || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
 }
 
 async function save_delivery() {
@@ -230,6 +258,68 @@ async function set_threshold(coffee, value) {
   await load_data(); render();
 }
 
+const BAG_SIZE_KG = { "100g": 0.1, "200g": 0.2, "250g": 0.25, "500g": 0.5, "1kg": 1, "Bar 5kg": 5 };
+
+async function ensure_staff_destination() {
+  // Make sure the "Staff" shop_mapping exists. Create on first use.
+  const { data: existing } = await supabaseClient.from("shop_mappings").select("id").eq("master_name", "Staff").maybeSingle();
+  if (existing) return;
+  await supabaseClient.from("shop_mappings").insert({ parsed_name: "Staff", master_name: "Staff", kind: "staff", shop_qr_id: null });
+}
+
+async function save_staff_takeaway() {
+  const s = state.ui.staff;
+  s.err = "";
+  const container = state.containers.find(c => c.id === s.container_id);
+  if (!s.coffee) { s.err = "Please select a coffee."; render(); return; }
+  if (!container) { s.err = "Please select a container."; render(); return; }
+  if (container.coffee !== s.coffee) { s.err = "Container doesn't match the selected coffee."; render(); return; }
+  const bag_kg = BAG_SIZE_KG[s.bag_size] || 0;
+  if (!bag_kg) { s.err = "Invalid bag size."; render(); return; }
+  if (container.remaining < bag_kg) { s.err = `Container only has ${container.remaining.toFixed(1)}kg remaining — not enough for a ${s.bag_size} bag.`; render(); return; }
+
+  s.saving = true; render();
+
+  await ensure_staff_destination();
+
+  // Find the FP code for this coffee + bag size (so dispatch_line.fp_code is set)
+  // Not strictly required — if no FP exists, we leave fp_code null
+  const { data: fp_row } = await supabaseClient.from("fp_codes").select("fp_code, coffees(name)").eq("bag_size", s.bag_size);
+  const fp_code = (fp_row || []).find(f => f.coffees?.name === s.coffee)?.fp_code || null;
+
+  // Create the dispatch (auto-confirmed since kind=staff)
+  const dispatch_id = gen_id("DISP");
+  const now_iso = new Date().toISOString();
+  const { error: disp_err } = await supabaseClient.from("dispatches").insert({
+    id: dispatch_id,
+    shop: "Staff",
+    date: today(),
+    container_id: container.id,
+    fill_id: container.fill_id,
+    total_kg: bag_kg,
+    confirmed_at: now_iso,
+  });
+  if (disp_err) { s.err = "Failed to save: " + disp_err.message; s.saving = false; render(); return; }
+
+  // Create the dispatch_line
+  await supabaseClient.from("dispatch_lines").insert({
+    id: gen_id("LINE"),
+    dispatch_id,
+    container_id: container.id,
+    fill_id: container.fill_id,
+    coffee: s.coffee,
+    bag_size: s.bag_size,
+    bags: 1,
+    kg: bag_kg,
+    fp_code,
+  });
+
+  // Reset form, reload
+  state.ui.staff = { coffee: "", container_id: "", bag_size: "200g", err: "", saving: false };
+  await load_data();
+  render();
+}
+
 async function init() { await load_data(); state.loading=false; render(); }
 
 function render() { document.getElementById("app").innerHTML=build_app(); attach_listeners(); }
@@ -247,12 +337,12 @@ function build_app() {
   if (state.loading) return header + `<div class="loading">Loading stock…</div>`;
   const low_stock_items = state.stock_items.filter(s => s.current_kg < (s.low_stock_threshold||LOW_STOCK_KG) && s.current_kg > 0);
   const out_of_stock = state.stock_items.filter(s => s.current_kg===0 && s.coffee);
-  const tabs = ["🌱 Green Stock","📦 Deliveries","⚖️ Adjustments"];
+  const tabs = ["🌱 Green Stock","📦 Deliveries","⚖️ Adjustments","👤 Staff Takeaway"];
   return header + `
     <div class="tabs">${tabs.map((t,i) => `<button class="tab-btn${state.tab===i?" active":""}" data-tab="${i}">${t}</button>`).join("")}</div>
     <div class="content">
       ${low_stock_items.length>0||out_of_stock.length>0?`<div class="low-stock">⚠️ Low stock: ${[...out_of_stock.map(s=>`<strong>${esc(s.coffee)}</strong> — out of stock`),...low_stock_items.map(s=>`<strong>${esc(s.coffee)}</strong> — ${s.current_kg.toFixed(1)}kg remaining`)].join(" · ")}</div>`:""}
-      ${state.tab===0?build_green_stock():state.tab===1?build_deliveries():state.tab===2?build_adjustments():""}
+      ${state.tab===0?build_green_stock():state.tab===1?build_deliveries():state.tab===2?build_adjustments():state.tab===3?build_staff():""}
     </div>`;
 }
 
@@ -593,6 +683,102 @@ function build_adjustments() {
     ${state.adjustments.length===0&&!show_adj_form?`<div class="card empty"><div class="icon">⚖️</div>No adjustments yet.</div>`:`<div class="card">${adj_list||`<div class="hint" style="padding:8px 0">No adjustments yet.</div>`}</div>`}`;
 }
 
+function build_staff() {
+  const s = state.ui.staff;
+  // Coffees available = those that have an active container with stock
+  const coffees_with_stock = [...new Set(state.containers.map(c => c.coffee).filter(Boolean))].sort();
+  // Containers matching the selected coffee, ordered oldest first (FIFO)
+  const matching_containers = state.containers
+    .filter(c => c.coffee === s.coffee)
+    .sort((a, b) => (a.fill_id || "").localeCompare(b.fill_id || ""));
+  // Auto-select the oldest container if one isn't picked yet
+  if (!s.container_id && matching_containers.length > 0) {
+    s.container_id = matching_containers[0].id;
+  }
+  const selected_container = matching_containers.find(c => c.id === s.container_id);
+  const bag_kg = BAG_SIZE_KG[s.bag_size] || 0;
+  const can_save = !!(s.coffee && selected_container && selected_container.remaining >= bag_kg);
+
+  // Recent log
+  const recent_log = state.staff_dispatches.slice(0, 30);
+  const total_kg = state.staff_dispatches.reduce((sum, d) => sum + (Number(d.total_kg) || 0), 0);
+  const total_bags = state.staff_dispatches.reduce((sum, d) => sum + (d.lines || []).reduce((ss, l) => ss + (Number(l.bags) || 0), 0), 0);
+
+  return `
+    <div class="flex-between mb-16">
+      <div>
+        <h2 style="margin:0">Staff Takeaway</h2>
+        <p class="hint" style="margin-top:4px;font-size:13px">Log roasted coffee staff have taken home. Deducts from container stock so traceability stays accurate.</p>
+      </div>
+    </div>
+
+    <div class="card mb-16">
+      <div class="section-label">Log a takeaway</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:flex-end">
+        <div>
+          <label class="lbl">Coffee *</label>
+          <select id="staff-coffee">
+            <option value="">— Select coffee —</option>
+            ${coffees_with_stock.map(c => `<option value="${esc(c)}" ${s.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+          </select>
+          ${coffees_with_stock.length === 0 ? '<p class="hint" style="font-size:11px;margin-top:4px;color:#dc2626">No coffees with stock available.</p>' : ""}
+        </div>
+        <div>
+          <label class="lbl">Container ${matching_containers.length > 1 ? "(oldest first)" : ""}</label>
+          <select id="staff-container" ${!s.coffee || matching_containers.length===0 ? "disabled" : ""}>
+            ${matching_containers.length === 0
+              ? `<option value="">${s.coffee ? "No containers available" : "Pick a coffee first"}</option>`
+              : matching_containers.map(c => `<option value="${esc(c.id)}" ${s.container_id===c.id?"selected":""}>${esc(c.name?`${c.id} — ${c.name}`:c.id)} · ${c.remaining.toFixed(1)}kg</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label class="lbl">Bag Size *</label>
+          <select id="staff-bag-size">
+            <option value="200g" ${s.bag_size==="200g"?"selected":""}>200g</option>
+            <option value="500g" ${s.bag_size==="500g"?"selected":""}>500g</option>
+          </select>
+        </div>
+        <div>
+          <button class="btn btn-dark" id="save-staff" ${!can_save || s.saving ? "disabled" : ""}>${s.saving?"Saving…":"+ Log Takeaway"}</button>
+        </div>
+      </div>
+      ${s.err ? `<p class="err">${esc(s.err)}</p>` : ""}
+    </div>
+
+    <div class="card mb-16">
+      <div class="section-label">Summary</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        <div style="background:#f4f2ed;border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:#666;letter-spacing:1px;text-transform:uppercase;font-weight:600">Total Bags</div>
+          <div style="font-size:22px;font-weight:700;color:#1a1a1a;margin-top:4px">${total_bags}</div>
+        </div>
+        <div style="background:#f4f2ed;border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:#666;letter-spacing:1px;text-transform:uppercase;font-weight:600">Total kg</div>
+          <div style="font-size:22px;font-weight:700;color:#1a1a1a;margin-top:4px">${total_kg.toFixed(2)}kg</div>
+        </div>
+        <div style="background:#f4f2ed;border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:#666;letter-spacing:1px;text-transform:uppercase;font-weight:600">Entries</div>
+          <div style="font-size:22px;font-weight:700;color:#1a1a1a;margin-top:4px">${state.staff_dispatches.length}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">Recent Takeaways ${recent_log.length < state.staff_dispatches.length ? `<span class="hint" style="font-weight:400;font-size:12px">(latest 30 of ${state.staff_dispatches.length})</span>` : ""}</div>
+      ${recent_log.length === 0
+        ? '<p class="hint" style="padding:8px 0">No staff takeaways logged yet.</p>'
+        : recent_log.map(d => {
+          const line = (d.lines || [])[0] || {};
+          return `<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #f0eee9;font-size:13px">
+            <span class="tag" style="background:#f4f2ed;color:#666;min-width:70px;text-align:center;font-weight:600">${esc(line.bag_size || "?")}</span>
+            <span style="font-weight:500">${esc(line.coffee || d.shop)}</span>
+            <span style="color:#666;font-family:monospace;font-size:12px">${esc(d.container_id || "—")}</span>
+            <span style="color:#666">${d.date}</span>
+          </div>`;
+        }).join("")}
+    </div>`;
+}
+
 function attach_listeners() {
   const app = document.getElementById("app");
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
@@ -682,6 +868,17 @@ function attach_listeners() {
     state.ui.adj.note      = document.getElementById("adj-note")?.value      ?? state.ui.adj.note;
     save_adjustment();
   });
+
+  // Staff Takeaway
+  app.querySelector("#staff-coffee")?.addEventListener("change", e => {
+    state.ui.staff.coffee = e.target.value;
+    state.ui.staff.container_id = "";  // reset so it auto-picks oldest matching
+    state.ui.staff.err = "";
+    render();
+  });
+  app.querySelector("#staff-container")?.addEventListener("change", e => { state.ui.staff.container_id = e.target.value; render(); });
+  app.querySelector("#staff-bag-size")?.addEventListener("change", e => { state.ui.staff.bag_size = e.target.value; render(); });
+  app.querySelector("#save-staff")?.addEventListener("click", () => save_staff_takeaway());
 }
 </script>
 </body>
