@@ -630,7 +630,7 @@
 
       if (items.length === 0) { alert("No FP codes to export."); return; }
 
-      const headers = ["coffee_name","roast_type","region","process","altitude","flavour_1","flavour_2","flavour_3","qr_image","price"];
+      const headers = ["coffee_name","roast_type","region","process","altitude","flavour_1","flavour_2","flavour_3","image_url","price"];
       // CSV escape — quotes if contains comma/quote/newline; double-up internal quotes
       const csv_esc = (v) => {
         const s = v == null ? "" : String(v);
