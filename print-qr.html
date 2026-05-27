@@ -7,6 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="config.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -195,6 +196,7 @@
           <button class="size-preset" data-size="80">80</button>
         </div>
       </div>
+      <button class="btn-print" id="zip-btn" style="display:none;background:#fff7ed;color:#92400e;border:1px solid #d97706">📦 Download all as ZIP</button>
       <button class="btn-print" id="print-btn">🖨️ Print All</button>
     </div>
   </div>
@@ -247,6 +249,7 @@
         document.body.classList.add(`mode-${mode}`);
         document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
         document.getElementById("size-controls").style.display = mode === "sheet" ? "flex" : "none";
+        update_zip_button_visibility();
         render_grid();
       }));
 
@@ -254,6 +257,7 @@
         state.type = e.target.value;
         state.selected_ids = new Set();
         state.coffee_filter = "all";
+        update_zip_button_visibility();
         render_picker(); render_grid();
       });
       const sizeInput = document.getElementById("size-input");
@@ -267,6 +271,7 @@
         sizeInput.value = v;
         render_grid();
       }));
+      document.getElementById("zip-btn").addEventListener("click", download_zip);
 
       const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }] = await Promise.all([
         supabaseClient.from("buckets").select("id, name, retired_at").order("created_at", { ascending: false }),
@@ -294,6 +299,7 @@
 
       render_picker();
       render_grid();
+      update_zip_button_visibility();
     }
 
     function render_picker() {
@@ -518,6 +524,90 @@
 
       const safe_id = String(item.id).replace(/[^a-zA-Z0-9_-]/g, "_");
       pdf.save(`${state.type}-${safe_id}.pdf`);
+    }
+
+    // Show the ZIP button only when type=fp AND mode=sheet (the bag-label / Canva workflow)
+    function update_zip_button_visibility() {
+      const btn = document.getElementById("zip-btn");
+      if (!btn) return;
+      btn.style.display = (state.type === "fp" && state.mode === "sheet") ? "inline-block" : "none";
+    }
+
+    // Bulk-export every visible FP code as individual PNGs in a ZIP — for Canva Bulk Create.
+    // QR contents and rendering match exactly what's on the live tiles (same QRCode.js call,
+    // same H error correction) so scans land on the FP code identically.
+    async function download_zip() {
+      if (!window.JSZip) { alert("ZIP library not loaded — refresh the page and try again."); return; }
+      if (state.type !== "fp") return;
+
+      // Filter to FP codes that match the current coffee filter, AND exclude "Bar 5kg" (not a retail bag)
+      const items = state.fp_codes
+        .filter(f => state.coffee_filter === "all" || f.coffee_name === state.coffee_filter)
+        .filter(f => f.bag_size && f.bag_size.toLowerCase() !== "bar 5kg");
+
+      if (items.length === 0) { alert("No FP codes to export."); return; }
+
+      const btn = document.getElementById("zip-btn");
+      const original_text = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = `Generating 0/${items.length}...`;
+
+      try {
+        const zip = new JSZip();
+        // Render each QR offscreen at print resolution (target 75mm × 8 px/mm = 600px)
+        // — same encoding settings the app uses live, so the QR is byte-identical.
+        const target_px = 600;
+        let done = 0;
+        for (const item of items) {
+          // Build offscreen container for QRCode.js to render into
+          const holder = document.createElement("div");
+          holder.style.position = "fixed";
+          holder.style.left = "-10000px";
+          holder.style.top = "0";
+          document.body.appendChild(holder);
+          new window.QRCode(holder, {
+            text: item.id,
+            width: target_px,
+            height: target_px,
+            colorDark: "#1a1a1a",
+            colorLight: "#ffffff",
+            correctLevel: window.QRCode.CorrectLevel.H,
+          });
+          // QRCode.js renders sync into a <canvas> (with an <img> fallback). Wait one tick to be safe.
+          await new Promise(r => setTimeout(r, 0));
+          const canvas = holder.querySelector("canvas");
+          if (!canvas) { document.body.removeChild(holder); throw new Error("Failed to render QR for " + item.id); }
+          // Get PNG bytes
+          const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+          document.body.removeChild(holder);
+          // Filename: "Holy Roast QR 500g.png" — coffee_name as stored, bag_size as stored
+          const filename = `${item.coffee_name} QR ${item.bag_size}.png`;
+          zip.file(filename, blob);
+          done++;
+          btn.textContent = `Generating ${done}/${items.length}...`;
+        }
+        btn.textContent = "Bundling ZIP...";
+        const zip_blob = await zip.generateAsync({ type: "blob" });
+        // Filename: include coffee name if filtered, otherwise generic
+        const date_str = new Date().toISOString().slice(0, 10);
+        const filter_part = state.coffee_filter === "all" ? "all-coffees" : state.coffee_filter.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const zip_filename = `bear-mrkt-qrs-${filter_part}-${date_str}.zip`;
+        // Trigger download
+        const url = URL.createObjectURL(zip_blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = zip_filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error(err);
+        alert("Failed to build ZIP: " + (err.message || err));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original_text;
+      }
     }
 
     function esc(s)      { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
