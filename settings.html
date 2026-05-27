@@ -69,6 +69,15 @@
     .mt-8{margin-top:8px} .mt-12{margin-top:12px} .mb-8{margin-bottom:8px} .mb-12{margin-bottom:12px}
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
     .inline-err { color: #dc2626; font-size: 12px; margin-top: 4px; }
+    .label-coffee-group { margin-bottom: 18px; }
+    .label-coffee-name { font-size: 14px; font-weight: 700; color: #1a1a1a; padding: 8px 0; margin-bottom: 8px; border-bottom: 2px solid #1a1a1a; }
+    .label-fp-card { background: #fff; border: 1px solid #e8e6e1; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+    .label-fp-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #fafaf8; border-bottom: 1px solid #f0eee9; flex-wrap: wrap; }
+    .label-fp-body { padding: 14px; }
+    .label-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    @media (max-width: 800px) { .label-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 500px) { .label-grid { grid-template-columns: 1fr; } }
+    .label-input { width: 100%; }
     @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } }
   </style>
 </head>
@@ -99,6 +108,7 @@ const state = {
   shop_mappings: [],    // [{ id, parsed_name, master_name }]
   buckets: [],          // [{ id, created_at, retired_at, notes }]
   containers: [],       // [{ id, name, status, retired_at, ... }]
+  fp_label_data: {},    // { [fp_code]: { roast_type, region, process, altitude, flavour_1, flavour_2, flavour_3, price } }
   user_roles: [],
   pending_invites: [],
   current_user: null,
@@ -110,6 +120,9 @@ const state = {
     coffee_err: "",
     // per-coffee inline new FP row: { [coffee_id]: { fp_code:"", bag_size:"100g", err:"" } }
     new_fp: {},
+    // per-FP-code label-edit working draft + save state:
+    // { [fp_code]: { roast_type, region, ..., price, dirty, saving, saved, err } }
+    label_edit: {},
     new_shop_master: "",
     new_shop_kind: "shop",
     shop_err: "",
@@ -148,6 +161,14 @@ async function load_shop_mappings() {
   const { data, error } = await supabaseClient.from("shop_mappings").select("*").order("parsed_name");
   if (error) { console.error("Failed to load shop mappings:", error); return; }
   state.shop_mappings = data || [];
+}
+
+async function load_fp_label_data() {
+  const { data, error } = await supabaseClient.from("fp_label_data").select("*");
+  if (error) { console.error("Failed to load fp_label_data:", error); return; }
+  const map = {};
+  (data||[]).forEach(r => { map[r.fp_code] = r; });
+  state.fp_label_data = map;
 }
 
 // Sanitise a master name into a URL/QR-safe slug
@@ -403,7 +424,7 @@ async function init() {
   await load_current_user();
   // Viewers shouldn't be in Settings at all — redirect to Reports
   if (state.current_user?.role !== "admin") { window.location.href = "reports.html"; return; }
-  await Promise.all([load_coffees(), load_shop_mappings(), load_users(), load_buckets(), load_containers()]);
+  await Promise.all([load_coffees(), load_shop_mappings(), load_fp_label_data(), load_users(), load_buckets(), load_containers()]);
   state.loading = false;
   render();
 }
@@ -457,6 +478,42 @@ async function delete_fp_code(coffee_id, fp_id) {
   if (error) { alert("Failed to delete FP code: " + error.message); return; }
   const coffee = state.coffees.find(c=>c.id===coffee_id);
   if (coffee) coffee.fp_codes = coffee.fp_codes.filter(f=>f.id!==fp_id);
+  render();
+}
+
+async function save_fp_label_data(fp_code) {
+  const draft = state.ui.label_edit[fp_code];
+  if (!draft) return;
+  // Mark saving
+  state.ui.label_edit[fp_code] = { ...draft, saving: true, err: "" };
+  render();
+  const payload = {
+    fp_code,
+    roast_type: draft.roast_type || null,
+    region:     draft.region     || null,
+    process:    draft.process    || null,
+    altitude:   draft.altitude   || null,
+    flavour_1:  draft.flavour_1  || null,
+    flavour_2:  draft.flavour_2  || null,
+    flavour_3:  draft.flavour_3  || null,
+    price:      draft.price      || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabaseClient
+    .from("fp_label_data")
+    .upsert(payload, { onConflict: "fp_code" })
+    .select()
+    .single();
+  if (error) {
+    state.ui.label_edit[fp_code] = { ...draft, saving: false, err: error.message };
+    render();
+    return;
+  }
+  state.fp_label_data[fp_code] = data;
+  // Clear the working draft — display will fall back to saved state
+  delete state.ui.label_edit[fp_code];
+  // Show a brief "Saved" hint
+  state.ui.label_edit[fp_code] = { saved_flash_until: Date.now() + 1500 };
   render();
 }
 
@@ -750,6 +807,7 @@ function build_app() {
     <div class="content">
       <p class="hint" style="margin-bottom:20px">Manage coffees, FP codes, shops, containers, buckets, and users.</p>
       ${build_coffees_section()}
+      ${build_label_data_section()}
       ${build_shops_section()}
       ${build_buckets_section()}
       ${build_containers_section()}
@@ -847,6 +905,135 @@ function build_coffees_section() {
         <div>
           <div class="section-title"><span class="icon">☕</span> Coffees &amp; FP Codes</div>
           <div class="section-desc">${coffees.length} coffee${coffees.length!==1?"s":""} · ${total_fp} FP code${total_fp!==1?"s":""}</div>
+        </div>
+        <span class="section-arrow">${open?"▾":"▸"}</span>
+      </div>
+      ${body}
+    </div>`;
+}
+
+// ── BAG LABEL DATA SECTION ───────────────────────────────────────────────────
+// One row per FP code (excl. "Bar 5kg" — not a retail bag).
+// Stored in fp_label_data table, keyed by fp_code.
+// "Copy from..." pre-fills shared fields from a sibling FP (same coffee, different size) to save typing.
+function build_label_data_section() {
+  const open = state.open_section === "label_data";
+  // Flatten all FP codes across coffees, filtering out Bar 5kg, keep coffee context
+  const rows = [];
+  state.coffees.forEach(c => {
+    c.fp_codes
+      .filter(f => f.bag_size && f.bag_size.toLowerCase() !== "bar 5kg")
+      .forEach(f => rows.push({ coffee: c, fp: f }));
+  });
+
+  const filled_count = rows.filter(r => state.fp_label_data[r.fp.fp_code]).length;
+
+  // Group rows by coffee for readability
+  const by_coffee = {};
+  rows.forEach(r => {
+    if (!by_coffee[r.coffee.id]) by_coffee[r.coffee.id] = { coffee: r.coffee, fps: [] };
+    by_coffee[r.coffee.id].fps.push(r.fp);
+  });
+
+  const get_draft = (fp_code) => {
+    const saved = state.fp_label_data[fp_code] || {};
+    const draft = state.ui.label_edit[fp_code];
+    // If there's a working draft with dirty=true, use it; otherwise show saved
+    if (draft && draft.dirty) return draft;
+    return saved;
+  };
+
+  const groups_html = Object.values(by_coffee).map(g => {
+    const fps_html = g.fps.map(f => {
+      const d = get_draft(f.fp_code);
+      const saved = state.fp_label_data[f.fp_code];
+      const ui_state = state.ui.label_edit[f.fp_code] || {};
+      const is_dirty = ui_state.dirty;
+      const is_saving = ui_state.saving;
+      const flash_active = ui_state.saved_flash_until && Date.now() < ui_state.saved_flash_until;
+      // Build copy-from options: siblings of this FP (same coffee, different fp_code, has saved data)
+      const siblings = g.fps.filter(s => s.fp_code !== f.fp_code && state.fp_label_data[s.fp_code]);
+      const copy_options = siblings.map(s => `<option value="${esc(s.fp_code)}">${esc(s.fp_code)} (${esc(s.bag_size)})</option>`).join("");
+      return `
+        <div class="label-fp-card" data-fp-card="${esc(f.fp_code)}">
+          <div class="label-fp-header">
+            <span class="mono" style="font-size:14px;font-weight:700;color:#1a1a1a">${esc(f.fp_code)}</span>
+            <span class="tag" style="background:#f0eee9;color:#1a1a1a;font-size:11px">${esc(f.bag_size)}</span>
+            ${saved ? '<span class="tag" style="background:#e7f5ec;color:#16a34a;font-size:10px">SAVED</span>' : '<span class="tag" style="background:#fff7ed;color:#d97706;font-size:10px">EMPTY</span>'}
+            ${siblings.length > 0 ? `
+              <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+                <label class="lbl" style="margin:0;font-size:10px">📋 Copy from</label>
+                <select class="label-copy-from" data-fp="${esc(f.fp_code)}" style="font-size:12px;padding:3px 6px">
+                  <option value="">— pick FP —</option>
+                  ${copy_options}
+                </select>
+              </div>
+            ` : ""}
+          </div>
+          <div class="label-fp-body">
+            <div class="label-grid">
+              <div>
+                <label class="lbl">Roast Type</label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="roast_type" value="${esc(d.roast_type||"")}" placeholder="Espresso / Filter" />
+              </div>
+              <div>
+                <label class="lbl">Region</label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="region" value="${esc(d.region||"")}" placeholder="e.g. Colombia Huila" />
+              </div>
+              <div>
+                <label class="lbl">Process</label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="process" value="${esc(d.process||"")}" placeholder="e.g. Washed" />
+              </div>
+              <div>
+                <label class="lbl">Altitude</label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="altitude" value="${esc(d.altitude||"")}" placeholder="e.g. 1800 Masl" />
+              </div>
+              <div>
+                <label class="lbl">Flavour 1</label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="flavour_1" value="${esc(d.flavour_1||"")}" placeholder="e.g. Chocolate" />
+              </div>
+              <div>
+                <label class="lbl">Flavour 2</label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="flavour_2" value="${esc(d.flavour_2||"")}" placeholder="e.g. Caramel" />
+              </div>
+              <div>
+                <label class="lbl">Flavour 3</label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="flavour_3" value="${esc(d.flavour_3||"")}" placeholder="e.g. Hazelnut" />
+              </div>
+              <div>
+                <label class="lbl">Price</label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="price" value="${esc(d.price||"")}" placeholder="e.g. €14.00" />
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+              <button class="btn ${is_dirty?"btn-dark":"btn-ghost"} btn-sm label-save-btn" data-fp="${esc(f.fp_code)}" ${(!is_dirty || is_saving)?"disabled":""}>${is_saving?"Saving…":"💾 Save"}</button>
+              ${flash_active ? '<span style="color:#16a34a;font-size:12px;font-weight:600">✓ Saved</span>' : ""}
+              ${ui_state.err ? `<span class="inline-err" style="margin:0">${esc(ui_state.err)}</span>` : ""}
+              ${is_dirty && !is_saving ? '<span style="color:#d97706;font-size:12px;font-style:italic">unsaved changes</span>' : ""}
+            </div>
+          </div>
+        </div>`;
+    }).join("");
+
+    return `
+      <div class="label-coffee-group">
+        <div class="label-coffee-name">☕ ${esc(g.coffee.name)} <span class="hint" style="font-weight:400;font-size:12px">· ${g.fps.length} bag size${g.fps.length!==1?"s":""}</span></div>
+        ${fps_html}
+      </div>`;
+  }).join("");
+
+  const body = open ? `
+    <div class="section-body">
+      <p class="hint mb-12">Marketing data printed on retail bag labels. Used by the Canva bulk-label CSV export. Each FP code (bag size SKU) can have its own data — use "📋 Copy from" to pre-fill from a sibling.</p>
+      ${rows.length === 0 ? '<p class="hint" style="font-style:italic">No FP codes yet. Add some in the Coffees section first.</p>' : groups_html}
+    </div>` : "";
+
+  return `
+    <div class="section">
+      <div class="section-header" data-toggle-section="label_data">
+        <div>
+          <div class="section-title"><span class="icon">🏷️</span> Bag Label Data</div>
+          <div class="section-desc">${filled_count}/${rows.length} filled · for Canva bag label CSV</div>
         </div>
         <span class="section-arrow">${open?"▾":"▸"}</span>
       </div>
@@ -1008,6 +1195,49 @@ function attach_listeners() {
   app.querySelectorAll("[data-delete-fp]").forEach(btn => btn.addEventListener("click", () => {
     const [cid, fid] = btn.dataset.deleteFp.split("__").map(Number);
     delete_fp_code(cid, fid);
+  }));
+
+  // ── Bag Label Data
+  // Input changes update the working draft (but don't render until save) — to keep typing fluid.
+  app.querySelectorAll(".label-input").forEach(inp => inp.addEventListener("input", e => {
+    const fp = inp.dataset.fp;
+    const field = inp.dataset.field;
+    const existing = state.ui.label_edit[fp] || { ...(state.fp_label_data[fp] || {}) };
+    state.ui.label_edit[fp] = { ...existing, [field]: e.target.value, dirty: true };
+    // Toggle the Save button's appearance without a full re-render
+    const card = document.querySelector(`[data-fp-card="${fp.replace(/"/g, '\\"')}"]`);
+    const save_btn = card?.querySelector(".label-save-btn");
+    if (save_btn) {
+      save_btn.disabled = false;
+      save_btn.classList.remove("btn-ghost");
+      save_btn.classList.add("btn-dark");
+    }
+  }));
+  // Save button — triggers upsert + re-renders
+  app.querySelectorAll(".label-save-btn").forEach(btn => btn.addEventListener("click", () => {
+    save_fp_label_data(btn.dataset.fp);
+  }));
+  // Copy-from sibling: pre-fill all fields except price from the chosen FP code's saved data
+  app.querySelectorAll(".label-copy-from").forEach(sel => sel.addEventListener("change", e => {
+    const target_fp = sel.dataset.fp;
+    const source_fp = e.target.value;
+    if (!source_fp) return;
+    const source = state.fp_label_data[source_fp];
+    if (!source) return;
+    const existing = state.ui.label_edit[target_fp] || { ...(state.fp_label_data[target_fp] || {}) };
+    // Copy shared fields, leave price alone
+    state.ui.label_edit[target_fp] = {
+      ...existing,
+      roast_type: source.roast_type || "",
+      region:     source.region     || "",
+      process:    source.process    || "",
+      altitude:   source.altitude   || "",
+      flavour_1:  source.flavour_1  || "",
+      flavour_2:  source.flavour_2  || "",
+      flavour_3:  source.flavour_3  || "",
+      dirty: true,
+    };
+    render();
   }));
 
   // ── Shops
