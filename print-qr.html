@@ -197,6 +197,7 @@
         </div>
       </div>
       <button class="btn-print" id="zip-btn" style="display:none;background:#fff7ed;color:#92400e;border:1px solid #d97706">📦 Download all as ZIP</button>
+      <button class="btn-print" id="csv-btn" style="display:none;background:#fff7ed;color:#92400e;border:1px solid #d97706">📋 Generate Label CSV</button>
       <button class="btn-print" id="print-btn">🖨️ Print All</button>
     </div>
   </div>
@@ -230,6 +231,7 @@
       containers: [],
       fp_codes: [],
       shops: [],
+      fp_label_data: {},     // { [fp_code]: { roast_type, region, process, ..., price } }
       selected_ids: new Set(init_ids || []),
     };
 
@@ -272,16 +274,20 @@
         render_grid();
       }));
       document.getElementById("zip-btn").addEventListener("click", download_zip);
+      document.getElementById("csv-btn").addEventListener("click", download_csv);
 
-      const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }] = await Promise.all([
+      const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }, { data: fp_label_data }] = await Promise.all([
         supabaseClient.from("buckets").select("id, name, retired_at").order("created_at", { ascending: false }),
         supabaseClient.from("containers").select("id, name, retired_at").order("id"),
         supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code"),
         supabaseClient.from("shop_mappings").select("master_name, shop_qr_id").order("master_name"),
+        supabaseClient.from("fp_label_data").select("*"),
       ]);
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
       state.containers = (containers||[]).filter(c => !c.retired_at);
       state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
+      state.fp_label_data = {};
+      (fp_label_data||[]).forEach(r => { state.fp_label_data[r.fp_code] = r; });
       const shop_seen = new Set();
       state.shops = (shop_mappings||[]).filter(s => {
         if (!s.shop_qr_id || shop_seen.has(s.master_name)) return false;
@@ -526,11 +532,13 @@
       pdf.save(`${state.type}-${safe_id}.pdf`);
     }
 
-    // Show the ZIP button only when type=fp AND mode=sheet (the bag-label / Canva workflow)
+    // Show the ZIP + CSV buttons only when type=fp AND mode=sheet (the bag-label / Canva workflow)
     function update_zip_button_visibility() {
-      const btn = document.getElementById("zip-btn");
-      if (!btn) return;
-      btn.style.display = (state.type === "fp" && state.mode === "sheet") ? "inline-block" : "none";
+      const visible = (state.type === "fp" && state.mode === "sheet");
+      const zip_btn = document.getElementById("zip-btn");
+      const csv_btn = document.getElementById("csv-btn");
+      if (zip_btn) zip_btn.style.display = visible ? "inline-block" : "none";
+      if (csv_btn) csv_btn.style.display = visible ? "inline-block" : "none";
     }
 
     // Bulk-export every visible FP code as individual PNGs in a ZIP — for Canva Bulk Create.
@@ -608,6 +616,63 @@
         btn.disabled = false;
         btn.textContent = original_text;
       }
+    }
+
+    // Generate label-data CSV for Canva Bulk Create.
+    // One row per FP code (excl. Bar 5kg), pulling marketing fields from fp_label_data.
+    // qr_image column matches the filename in the ZIP exactly (e.g. "Holy Roast QR 500g.png").
+    function download_csv() {
+      if (state.type !== "fp") return;
+
+      const items = state.fp_codes
+        .filter(f => state.coffee_filter === "all" || f.coffee_name === state.coffee_filter)
+        .filter(f => f.bag_size && f.bag_size.toLowerCase() !== "bar 5kg");
+
+      if (items.length === 0) { alert("No FP codes to export."); return; }
+
+      const headers = ["coffee_name","roast_type","region","process","altitude","flavour_1","flavour_2","flavour_3","qr_image","price"];
+      // CSV escape — quotes if contains comma/quote/newline; double-up internal quotes
+      const csv_esc = (v) => {
+        const s = v == null ? "" : String(v);
+        if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
+          return `"${s.replace(/"/g, '""')}"`;
+        }
+        return s;
+      };
+
+      const rows = items.map(f => {
+        const label = state.fp_label_data[f.id] || {};
+        const qr_filename = `${f.coffee_name} QR ${f.bag_size}.png`;
+        return [
+          f.coffee_name,
+          label.roast_type || "",
+          label.region || "",
+          label.process || "",
+          label.altitude || "",
+          label.flavour_1 || "",
+          label.flavour_2 || "",
+          label.flavour_3 || "",
+          qr_filename,
+          label.price || "",
+        ].map(csv_esc).join(",");
+      });
+
+      const csv = headers.join(",") + "\n" + rows.join("\n") + "\n";
+      // Add BOM so Excel correctly detects UTF-8 (handles € symbol etc.)
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+
+      const date_str = new Date().toISOString().slice(0, 10);
+      const filter_part = state.coffee_filter === "all" ? "all-coffees" : state.coffee_filter.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const filename = `bear-mrkt-labels-${filter_part}-${date_str}.csv`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
 
     function esc(s)      { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
