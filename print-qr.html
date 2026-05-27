@@ -640,9 +640,12 @@
         return s;
       };
 
+      const QR_BASE_URL = "https://bearmarketroaster.github.io/RoasterHub/QrCodes/";
+
       const rows = items.map(f => {
         const label = state.fp_label_data[f.id] || {};
         const qr_filename = `${f.coffee_name} QR ${f.bag_size}.png`;
+        const qr_url = QR_BASE_URL + encodeURIComponent(qr_filename);
         return [
           f.coffee_name,
           label.roast_type || "",
@@ -652,7 +655,7 @@
           label.flavour_1 || "",
           label.flavour_2 || "",
           label.flavour_3 || "",
-          qr_filename,
+          qr_url,
           label.price || "",
         ].map(csv_esc).join(",");
       });
