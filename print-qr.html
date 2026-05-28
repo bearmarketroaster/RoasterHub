@@ -56,11 +56,16 @@
     body.mode-single .tile-descriptor { font-size: 11px; color: #666; text-align: center; margin-top: 8px; padding-top: 6px; border-top: 1px solid #f0eee9; }
     body.mode-single .tile-descriptor strong { color: #1a1a1a; font-weight: 600; }
 
-    /* A4 21-UP MODE — sheet of 21 bag stickers (3 cols × 7 rows), 63mm × 37mm each.
+    /* A4 21-UP MODE — OnlineLabels EU30015GM / Avery L7160 spec.
+       21 labels per sheet (3 cols × 7 rows), 63.5mm × 38.1mm each.
+       Top/bottom margin: 15.15mm · Left/right margin: 7.21mm
+       Horizontal gap between columns: 2.54mm · No vertical gap.
+       Verified: 15.15 + 7×38.1 + 15.15 = 297mm (A4 height)
+                  7.21 + 3×63.5 + 2×2.54 + 7.21 = 210mm (A4 width)
        Uses absolute positioning in mm so the layout can't drift or stretch.
        Label N (0..20): row = floor(N/3), col = N%3
-       top  = 15mm + row × 37mm
-       left = 7.5mm + col × 66mm  (66mm = 63 label + 3 gap) */
+       top  = 15.15mm + row × 38.1mm
+       left = 7.21mm  + col × 66.04mm  (66.04 = 63.5 label + 2.54 gap) */
     body.mode-a4_21 .a4-sheet {
       width: 210mm;
       height: 297mm;
@@ -73,8 +78,8 @@
     }
     body.mode-a4_21 .bag-label {
       position: absolute;
-      width: 63mm;
-      height: 37mm;
+      width: 63.5mm;
+      height: 38.1mm;
       background: #fff;
       border: 1px dashed #e8e6e1;     /* dashed border for screen preview only — hidden in print */
       box-sizing: border-box;
@@ -512,14 +517,15 @@
           ${flavours ? `<div class="bl-flavours">${esc(flavours)}</div>` : ""}
           ${label_data.price ? `<div class="bl-price">${esc(label_data.price)}</div>` : ""}`;
       // 21 copies (3 cols × 7 rows) — each positioned absolutely in mm.
-      // top  = 15mm + row × 37mm
-      // left = 7.5mm + col × 66mm (66 = 63 label + 3 gap)
+      // OnlineLabels EU30015GM / Avery L7160 spec:
+      // top  = 15.15mm + row × 38.1mm
+      // left = 7.21mm  + col × 66.04mm  (66.04 = 63.5 label + 2.54 gap)
       const all_labels = [];
       for (let i = 0; i < 21; i++) {
         const row = Math.floor(i / 3);
         const col = i % 3;
-        const top_mm  = 15  + row * 37;
-        const left_mm = 7.5 + col * 66;
+        const top_mm  = 15.15 + row * 38.1;
+        const left_mm = 7.21  + col * 66.04;
         all_labels.push(`<div class="bag-label" style="top:${top_mm}mm;left:${left_mm}mm">${label_inner}</div>`);
       }
       grid.innerHTML = `<div class="a4-sheet">${all_labels.join("")}</div>`;
