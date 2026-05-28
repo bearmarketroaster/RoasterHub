@@ -123,6 +123,8 @@ const state = {
     // per-FP-code label-edit working draft + save state:
     // { [fp_code]: { roast_type, region, ..., price, dirty, saving, saved, err } }
     label_edit: {},
+    coffee_filter: "active",      // "active" | "retired" — toggle for coffees section
+    show_retired_fp: {},          // { [coffee_id]: true } — expanded retired FP sections per coffee
     new_shop_master: "",
     new_shop_kind: "shop",
     shop_err: "",
@@ -481,6 +483,67 @@ async function delete_fp_code(coffee_id, fp_id) {
   render();
 }
 
+// ── RETIRE / RESTORE ──────────────────────────────────────────────────────────
+// Soft-delete pattern. Retired coffees/FPs stay in the database (so reports keep working)
+// but are hidden everywhere else. Set retired_at=now() to retire, retired_at=null to restore.
+
+async function retire_coffee(coffee_id) {
+  const coffee = state.coffees.find(c => c.id === coffee_id);
+  if (!coffee) return;
+  const active_fps = coffee.fp_codes.filter(f => !f.retired_at);
+  const fp_count = active_fps.length;
+  const msg = `You are about to retire "${coffee.name}"${fp_count > 0 ? ` and its ${fp_count} active FP code${fp_count!==1?"s":""}` : ""}.\n\nRetired coffees stay in reports but are hidden from packing, printing, and stock workflows.\n\nAre you sure?`;
+  if (!confirm(msg)) return;
+  const now = new Date().toISOString();
+  // Retire the coffee
+  const { error: ce } = await supabaseClient.from("coffees").update({ retired_at: now }).eq("id", coffee_id);
+  if (ce) { alert("Failed to retire coffee: " + ce.message); return; }
+  coffee.retired_at = now;
+  // Cascade: retire all currently-active FP codes
+  if (active_fps.length > 0) {
+    const active_fp_ids = active_fps.map(f => f.id);
+    const { error: fe } = await supabaseClient.from("fp_codes").update({ retired_at: now }).in("id", active_fp_ids);
+    if (fe) { alert("Coffee retired, but failed to retire its FP codes: " + fe.message); render(); return; }
+    coffee.fp_codes.forEach(f => { if (active_fp_ids.includes(f.id)) f.retired_at = now; });
+  }
+  if (state.ui.open_coffee === coffee_id) state.ui.open_coffee = null;
+  render();
+}
+
+async function restore_coffee(coffee_id) {
+  const coffee = state.coffees.find(c => c.id === coffee_id);
+  if (!coffee) return;
+  if (!confirm(`Restore "${coffee.name}"?\n\nNote: its FP codes will stay retired. Restore them individually if needed.`)) return;
+  const { error } = await supabaseClient.from("coffees").update({ retired_at: null }).eq("id", coffee_id);
+  if (error) { alert("Failed to restore: " + error.message); return; }
+  coffee.retired_at = null;
+  render();
+}
+
+async function retire_fp_code(coffee_id, fp_id) {
+  const coffee = state.coffees.find(c => c.id === coffee_id);
+  const fp = coffee?.fp_codes.find(f => f.id === fp_id);
+  if (!fp) return;
+  const msg = `You are about to retire FP code "${fp.fp_code}" (${fp.bag_size}).\n\nRetired FP codes stay in reports but are hidden from packing, printing, and label workflows.\n\nAre you sure?`;
+  if (!confirm(msg)) return;
+  const now = new Date().toISOString();
+  const { error } = await supabaseClient.from("fp_codes").update({ retired_at: now }).eq("id", fp_id);
+  if (error) { alert("Failed to retire FP code: " + error.message); return; }
+  fp.retired_at = now;
+  render();
+}
+
+async function restore_fp_code(coffee_id, fp_id) {
+  const coffee = state.coffees.find(c => c.id === coffee_id);
+  const fp = coffee?.fp_codes.find(f => f.id === fp_id);
+  if (!fp) return;
+  if (!confirm(`Restore FP code "${fp.fp_code}" (${fp.bag_size})?`)) return;
+  const { error } = await supabaseClient.from("fp_codes").update({ retired_at: null }).eq("id", fp_id);
+  if (error) { alert("Failed to restore: " + error.message); return; }
+  fp.retired_at = null;
+  render();
+}
+
 async function save_fp_label_data(fp_code) {
   const draft = state.ui.label_edit[fp_code];
   if (!draft) return;
@@ -818,27 +881,49 @@ function build_app() {
 // ── COFFEES SECTION ───────────────────────────────────────────────────────────
 function build_coffees_section() {
   const open = state.open_section === "coffees";
-  const coffees = state.coffees;
-  const total_fp = coffees.reduce((n,c)=>n+c.fp_codes.length, 0);
+  const all_coffees = state.coffees;
+  const active_coffees  = all_coffees.filter(c => !c.retired_at);
+  const retired_coffees = all_coffees.filter(c =>  c.retired_at);
+  const filter = state.ui.coffee_filter || "active";
+  const showing = filter === "retired" ? retired_coffees : active_coffees;
+  const total_active_fp = active_coffees.reduce((n,c)=>n+c.fp_codes.filter(f=>!f.retired_at).length, 0);
 
-  const coffees_html = coffees.map(c => {
+  const coffees_html = showing.map(c => {
     const is_open = state.ui.open_coffee === c.id;
     const nfp = state.ui.new_fp[c.id] || { fp_code:"", bag_size:"100g", err:"" };
+    const is_retired_coffee = !!c.retired_at;
 
-    const fp_rows = c.fp_codes.map(f => `
-      <div class="fp-row">
+    const active_fps  = c.fp_codes.filter(f => !f.retired_at);
+    const retired_fps = c.fp_codes.filter(f =>  f.retired_at);
+    const show_retired_fps = !!state.ui.show_retired_fp[c.id];
+
+    const fp_row = (f, retired) => `
+      <div class="fp-row" style="${retired?'opacity:0.6':''}">
         <span class="mono" style="font-size:13px;font-weight:600;color:#1a1a1a">${esc(f.fp_code)}</span>
         <span class="tag" style="background:#f0eee9;color:#1a1a1a;font-size:11px">${esc(f.bag_size)}</span>
-        <button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;padding:0 2px" data-delete-fp="${c.id}__${f.id}" title="Remove FP code">✕</button>
-      </div>`).join("");
+        <div style="display:flex;gap:4px">
+          ${retired
+            ? `<button class="btn btn-ghost btn-sm" data-restore-fp="${c.id}__${f.id}" title="Restore FP code">♻️ Restore</button>`
+            : `<button style="background:none;border:none;color:#666;cursor:pointer;font-size:13px;padding:0 4px" data-retire-fp="${c.id}__${f.id}" title="Retire FP code">🗄️</button>
+               <button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;padding:0 2px" data-delete-fp="${c.id}__${f.id}" title="Delete FP code (permanent)">✕</button>`
+          }
+        </div>
+      </div>`;
+
+    const active_fp_rows  = active_fps.map(f => fp_row(f, false)).join("");
+    const retired_fp_rows = retired_fps.map(f => fp_row(f, true)).join("");
 
     return `
-      <div class="coffee-card">
+      <div class="coffee-card" style="${is_retired_coffee?'opacity:0.85;background:#fafaf8':''}">
         <div class="coffee-card-header ${is_open?"open":""}" data-toggle-coffee="${c.id}">
           <span style="font-size:15px;color:#666">${is_open?"▾":"▸"}</span>
-          <span style="flex:1;font-weight:600;font-size:14px;color:#1a1a1a">${esc(c.name)}</span>
-          <span class="hint" style="font-size:12px;margin-right:8px">${c.fp_codes.length} FP code${c.fp_codes.length!==1?"s":""}</span>
-          <button data-delete-coffee="${c.id}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" onclick="event.stopPropagation()">✕</button>
+          <span style="flex:1;font-weight:600;font-size:14px;color:#1a1a1a">${esc(c.name)}${is_retired_coffee?' <span class="tag" style="background:#fff7ed;color:#d97706;font-size:10px;margin-left:6px">RETIRED</span>':""}</span>
+          <span class="hint" style="font-size:12px;margin-right:8px">${active_fps.length} active${retired_fps.length?` · ${retired_fps.length} retired`:""}</span>
+          ${is_retired_coffee
+            ? `<button data-restore-coffee="${c.id}" class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">♻️ Restore</button>`
+            : `<button data-retire-coffee="${c.id}" style="background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:0 6px" title="Retire coffee" onclick="event.stopPropagation()">🗄️</button>
+               <button data-delete-coffee="${c.id}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;padding:0 6px;line-height:1" title="Delete (permanent)" onclick="event.stopPropagation()">✕</button>`
+          }
         </div>
         ${is_open ? `
           <div class="coffee-card-body">
@@ -846,20 +931,21 @@ function build_coffees_section() {
             <div class="mb-12">
               <label class="lbl">Coffee Name</label>
               <div style="display:flex;gap:8px">
-                <input class="coffee-rename-input" data-cid="${c.id}" value="${esc(c.name)}" style="max-width:320px" />
-                <button class="btn btn-ghost btn-sm coffee-rename-btn" data-cid="${c.id}">Rename</button>
+                <input class="coffee-rename-input" data-cid="${c.id}" value="${esc(c.name)}" style="max-width:320px" ${is_retired_coffee?"disabled":""} />
+                <button class="btn btn-ghost btn-sm coffee-rename-btn" data-cid="${c.id}" ${is_retired_coffee?"disabled":""}>Rename</button>
               </div>
             </div>
 
-            <div class="section-label">FP Codes</div>
+            <div class="section-label">Active FP Codes</div>
             <div class="card-white" style="margin-bottom:12px">
               <div class="fp-table-header">
                 <span class="lbl" style="margin:0">FP Code</span>
                 <span class="lbl" style="margin:0">Size</span>
                 <span></span>
               </div>
-              ${c.fp_codes.length===0?'<div style="padding:10px 12px;font-size:12px;color:#999;font-style:italic">No FP codes yet. Add one below.</div>':""}
-              ${fp_rows}
+              ${active_fps.length===0?'<div style="padding:10px 12px;font-size:12px;color:#999;font-style:italic">No active FP codes.</div>':""}
+              ${active_fp_rows}
+              ${is_retired_coffee ? "" : `
               <div style="padding:10px 12px;border-top:1px solid #f0eee9;background:#fafaf8">
                 <div style="display:grid;grid-template-columns:1.2fr 1.5fr 1fr auto;gap:8px;align-items:flex-end">
                   <div>
@@ -875,20 +961,39 @@ function build_coffees_section() {
                   <button class="btn btn-amber btn-sm add-fp-btn" data-cid="${c.id}" style="margin-top:18px">+ Add</button>
                 </div>
                 ${nfp.err?`<p class="inline-err">${esc(nfp.err)}</p>`:""}
-              </div>
+              </div>`}
             </div>
+
+            ${retired_fps.length > 0 ? `
+            <div class="section-label" style="cursor:pointer;user-select:none" data-toggle-retired-fp="${c.id}">
+              ${show_retired_fps?"▾":"▸"} Retired FP Codes (${retired_fps.length})
+            </div>
+            ${show_retired_fps ? `
+              <div class="card-white" style="margin-bottom:12px">
+                ${retired_fp_rows}
+              </div>` : ""}
+            ` : ""}
 
           </div>` : ""}
       </div>`;
   }).join("");
 
+  const filter_tabs = `
+    <div style="display:flex;gap:0;margin-bottom:12px;background:#f4f2ed;padding:3px;border-radius:8px;width:fit-content">
+      <button class="btn ${filter==='active'?'btn-dark':'btn-ghost'} btn-sm" data-coffee-filter="active" style="${filter==='active'?'color:#fff':''}">Active (${active_coffees.length})</button>
+      <button class="btn ${filter==='retired'?'btn-dark':'btn-ghost'} btn-sm" data-coffee-filter="retired" style="${filter==='retired'?'color:#fff':''}">🗄️ Retired (${retired_coffees.length})</button>
+    </div>`;
+
   const body = open ? `
     <div class="section-body">
-      <p class="hint mb-12">Master coffee names used across all modules. Each coffee can have multiple FP codes for different bag sizes and SKUs.</p>
+      <p class="hint mb-12">Master coffee names used across all modules. Retire a coffee (or individual FP code) to hide it from packing/printing/labels while keeping it in reports.</p>
 
-      ${coffees.length===0?'<p class="hint" style="font-style:italic;margin-bottom:12px">No coffees yet. Add one below.</p>':""}
+      ${filter_tabs}
+
+      ${showing.length===0?`<p class="hint" style="font-style:italic;margin-bottom:12px">${filter==='retired'?'No retired coffees.':'No active coffees. Add one below.'}</p>`:""}
       ${coffees_html}
 
+      ${filter === "active" ? `
       <div class="card mt-12">
         <label class="lbl">Add New Coffee</label>
         <div style="display:flex;gap:8px;align-items:center">
@@ -896,7 +1001,7 @@ function build_coffees_section() {
           <button class="btn btn-dark btn-sm" id="add-coffee-btn">Add Coffee</button>
         </div>
         ${state.ui.coffee_err?`<p class="inline-err">${esc(state.ui.coffee_err)}</p>`:""}
-      </div>
+      </div>` : ""}
     </div>` : "";
 
   return `
@@ -904,7 +1009,7 @@ function build_coffees_section() {
       <div class="section-header" data-toggle-section="coffees">
         <div>
           <div class="section-title"><span class="icon">☕</span> Coffees &amp; FP Codes</div>
-          <div class="section-desc">${coffees.length} coffee${coffees.length!==1?"s":""} · ${total_fp} FP code${total_fp!==1?"s":""}</div>
+          <div class="section-desc">${active_coffees.length} active${retired_coffees.length?` · ${retired_coffees.length} retired`:""} · ${total_active_fp} active FP code${total_active_fp!==1?"s":""}</div>
         </div>
         <span class="section-arrow">${open?"▾":"▸"}</span>
       </div>
@@ -918,13 +1023,16 @@ function build_coffees_section() {
 // "Copy from..." pre-fills shared fields from a sibling FP (same coffee, different size) to save typing.
 function build_label_data_section() {
   const open = state.open_section === "label_data";
-  // Flatten all FP codes across coffees, filtering out Bar 5kg, keep coffee context
+  // Flatten all FP codes across active coffees, filtering out Bar 5kg AND retired entities
   const rows = [];
-  state.coffees.forEach(c => {
-    c.fp_codes
-      .filter(f => f.bag_size && f.bag_size.toLowerCase() !== "bar 5kg")
-      .forEach(f => rows.push({ coffee: c, fp: f }));
-  });
+  state.coffees
+    .filter(c => !c.retired_at)
+    .forEach(c => {
+      c.fp_codes
+        .filter(f => !f.retired_at)
+        .filter(f => f.bag_size && f.bag_size.toLowerCase() !== "bar 5kg")
+        .forEach(f => rows.push({ coffee: c, fp: f }));
+    });
 
   const filled_count = rows.filter(r => state.fp_label_data[r.fp.fp_code]).length;
 
@@ -1024,7 +1132,7 @@ function build_label_data_section() {
 
   const body = open ? `
     <div class="section-body">
-      <p class="hint mb-12">Marketing data printed on retail bag labels. Used by the Canva bulk-label CSV export. Each FP code (bag size SKU) can have its own data — use "📋 Copy from" to pre-fill from a sibling.</p>
+      <p class="hint mb-12">Marketing data printed on retail bag labels. Used by the A4 21-up bag-sticker print page. Each FP code (bag size SKU) can have its own data — use "📋 Copy from" to pre-fill from a sibling.</p>
       ${rows.length === 0 ? '<p class="hint" style="font-style:italic">No FP codes yet. Add some in the Coffees section first.</p>' : groups_html}
     </div>` : "";
 
@@ -1033,7 +1141,7 @@ function build_label_data_section() {
       <div class="section-header" data-toggle-section="label_data">
         <div>
           <div class="section-title"><span class="icon">🏷️</span> Bag Label Data</div>
-          <div class="section-desc">${filled_count}/${rows.length} filled · for Canva bag label CSV</div>
+          <div class="section-desc">${filled_count}/${rows.length} filled · for A4 bag-sticker printing</div>
         </div>
         <span class="section-arrow">${open?"▾":"▸"}</span>
       </div>
@@ -1195,6 +1303,35 @@ function attach_listeners() {
   app.querySelectorAll("[data-delete-fp]").forEach(btn => btn.addEventListener("click", () => {
     const [cid, fid] = btn.dataset.deleteFp.split("__").map(Number);
     delete_fp_code(cid, fid);
+  }));
+
+  // ── Retire / Restore
+  app.querySelectorAll("[data-retire-coffee]").forEach(btn => btn.addEventListener("click", e => {
+    e.stopPropagation();
+    retire_coffee(Number(btn.dataset.retireCoffee));
+  }));
+  app.querySelectorAll("[data-restore-coffee]").forEach(btn => btn.addEventListener("click", e => {
+    e.stopPropagation();
+    restore_coffee(Number(btn.dataset.restoreCoffee));
+  }));
+  app.querySelectorAll("[data-retire-fp]").forEach(btn => btn.addEventListener("click", () => {
+    const [cid, fid] = btn.dataset.retireFp.split("__").map(Number);
+    retire_fp_code(cid, fid);
+  }));
+  app.querySelectorAll("[data-restore-fp]").forEach(btn => btn.addEventListener("click", () => {
+    const [cid, fid] = btn.dataset.restoreFp.split("__").map(Number);
+    restore_fp_code(cid, fid);
+  }));
+  // Coffee filter tabs (active / retired)
+  app.querySelectorAll("[data-coffee-filter]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.coffee_filter = btn.dataset.coffeeFilter;
+    render();
+  }));
+  // Toggle retired FP section visibility per coffee
+  app.querySelectorAll("[data-toggle-retired-fp]").forEach(el => el.addEventListener("click", () => {
+    const cid = Number(el.dataset.toggleRetiredFp);
+    state.ui.show_retired_fp[cid] = !state.ui.show_retired_fp[cid];
+    render();
   }));
 
   // ── Bag Label Data
