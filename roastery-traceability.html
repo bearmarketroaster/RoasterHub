@@ -213,7 +213,13 @@ async function load_data() {
   state.active_coffees = (coffees_data||[]).filter(c => !c.retired_at).map(c => c.name);
 
   const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code");
-  state.fp_codes = (fp_codes_data||[]).map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
+  state.fp_codes = (fp_codes_data||[]).map(f => ({
+    fp_code: f.fp_code,
+    bag_size: f.bag_size,
+    coffee_name: f.coffees?.name||"",
+    retired_at: f.retired_at,                       // for scan-time retired detection
+    coffee_retired_at: f.coffees?.retired_at,       // parent coffee retired too?
+  }));
   // Active-only: FP itself not retired, AND parent coffee not retired
   state.active_fp_codes = (fp_codes_data||[])
     .filter(f => !f.retired_at && !f.coffees?.retired_at)
@@ -1103,8 +1109,12 @@ function process_scan(raw_value) {
     return;
   }
   const fp = state.fp_codes.find(f => f.fp_code === value);
-  if (!fp) {
-    flash_scan(`${value} not found in settings`, "error");
+  // Treat retired FP codes (and FPs whose parent coffee is retired) as if they don't exist.
+  // The packer should never be packing a retired SKU into a fresh dispatch — if a real bag
+  // with a retired FP turns up, that's a stock-correction issue, not a packing flow concern.
+  const fp_is_retired = fp && (fp.retired_at || fp.coffee_retired_at);
+  if (!fp || fp_is_retired) {
+    flash_scan(`${value} not recognised`, "error");
     return;
   }
   if (fp.bag_size === "Bar 5kg") {
