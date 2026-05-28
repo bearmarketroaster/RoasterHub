@@ -23,63 +23,111 @@
     .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
     .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; margin-bottom: 16px; }
     .section-title { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #666; margin-bottom: 12px; }
-    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 14px; }
-    .stat { background: #f4f2ed; border-radius: 8px; padding: 12px 14px; }
-    .stat-label { font-size: 11px; color: #666; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
-    .stat-value { font-size: 22px; font-weight: 700; color: #1a1a1a; }
-    .stat-sub { font-size: 11px; color: #666; margin-top: 2px; }
+    .hint { color: #999; font-style: italic; font-size: 13px; }
+
+    /* Range selector tabs */
+    .range-tabs { display: flex; gap: 4px; background: #f4f2ed; padding: 4px; border-radius: 8px; width: fit-content; margin-bottom: 14px; }
+    .range-tabs button { background: transparent; border: none; padding: 6px 12px; font-size: 12px; font-weight: 600; border-radius: 6px; color: #666; cursor: pointer; transition: all 0.15s; }
+    .range-tabs button.active { background: #1a1a1a; color: #fff; }
+    .range-tabs button:hover:not(.active) { background: #fff; color: #1a1a1a; }
+
+    /* Summary bar (compact replacement for fleet overview) */
+    .summary-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 14px; background: #f4f2ed; border-radius: 8px; font-size: 13px; align-items: center; }
+    .summary-bar .summary-item { display: flex; align-items: baseline; gap: 6px; }
+    .summary-bar .summary-num { font-weight: 700; color: #1a1a1a; font-size: 16px; }
+    .summary-bar .summary-lbl { color: #666; font-size: 12px; }
+    .summary-bar .summary-alert { color: #dc2626; font-weight: 700; }
+    .summary-bar .summary-warn { color: #d97706; font-weight: 700; }
+
+    /* Tables */
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; padding: 10px 8px; background: #f4f2ed; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e8e6e1; cursor: pointer; user-select: none; transition: color 0.15s; }
-    th:hover { color: #1a1a1a; }
-    th.sorted { color: #1a1a1a; }
+    th { text-align: left; padding: 10px 8px; background: #f4f2ed; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e8e6e1; user-select: none; }
     td { padding: 10px 8px; border-bottom: 1px solid #f0eee9; vertical-align: middle; }
-    tr:hover td { background: #fafaf8; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover td { background: #fafaf8; }
+
+    /* Days-out flags */
+    .days-flag { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+    .days-flag.red { color: #dc2626; }
+    .days-flag.amber { color: #d97706; }
+    .days-flag.dim { color: #1a1a1a; }
+    .days-flag .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+    .days-flag.red .dot { background: #dc2626; }
+    .days-flag.amber .dot { background: #d97706; }
+    .days-flag.dim .dot { background: #9ca3af; }
+
+    /* Condition tags */
     .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .tag-clean   { background: #e7f5ec; color: #16a34a; }
+    .tag-dirty   { background: #fff7ed; color: #d97706; }
+    .tag-damaged { background: #fdecea; color: #dc2626; }
+    .tag-lost    { background: #1a1a1a; color: #fff; }
     .tag-empty   { background: #f0eee9; color: #666; }
     .tag-filled  { background: #fff7ed; color: #d97706; }
-    .tag-transit { background: #fff7ed; color: #d97706; }
+    .tag-transit { background: #dbeafe; color: #2563eb; }
     .tag-atshop  { background: #e7f5ec; color: #16a34a; }
-    .tag-retired { background: #fdecea; color: #dc2626; }
-    .tag-condition-clean   { background: #e7f5ec; color: #16a34a; }
-    .tag-condition-dirty   { background: #fff7ed; color: #d97706; }
-    .tag-condition-damaged { background: #fdecea; color: #dc2626; }
-    .tag-condition-lost    { background: #1a1a1a; color: #fff; }
+    .tag-retired { background: #f0eee9; color: #999; }
+
+    /* Per-shop scorecard */
+    .shop-card { border: 1px solid #e8e6e1; border-radius: 8px; padding: 14px; margin-bottom: 10px; background: #fff; }
+    .shop-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .shop-name { font-weight: 700; font-size: 15px; flex: 1; }
+    .shop-flag { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+    .shop-flag-ok    { background: #e7f5ec; color: #16a34a; }
+    .shop-flag-warn  { background: #fff7ed; color: #d97706; }
+    .shop-flag-bad   { background: #fdecea; color: #dc2626; }
+    .shop-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 10px; }
+    .shop-stat { font-size: 13px; }
+    .shop-stat-label { font-size: 10px; color: #666; letter-spacing: 0.5px; text-transform: uppercase; font-weight: 600; margin-bottom: 2px; }
+    .shop-stat-val { font-weight: 700; font-size: 16px; color: #1a1a1a; }
+    .shop-stat-val.alert { color: #dc2626; }
+    .shop-stat-val.warn { color: #d97706; }
+    .condition-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #f0eee9; margin: 8px 0 6px; }
+    .condition-bar-seg { height: 100%; }
+    .condition-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; }
+    .condition-legend span { display: flex; align-items: center; gap: 4px; }
+
+    /* Section toggle / collapse */
+    .section-collapsible { cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; }
+    .section-collapsible:hover { color: #1a1a1a; }
+    .section-arrow { font-size: 14px; color: #666; }
+
+    /* Bucket detail filter row */
     .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
     .filters input, .filters select { max-width: 220px; padding: 6px 10px; font-size: 13px; }
     .mono { font-family: monospace; font-size: 11px; color: #999; }
-    .shop-card { border: 1px solid #e8e6e1; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
-    .shop-card-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
-    .shop-name { font-weight: 700; font-size: 15px; }
-    .shop-flag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
-    .shop-flag-ok   { background: #e7f5ec; color: #16a34a; }
-    .shop-flag-warn { background: #fff7ed; color: #d97706; }
-    .shop-flag-bad  { background: #fdecea; color: #dc2626; }
-    .shop-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; font-size: 13px; }
-    .shop-stat-label { font-size: 11px; color: #666; }
-    .shop-stat-val { font-weight: 700; color: #1a1a1a; }
-    .condition-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 4px; background: #f0eee9; }
-    .condition-bar-seg { height: 100%; }
-    .condition-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: #666; }
+
+    /* History modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+    .modal { background: #fff; border-radius: 10px; max-width: 640px; width: 100%; max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid #e8e6e1; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; background: #fff; }
+    .modal-title { font-weight: 700; font-size: 16px; }
+    .modal-close { background: none; border: none; font-size: 22px; color: #666; cursor: pointer; padding: 0 6px; }
+    .modal-body { padding: 16px 20px; }
+
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
-    .hint { color: #999; font-size: 12px; }
-    @media (max-width: 600px) { .content { padding: 16px; } table { font-size: 12px; } th, td { padding: 8px 6px; } }
   </style>
 </head>
 <body>
-<div id="app"><div class="loading">Loading bucket data…</div></div>
+<div id="app"></div>
 <script>
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-const esc = s => String(s ?? "").replace(/[<>&"']/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;","'":"&#39;"})[c]);
+
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 const state = {
-  buckets: [],                 // bucket rows
-  dispatches_by_id: {},        // id → dispatch
-  per_bucket_history: {},      // bucket_id → [{ dispatch_id, shop, dispatched_at, confirmed_at, filled_at, returned_at, condition }]
+  buckets: [],
+  dispatches_by_id: {},
+  per_bucket_history: {},
   loaded: false,
-  filter_status: "all",        // empty | filled | in_transit | at_shop | all
+  // UI state
+  range: "30d",                    // 7d | 30d | 90d | 1y | all
+  filter_status: "all",
   filter_text: "",
   sort_col: "name",
   sort_dir: "asc",
+  show_full_list: false,           // collapsed by default
+  history_modal_bucket_id: null,   // when set, the history modal is open
 };
 
 (async () => {
@@ -90,19 +138,12 @@ const state = {
 })();
 
 async function load() {
-  // Pull buckets
   const { data: buckets } = await supabaseClient.from("buckets").select("*").order("created_at", { ascending: false });
   state.buckets = buckets || [];
-
-  // Pull all dispatches (just the fields we need)
   const { data: dispatches } = await supabaseClient.from("dispatches").select("id, shop, date, confirmed_at, container_id");
   state.dispatches_by_id = {};
   (dispatches || []).forEach(d => { state.dispatches_by_id[d.id] = d; });
-
-  // Pull dispatch_buckets (the link table) — iterate directly to build per-bucket history
   const { data: db } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false });
-
-  // Build per-bucket history (most-recent dispatch first)
   state.per_bucket_history = {};
   (db || []).forEach(row => {
     const d = state.dispatches_by_id[row.dispatch_id];
@@ -119,7 +160,30 @@ async function load() {
   state.loaded = true;
 }
 
-// Derive the "effective state" of a bucket for display + filtering
+// ── Date range helpers ───────────────────────────────────────────────────────
+function range_cutoff() {
+  // Returns a Date representing the lower bound of the selected range, or null for "all"
+  const now = new Date();
+  switch (state.range) {
+    case "7d":  return new Date(now.getTime() - 7  * 86400000);
+    case "30d": return new Date(now.getTime() - 30 * 86400000);
+    case "90d": return new Date(now.getTime() - 90 * 86400000);
+    case "1y":  return new Date(now.getTime() - 365 * 86400000);
+    case "all":
+    default:    return null;
+  }
+}
+function range_label() {
+  return { "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days", "1y": "Last year", "all": "All time" }[state.range] || "Last 30 days";
+}
+function in_range(ts) {
+  if (!ts) return false;
+  const cutoff = range_cutoff();
+  if (!cutoff) return true;
+  return new Date(ts).getTime() >= cutoff.getTime();
+}
+
+// ── Bucket state helpers ────────────────────────────────────────────────────
 function effective_state(bucket) {
   if (bucket.retired_at) return "retired";
   if (bucket.status === "empty") return "empty";
@@ -132,7 +196,6 @@ function effective_state(bucket) {
   }
   return "unknown";
 }
-
 function state_tag(eff) {
   const m = {
     empty: { label: "Empty", cls: "tag-empty" },
@@ -145,154 +208,237 @@ function state_tag(eff) {
   const info = m[eff] || m.unknown;
   return `<span class="tag ${info.cls}">${info.label}</span>`;
 }
-
 function days_between(a, b) {
   if (!a || !b) return null;
   const ms = new Date(b).getTime() - new Date(a).getTime();
   if (isNaN(ms)) return null;
   return ms / (1000 * 60 * 60 * 24);
 }
-
 function fmt_days(d) {
   if (d === null || d === undefined) return "—";
   if (d < 1) return `${Math.round(d * 24)}h`;
-  return `${d.toFixed(1)}d`;
+  return `${Math.round(d)}d`;
+}
+function days_flag(days) {
+  // Days-out thresholds: <14 default · ≥14 amber · >30 red
+  if (days === null || days === undefined) return { cls: "dim", label: "—" };
+  if (days > 30) return { cls: "red", label: `${Math.round(days)}d` };
+  if (days >= 14) return { cls: "amber", label: `${Math.round(days)}d` };
+  return { cls: "dim", label: `${Math.round(days)}d` };
 }
 
-// Per-shop aggregate
+// ── Section 1: Currently Out ────────────────────────────────────────────────
+function build_currently_out() {
+  const now = new Date();
+  const rows = [];
+  state.buckets.forEach(b => {
+    if (b.retired_at) return;
+    if (b.status !== "dispatched") return;
+    const history = state.per_bucket_history[b.id] || [];
+    const latest = history[0];
+    if (!latest) return;
+    const days_out = days_between(latest.scanned_at, now);
+    rows.push({
+      bucket: b,
+      shop: latest.shop,
+      coffee: b.coffee || "",
+      days_out,
+      status: latest.confirmed_at ? "at_shop" : "in_transit",
+      dispatched_at: latest.scanned_at,
+      confirmed_at: latest.confirmed_at,
+    });
+  });
+  // Sort: worst first (most days out)
+  rows.sort((a, b) => (b.days_out||0) - (a.days_out||0));
+  return rows;
+}
+
+// ── Section 2: Recently Returned ────────────────────────────────────────────
+function build_recently_returned() {
+  const rows = [];
+  state.buckets.forEach(b => {
+    if (!b.returned_at) return;
+    if (!in_range(b.returned_at)) return;
+    const history = state.per_bucket_history[b.id] || [];
+    const latest = history[0];
+    if (!latest) return;
+    const time_out = days_between(latest.scanned_at, b.returned_at);
+    rows.push({
+      bucket: b,
+      shop: latest.shop,
+      coffee: latest.shop ? (b.coffee || "") : "",
+      time_out,
+      condition: b.condition || "clean",
+      returned_at: b.returned_at,
+    });
+  });
+  rows.sort((a, b) => new Date(b.returned_at).getTime() - new Date(a.returned_at).getTime());
+  return rows;
+}
+
+// ── Section 3: Per-Shop Scorecard ───────────────────────────────────────────
+// Time-window-aware: total_sent counts dispatches within range, condition_counts counts returns within range.
 function build_shop_stats() {
   const shops = {};
+  const ensure = (shop) => {
+    if (!shops[shop]) shops[shop] = {
+      shop,
+      total_sent: 0,
+      currently_out: 0,
+      returned_count: 0,
+      lost_count: 0,
+      return_times: [],
+      condition_counts: { clean: 0, dirty: 0, damaged: 0, lost: 0 },
+    };
+    return shops[shop];
+  };
+
+  // Count dispatches in range
   state.buckets.forEach(b => {
     const history = state.per_bucket_history[b.id] || [];
     history.forEach(h => {
       if (!h.shop) return;
-      if (!shops[h.shop]) shops[h.shop] = {
-        shop: h.shop, total_sent: 0, currently_out: 0, returned_count: 0,
-        return_times: [],   // days from confirmed_at → bucket.returned_at (when applicable)
-        condition_counts: { clean: 0, dirty: 0, damaged: 0, lost: 0 },
-      };
-      shops[h.shop].total_sent += 1;
+      if (!in_range(h.scanned_at)) return;
+      const s = ensure(h.shop);
+      s.total_sent += 1;
     });
   });
-  // Currently out (status=dispatched) per shop: look at the latest dispatch's shop
+
+  // Currently out (regardless of range — current state matters)
   state.buckets.forEach(b => {
     if (b.status !== "dispatched" || b.retired_at) return;
     const history = state.per_bucket_history[b.id] || [];
     const latest = history[0];
-    if (latest && shops[latest.shop]) shops[latest.shop].currently_out += 1;
+    if (!latest) return;
+    const s = ensure(latest.shop);
+    s.currently_out += 1;
+    // Count as "lost" if out > 30 days
+    const days_out = days_between(latest.scanned_at, new Date());
+    if (days_out !== null && days_out > 30) s.lost_count += 1;
   });
-  // For each shop, count returned + collect return times + condition stats.
-  // A bucket is "returned" if its status is empty AND it has at least one dispatch history entry,
-  // AND its returned_at is set. We attribute the return to the latest dispatch's shop.
+
+  // Returns in range
   state.buckets.forEach(b => {
     if (!b.returned_at) return;
+    if (!in_range(b.returned_at)) return;
     const history = state.per_bucket_history[b.id] || [];
     const latest = history[0];
-    if (!latest || !shops[latest.shop]) return;
-    const s = shops[latest.shop];
+    if (!latest) return;
+    const s = ensure(latest.shop);
     s.returned_count += 1;
-    // Time to return = scanned_at (dispatched) → returned_at
     const days = days_between(latest.scanned_at, b.returned_at);
     if (days !== null && days >= 0) s.return_times.push(days);
-    // Condition tally (only the most recent return — bucket.condition reflects the last return)
     const cond = b.condition || "clean";
     if (s.condition_counts[cond] !== undefined) s.condition_counts[cond] += 1;
   });
-  // Compute return rate, avg return time, flag
+
+  // Compute derived metrics + cleanliness-based flag
   Object.values(shops).forEach(s => {
-    s.return_rate = s.total_sent > 0 ? (s.returned_count / s.total_sent) : null;
     s.avg_return_days = s.return_times.length > 0
       ? s.return_times.reduce((a,b)=>a+b, 0) / s.return_times.length
       : null;
-    // Score: bad if return rate < 0.6 OR damaged+lost > 20% of returns
-    const damaged_pct = s.returned_count > 0
-      ? (s.condition_counts.damaged + s.condition_counts.lost) / s.returned_count
-      : 0;
-    if (s.total_sent < 3) s.flag = "ok";          // too small to judge
-    else if (s.return_rate < 0.6 || damaged_pct > 0.2) s.flag = "bad";
-    else if (s.return_rate < 0.85 || damaged_pct > 0.1) s.flag = "warn";
-    else s.flag = "ok";
+    const total_returns = s.condition_counts.clean + s.condition_counts.dirty + s.condition_counts.damaged + s.condition_counts.lost;
+    s.clean_pct = total_returns > 0 ? (s.condition_counts.clean / total_returns) : null;
+    // Cleanliness thresholds: ≥95% OK · ≥85% Watch · <85% Problem
+    if (s.clean_pct === null) s.flag = "ok";
+    else if (s.clean_pct >= 0.95) s.flag = "ok";
+    else if (s.clean_pct >= 0.85) s.flag = "warn";
+    else s.flag = "bad";
   });
-  return Object.values(shops).filter(s => s.total_sent > 0).sort((a,b) => {
-    // Worst offenders first
-    const order = { bad: 0, warn: 1, ok: 2 };
-    return order[a.flag] - order[b.flag] || (b.currently_out - a.currently_out);
-  });
+
+  // Sort: worst first by flag, then by lost count, then by total_sent
+  return Object.values(shops)
+    .filter(s => s.total_sent > 0 || s.currently_out > 0 || s.returned_count > 0)
+    .sort((a, b) => {
+      const order = { bad: 0, warn: 1, ok: 2 };
+      if (order[a.flag] !== order[b.flag]) return order[a.flag] - order[b.flag];
+      if (b.lost_count !== a.lost_count) return b.lost_count - a.lost_count;
+      return b.total_sent - a.total_sent;
+    });
 }
 
+// ── History modal ────────────────────────────────────────────────────────────
+function build_history_modal() {
+  const b = state.buckets.find(x => x.id === state.history_modal_bucket_id);
+  if (!b) return "";
+  const history = (state.per_bucket_history[b.id] || []).slice();
+  // Sort newest first
+  history.sort((x, y) => new Date(y.scanned_at).getTime() - new Date(x.scanned_at).getTime());
+
+  const cur_state = effective_state(b);
+  const display_name = b.name ? `${b.name} (${b.id})` : b.id;
+
+  const rows = history.length === 0
+    ? `<p class="hint">No dispatch history.</p>`
+    : `<table>
+        <thead><tr><th>Date</th><th>Shop</th><th>Confirmed</th><th>Time Out</th></tr></thead>
+        <tbody>
+          ${history.map((h, i) => {
+            const next_dispatch = history[i-1];                       // next-newer dispatch (history is newest-first)
+            // For all but the latest, the "return" happened when the next dispatch (or refill) occurred —
+            // we approximate by using bucket.filled_at if this is the latest, or the next dispatch's date.
+            // For the latest dispatch, if bucket has returned_at, that's the return time.
+            let returned_ts = null;
+            if (i === 0) {
+              returned_ts = b.returned_at;
+            } else {
+              returned_ts = next_dispatch?.scanned_at;
+            }
+            const time_out = returned_ts ? days_between(h.scanned_at, returned_ts) : days_between(h.scanned_at, new Date());
+            return `<tr>
+              <td>${esc(new Date(h.scanned_at).toLocaleDateString())}</td>
+              <td>${esc(h.shop || "—")}</td>
+              <td>${h.confirmed_at ? `<span style="color:#16a34a">✓ ${esc(new Date(h.confirmed_at).toLocaleDateString())}</span>` : `<span style="color:#999">—</span>`}</td>
+              <td>${returned_ts ? fmt_days(time_out) : `<em style="color:#999">still out (${fmt_days(time_out)})</em>`}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>`;
+
+  return `
+    <div class="modal-overlay" id="history-modal">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title">${esc(display_name)}</div>
+            <div style="font-size:12px;color:#666;margin-top:2px">${state_tag(cur_state)} ${b.coffee ? `· ${esc(b.coffee)}` : ""}</div>
+          </div>
+          <button class="modal-close" id="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
+            <div><div class="shop-stat-label">Total Dispatches</div><div class="shop-stat-val">${history.length}</div></div>
+            <div><div class="shop-stat-label">Current State</div><div style="margin-top:2px">${state_tag(cur_state)}</div></div>
+            ${b.condition && cur_state==="empty" ? `<div><div class="shop-stat-label">Last Condition</div><div style="margin-top:2px"><span class="tag tag-${b.condition}">${esc(b.condition)}</span></div></div>` : ""}
+            ${b.filled_at ? `<div><div class="shop-stat-label">Last Filled</div><div class="shop-stat-val" style="font-size:13px;font-weight:600">${esc(new Date(b.filled_at).toLocaleDateString())}</div></div>` : ""}
+          </div>
+          <div class="section-title" style="margin-top:12px">Dispatch History</div>
+          ${rows}
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Main render ──────────────────────────────────────────────────────────────
 function render() {
   const app = document.getElementById("app");
   if (!state.loaded) { app.innerHTML = `<div class="loading">Loading…</div>`; return; }
 
-  const total_buckets = state.buckets.filter(b => !b.retired_at).length;
-  const retired = state.buckets.filter(b =>  b.retired_at).length;
-  const by_state = { empty: 0, filled: 0, in_transit: 0, at_shop: 0 };
-  state.buckets.forEach(b => {
-    if (b.retired_at) return;
-    by_state[effective_state(b)] = (by_state[effective_state(b)] || 0) + 1;
-  });
-
+  const currently_out = build_currently_out();
+  const recently_returned = build_recently_returned();
   const shop_stats = build_shop_stats();
 
-  // Per-bucket table
-  let rows = state.buckets.map(b => {
-    const eff = effective_state(b);
-    const history = state.per_bucket_history[b.id] || [];
-    const latest = history[0];
-    const dispatch_count = history.length;
-    // Degas: filled_at → latest scanned_at (if dispatched)
-    let degas_days = null;
-    if (b.filled_at && latest && latest.scanned_at) {
-      degas_days = days_between(b.filled_at, latest.scanned_at);
-    }
-    const last_seen = latest
-      ? (latest.confirmed_at ? `Delivered to ${latest.shop}` : `In transit to ${latest.shop}`)
-      : (b.filled_at ? "Filled, not dispatched" : "Never dispatched");
-    return {
-      bucket: b,
-      eff,
-      dispatch_count,
-      last_seen,
-      degas_days,
-      coffee: b.coffee || "",
-      condition: b.condition || "",
-    };
-  });
+  // Compact summary stats
+  const total_active = state.buckets.filter(b => !b.retired_at).length;
+  const retired_count = state.buckets.filter(b =>  b.retired_at).length;
+  const overdue_count = currently_out.filter(r => r.days_out !== null && r.days_out > 14).length;
+  const red_count = currently_out.filter(r => r.days_out !== null && r.days_out > 30).length;
+  const dirty_returns = recently_returned.filter(r => r.condition === "dirty").length;
+  const broken_returns = recently_returned.filter(r => r.condition === "damaged").length;
 
-  // Filter
-  if (state.filter_status !== "all") {
-    rows = rows.filter(r => r.eff === state.filter_status);
-  }
-  if (state.filter_text.trim()) {
-    const q = state.filter_text.trim().toLowerCase();
-    rows = rows.filter(r => {
-      const hay = `${r.bucket.id} ${r.bucket.name||""} ${r.coffee} ${r.last_seen}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }
+  const range_button = (val, label) => `<button data-range="${val}" class="${state.range===val?'active':''}">${label}</button>`;
 
-  // Sort
-  const cmp = (a, b, dir) => {
-    if (a === b) return 0;
-    if (a === null || a === undefined) return 1;
-    if (b === null || b === undefined) return -1;
-    return (a < b ? -1 : 1) * (dir === "asc" ? 1 : -1);
-  };
-  const col = state.sort_col;
-  const dir = state.sort_dir;
-  rows.sort((x, y) => {
-    if (col === "name") return cmp((x.bucket.name||x.bucket.id).toLowerCase(), (y.bucket.name||y.bucket.id).toLowerCase(), dir);
-    if (col === "state") return cmp(x.eff, y.eff, dir);
-    if (col === "coffee") return cmp(x.coffee, y.coffee, dir);
-    if (col === "dispatch_count") return cmp(x.dispatch_count, y.dispatch_count, dir);
-    if (col === "degas_days") return cmp(x.degas_days, y.degas_days, dir);
-    if (col === "last_seen") return cmp(x.last_seen, y.last_seen, dir);
-    return 0;
-  });
-
-  const sort_arrow = c => state.sort_col === c ? (state.sort_dir === "asc" ? " ▲" : " ▼") : "";
-  const sort_class = c => state.sort_col === c ? "sorted" : "";
-
+  // ── HTML
   app.innerHTML = `
     <div class="header">
       <div class="header-left">
@@ -308,36 +454,91 @@ function render() {
 
     <div class="content">
 
+      <div class="range-tabs">
+        ${range_button("7d", "7 days")}
+        ${range_button("30d", "30 days")}
+        ${range_button("90d", "90 days")}
+        ${range_button("1y", "1 year")}
+        ${range_button("all", "All time")}
+      </div>
+
       <div class="card">
-        <div class="section-title">Fleet Overview</div>
-        <div class="stat-grid">
-          <div class="stat"><div class="stat-label">Total Active</div><div class="stat-value">${total_buckets}</div><div class="stat-sub">${retired} retired</div></div>
-          <div class="stat"><div class="stat-label">Empty</div><div class="stat-value">${by_state.empty}</div></div>
-          <div class="stat"><div class="stat-label">Filled</div><div class="stat-value">${by_state.filled}</div></div>
-          <div class="stat"><div class="stat-label">In Transit</div><div class="stat-value">${by_state.in_transit}</div></div>
-          <div class="stat"><div class="stat-label">At Shops</div><div class="stat-value">${by_state.at_shop}</div></div>
+        <div class="section-title">Bucket Health · ${esc(range_label())}</div>
+        <div class="summary-bar">
+          <div class="summary-item"><span class="summary-num">${total_active}</span><span class="summary-lbl">active fleet${retired_count?` · ${retired_count} retired`:""}</span></div>
+          <div class="summary-item"><span class="summary-num">${currently_out.length}</span><span class="summary-lbl">currently out</span></div>
+          ${red_count    ? `<div class="summary-item"><span class="summary-num summary-alert">${red_count}</span><span class="summary-lbl">overdue (>30d)</span></div>` : ""}
+          ${overdue_count && !red_count ? `<div class="summary-item"><span class="summary-num summary-warn">${overdue_count}</span><span class="summary-lbl">approaching overdue (>14d)</span></div>` : ""}
+          ${dirty_returns ? `<div class="summary-item"><span class="summary-num summary-warn">${dirty_returns}</span><span class="summary-lbl">dirty returns</span></div>` : ""}
+          ${broken_returns ? `<div class="summary-item"><span class="summary-num summary-alert">${broken_returns}</span><span class="summary-lbl">broken returns</span></div>` : ""}
         </div>
       </div>
 
       <div class="card">
-        <div class="section-title">Per-Shop Scorecard</div>
-        ${shop_stats.length === 0 ? '<p class="hint">No bucket dispatches yet.</p>' : shop_stats.map(s => {
+        <div class="section-title">🚨 Currently Out (${currently_out.length})</div>
+        ${currently_out.length === 0 ? '<p class="hint">No buckets currently out.</p>' : `
+          <div style="overflow-x:auto">
+            <table>
+              <thead><tr><th>Shop</th><th>Bucket</th><th>Coffee</th><th>Out For</th><th>Status</th></tr></thead>
+              <tbody>
+                ${currently_out.map(r => {
+                  const flag = days_flag(r.days_out);
+                  return `<tr class="clickable" data-bucket-history="${esc(r.bucket.id)}">
+                    <td style="font-weight:600">${esc(r.shop)}</td>
+                    <td><div style="font-weight:600">${esc(r.bucket.name || r.bucket.id)}</div>${r.bucket.name ? `<div class="mono">${esc(r.bucket.id)}</div>` : ""}</td>
+                    <td>${esc(r.coffee || "—")}</td>
+                    <td><span class="days-flag ${flag.cls}"><span class="dot"></span>${flag.label}</span></td>
+                    <td>${state_tag(r.status)}</td>
+                  </tr>`;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>`}
+      </div>
+
+      <div class="card">
+        <div class="section-title">🔄 Recently Returned · ${esc(range_label())} (${recently_returned.length})</div>
+        ${recently_returned.length === 0 ? '<p class="hint">No returns in this period.</p>' : `
+          <div style="overflow-x:auto">
+            <table>
+              <thead><tr><th>Date</th><th>Shop</th><th>Bucket</th><th>Coffee</th><th>Time Out</th><th>Condition</th></tr></thead>
+              <tbody>
+                ${recently_returned.map(r => `
+                  <tr class="clickable" data-bucket-history="${esc(r.bucket.id)}">
+                    <td>${esc(new Date(r.returned_at).toLocaleDateString())}</td>
+                    <td style="font-weight:600">${esc(r.shop)}</td>
+                    <td><div style="font-weight:600">${esc(r.bucket.name || r.bucket.id)}</div>${r.bucket.name ? `<div class="mono">${esc(r.bucket.id)}</div>` : ""}</td>
+                    <td>${esc(r.coffee || "—")}</td>
+                    <td>${fmt_days(r.time_out)}</td>
+                    <td><span class="tag tag-${r.condition}">${esc(r.condition)}</span></td>
+                  </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>`}
+      </div>
+
+      <div class="card">
+        <div class="section-title">📊 Per-Shop Scorecard · ${esc(range_label())}</div>
+        ${shop_stats.length === 0 ? '<p class="hint">No dispatch activity in this period.</p>' : shop_stats.map(s => {
           const cc = s.condition_counts;
           const total_returned = cc.clean + cc.dirty + cc.damaged + cc.lost;
           const seg = (n, color) => total_returned > 0 ? `<div class="condition-bar-seg" style="width:${(n/total_returned*100).toFixed(1)}%;background:${color}"></div>` : "";
-          const flag_label = s.flag === "bad" ? "⚠️ Needs attention" : s.flag === "warn" ? "⚡ Watch" : "✓ OK";
+          const flag_label = s.flag === "bad" ? "🔴 Problem" : s.flag === "warn" ? "🟡 Watch" : "🟢 OK";
+          const clean_pct_str = s.clean_pct === null ? "—" : (s.clean_pct*100).toFixed(0)+"%";
           return `
             <div class="shop-card">
               <div class="shop-card-header">
                 <div class="shop-name">${esc(s.shop)}</div>
                 <span class="shop-flag shop-flag-${s.flag}">${flag_label}</span>
               </div>
-              <div class="shop-stats">
-                <div><div class="shop-stat-label">Total Sent</div><div class="shop-stat-val">${s.total_sent}</div></div>
-                <div><div class="shop-stat-label">Currently Out</div><div class="shop-stat-val">${s.currently_out}</div></div>
-                <div><div class="shop-stat-label">Returned</div><div class="shop-stat-val">${s.returned_count}</div></div>
-                <div><div class="shop-stat-label">Return Rate</div><div class="shop-stat-val">${s.return_rate === null ? "—" : (s.return_rate*100).toFixed(0)+"%"}</div></div>
-                <div><div class="shop-stat-label">Avg Return Time</div><div class="shop-stat-val">${fmt_days(s.avg_return_days)}</div></div>
+              <div class="shop-stats-grid">
+                <div class="shop-stat"><div class="shop-stat-label">Sent</div><div class="shop-stat-val">${s.total_sent}</div></div>
+                <div class="shop-stat"><div class="shop-stat-label">Returned</div><div class="shop-stat-val">${s.returned_count}</div></div>
+                <div class="shop-stat"><div class="shop-stat-label">Currently Out</div><div class="shop-stat-val">${s.currently_out}</div></div>
+                <div class="shop-stat"><div class="shop-stat-label">Lost (>30d)</div><div class="shop-stat-val ${s.lost_count>0?'alert':''}">${s.lost_count}</div></div>
+                <div class="shop-stat"><div class="shop-stat-label">Avg Return Time</div><div class="shop-stat-val">${fmt_days(s.avg_return_days)}</div></div>
+                <div class="shop-stat"><div class="shop-stat-label">% Clean</div><div class="shop-stat-val ${s.flag==='bad'?'alert':s.flag==='warn'?'warn':''}">${clean_pct_str}</div></div>
+                <div class="shop-stat"><div class="shop-stat-label">Broken Returns</div><div class="shop-stat-val ${cc.damaged>0?'alert':''}">${cc.damaged}</div></div>
               </div>
               ${total_returned > 0 ? `
                 <div class="condition-bar">
@@ -349,70 +550,145 @@ function render() {
                 <div class="condition-legend">
                   ${cc.clean ? `<span style="color:#16a34a">● ${cc.clean} clean</span>` : ""}
                   ${cc.dirty ? `<span style="color:#d97706">● ${cc.dirty} dirty</span>` : ""}
-                  ${cc.damaged ? `<span style="color:#dc2626">● ${cc.damaged} damaged</span>` : ""}
+                  ${cc.damaged ? `<span style="color:#dc2626">● ${cc.damaged} broken</span>` : ""}
                   ${cc.lost ? `<span style="color:#1a1a1a">● ${cc.lost} lost</span>` : ""}
-                </div>` : '<p class="hint" style="margin-top:6px">No returns recorded yet.</p>'}
+                </div>` : '<p class="hint" style="margin-top:6px;font-size:12px">No returns recorded in this period.</p>'}
             </div>`;
         }).join("")}
       </div>
 
       <div class="card">
-        <div class="section-title">Per-Bucket Detail (${rows.length})</div>
-        <div class="filters">
-          <select id="filter-status">
-            <option value="all" ${state.filter_status==="all"?"selected":""}>All states</option>
-            <option value="empty" ${state.filter_status==="empty"?"selected":""}>Empty</option>
-            <option value="filled" ${state.filter_status==="filled"?"selected":""}>Filled</option>
-            <option value="in_transit" ${state.filter_status==="in_transit"?"selected":""}>In Transit</option>
-            <option value="at_shop" ${state.filter_status==="at_shop"?"selected":""}>At Shop</option>
-            <option value="retired" ${state.filter_status==="retired"?"selected":""}>Retired</option>
-          </select>
-          <input id="filter-text" placeholder="Search by name, ID, coffee, shop…" value="${esc(state.filter_text)}" />
+        <div class="section-collapsible" id="toggle-full-list">
+          <div class="section-title" style="margin:0">📋 Full Bucket List (${state.buckets.filter(b=>!b.retired_at).length})</div>
+          <span class="section-arrow">${state.show_full_list ? "▾" : "▸"}</span>
         </div>
-        ${rows.length === 0 ? '<p class="hint">No buckets match.</p>' : `
-          <div style="overflow-x:auto">
-            <table>
-              <thead>
-                <tr>
-                  <th class="${sort_class('name')}" data-sort="name">Bucket${sort_arrow('name')}</th>
-                  <th class="${sort_class('state')}" data-sort="state">State${sort_arrow('state')}</th>
-                  <th class="${sort_class('coffee')}" data-sort="coffee">Coffee${sort_arrow('coffee')}</th>
-                  <th class="${sort_class('last_seen')}" data-sort="last_seen">Last Seen${sort_arrow('last_seen')}</th>
-                  <th class="${sort_class('dispatch_count')}" data-sort="dispatch_count">Dispatches${sort_arrow('dispatch_count')}</th>
-                  <th class="${sort_class('degas_days')}" data-sort="degas_days">Degas${sort_arrow('degas_days')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows.map(r => `
-                  <tr>
-                    <td>
-                      <div style="font-weight:600">${esc(r.bucket.name || r.bucket.id)}</div>
-                      ${r.bucket.name ? `<div class="mono">${esc(r.bucket.id)}</div>` : ""}
-                    </td>
-                    <td>${state_tag(r.eff)}${r.condition && r.eff==="empty" && r.bucket.returned_at ? ` <span class="tag tag-condition-${r.condition}" style="margin-left:4px">${r.condition}</span>` : ""}</td>
-                    <td>${esc(r.coffee || "—")}</td>
-                    <td>${esc(r.last_seen)}</td>
-                    <td style="text-align:center">${r.dispatch_count}</td>
-                    <td>${fmt_days(r.degas_days)}</td>
-                  </tr>`).join("")}
-              </tbody>
-            </table>
-          </div>`}
+        ${state.show_full_list ? build_full_list_html() : ""}
       </div>
 
-    </div>`;
+    </div>
 
-  document.getElementById("back-btn").addEventListener("click", () => window.location.href = "reports.html");
-  document.getElementById("logout-btn").addEventListener("click", async () => {
+    ${state.history_modal_bucket_id ? build_history_modal() : ""}
+  `;
+
+  attach_listeners();
+}
+
+// ── Full bucket list (collapsed by default) ─────────────────────────────────
+function build_full_list_html() {
+  let rows = state.buckets.map(b => {
+    const eff = effective_state(b);
+    const history = state.per_bucket_history[b.id] || [];
+    const latest = history[0];
+    const dispatch_count = history.length;
+    let degas_days = null;
+    if (b.filled_at && latest && latest.scanned_at) {
+      degas_days = days_between(b.filled_at, latest.scanned_at);
+    }
+    const last_seen = latest
+      ? (latest.confirmed_at ? `Delivered to ${latest.shop}` : `In transit to ${latest.shop}`)
+      : (b.filled_at ? "Filled, not dispatched" : "Never dispatched");
+    return { bucket: b, eff, dispatch_count, last_seen, degas_days, coffee: b.coffee || "", condition: b.condition || "" };
+  });
+
+  if (state.filter_status !== "all") rows = rows.filter(r => r.eff === state.filter_status);
+  if (state.filter_text.trim()) {
+    const q = state.filter_text.trim().toLowerCase();
+    rows = rows.filter(r => `${r.bucket.id} ${r.bucket.name||""} ${r.coffee} ${r.last_seen}`.toLowerCase().includes(q));
+  }
+
+  const cmp = (a, b, dir) => {
+    if (a === b) return 0;
+    if (a === null || a === undefined) return 1;
+    if (b === null || b === undefined) return -1;
+    return (a < b ? -1 : 1) * (dir === "asc" ? 1 : -1);
+  };
+  const col = state.sort_col, dir = state.sort_dir;
+  rows.sort((x, y) => {
+    if (col === "name") return cmp((x.bucket.name||x.bucket.id).toLowerCase(), (y.bucket.name||y.bucket.id).toLowerCase(), dir);
+    if (col === "state") return cmp(x.eff, y.eff, dir);
+    if (col === "coffee") return cmp(x.coffee, y.coffee, dir);
+    if (col === "dispatch_count") return cmp(x.dispatch_count, y.dispatch_count, dir);
+    if (col === "degas_days") return cmp(x.degas_days, y.degas_days, dir);
+    if (col === "last_seen") return cmp(x.last_seen, y.last_seen, dir);
+    return 0;
+  });
+
+  return `
+    <div class="filters" style="margin-top:12px">
+      <select id="filter-status">
+        <option value="all" ${state.filter_status==="all"?"selected":""}>All states</option>
+        <option value="empty" ${state.filter_status==="empty"?"selected":""}>Empty</option>
+        <option value="filled" ${state.filter_status==="filled"?"selected":""}>Filled</option>
+        <option value="in_transit" ${state.filter_status==="in_transit"?"selected":""}>In Transit</option>
+        <option value="at_shop" ${state.filter_status==="at_shop"?"selected":""}>At Shop</option>
+        <option value="retired" ${state.filter_status==="retired"?"selected":""}>Retired</option>
+      </select>
+      <input id="filter-text" placeholder="Search by name, ID, coffee, shop…" value="${esc(state.filter_text)}" />
+    </div>
+    ${rows.length === 0 ? '<p class="hint">No buckets match.</p>' : `
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Bucket</th><th>State</th><th>Coffee</th><th>Last Seen</th><th>Dispatches</th><th>Degas</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr class="clickable" data-bucket-history="${esc(r.bucket.id)}">
+                <td><div style="font-weight:600">${esc(r.bucket.name || r.bucket.id)}</div>${r.bucket.name ? `<div class="mono">${esc(r.bucket.id)}</div>` : ""}</td>
+                <td>${state_tag(r.eff)}${r.condition && r.eff==="empty" && r.bucket.returned_at ? ` <span class="tag tag-${r.condition}" style="margin-left:4px">${r.condition}</span>` : ""}</td>
+                <td>${esc(r.coffee || "—")}</td>
+                <td>${esc(r.last_seen)}</td>
+                <td style="text-align:center">${r.dispatch_count}</td>
+                <td>${fmt_days(r.degas_days)}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`}`;
+}
+
+function attach_listeners() {
+  document.getElementById("back-btn")?.addEventListener("click", () => window.location.href = "reports.html");
+  document.getElementById("logout-btn")?.addEventListener("click", async () => {
     await supabaseClient.auth.signOut();
     window.location.href = "login.html";
   });
 
-  // Filters
+  // Range tabs
+  document.querySelectorAll("[data-range]").forEach(btn => btn.addEventListener("click", () => {
+    state.range = btn.dataset.range;
+    render();
+  }));
+
+  // Click any bucket row → open history modal
+  document.querySelectorAll("[data-bucket-history]").forEach(el => el.addEventListener("click", () => {
+    state.history_modal_bucket_id = el.dataset.bucketHistory;
+    render();
+  }));
+
+  // History modal close
+  document.getElementById("history-modal")?.addEventListener("click", () => {
+    state.history_modal_bucket_id = null;
+    render();
+  });
+  document.getElementById("modal-close")?.addEventListener("click", () => {
+    state.history_modal_bucket_id = null;
+    render();
+  });
+
+  // Toggle full list
+  document.getElementById("toggle-full-list")?.addEventListener("click", () => {
+    state.show_full_list = !state.show_full_list;
+    render();
+  });
+
+  // Full-list filters
   document.getElementById("filter-status")?.addEventListener("change", e => {
     state.filter_status = e.target.value;
     render();
   });
+
   let filter_timer = null;
   const filter_input = document.getElementById("filter-text");
   if (filter_input) {
@@ -420,12 +696,10 @@ function render() {
       if (filter_timer) clearTimeout(filter_timer);
       filter_timer = setTimeout(() => {
         state.filter_text = e.target.value;
-        // Capture cursor position so we can restore it after re-render
         state._filter_focus = { caret: e.target.selectionStart };
         render();
       }, 200);
     });
-    // Restore focus + caret if we just re-rendered after a filter input change
     if (state._filter_focus) {
       filter_input.focus();
       const pos = state._filter_focus.caret ?? filter_input.value.length;
@@ -433,20 +707,6 @@ function render() {
       state._filter_focus = null;
     }
   }
-
-  // Sort
-  document.querySelectorAll("th[data-sort]").forEach(th => {
-    th.addEventListener("click", () => {
-      const col = th.dataset.sort;
-      if (state.sort_col === col) {
-        state.sort_dir = state.sort_dir === "asc" ? "desc" : "asc";
-      } else {
-        state.sort_col = col;
-        state.sort_dir = "asc";
-      }
-      render();
-    });
-  });
 }
 </script>
 </body>
