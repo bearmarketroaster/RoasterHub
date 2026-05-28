@@ -386,13 +386,18 @@
       const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }, { data: fp_label_data }] = await Promise.all([
         supabaseClient.from("buckets").select("id, name, retired_at").order("created_at", { ascending: false }),
         supabaseClient.from("containers").select("id, name, retired_at").order("id"),
-        supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code"),
+        supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
         supabaseClient.from("shop_mappings").select("master_name, shop_qr_id").order("master_name"),
         supabaseClient.from("fp_label_data").select("*"),
       ]);
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
       state.containers = (containers||[]).filter(c => !c.retired_at);
-      state.fp_codes = (fp_codes||[]).map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
+      // Print/label workflows are forward-only — never need retired FPs or retired coffees.
+      // Filter out: retired FP codes, AND any FP whose parent coffee is retired.
+      state.fp_codes = (fp_codes||[])
+        .filter(f => !f.retired_at)
+        .filter(f => !f.coffees?.retired_at)
+        .map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
       state.fp_label_data = {};
       (fp_label_data||[]).forEach(r => { state.fp_label_data[r.fp_code] = r; });
       const shop_seen = new Set();
