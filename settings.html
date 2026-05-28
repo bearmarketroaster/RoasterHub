@@ -513,10 +513,28 @@ async function retire_coffee(coffee_id) {
 async function restore_coffee(coffee_id) {
   const coffee = state.coffees.find(c => c.id === coffee_id);
   if (!coffee) return;
-  if (!confirm(`Restore "${coffee.name}"?\n\nNote: its FP codes will stay retired. Restore them individually if needed.`)) return;
-  const { error } = await supabaseClient.from("coffees").update({ retired_at: null }).eq("id", coffee_id);
-  if (error) { alert("Failed to restore: " + error.message); return; }
+  // Identify FP codes that were retired *with* the coffee (matching timestamp = cascade-retired).
+  // FPs that were retired individually before the coffee was retired keep their own retired_at and stay retired.
+  const coffee_retired_at = coffee.retired_at;
+  const cascade_fps = coffee.fp_codes.filter(f => f.retired_at === coffee_retired_at);
+  const ind_fps = coffee.fp_codes.filter(f => f.retired_at && f.retired_at !== coffee_retired_at);
+
+  let msg = `Restore "${coffee.name}"?`;
+  if (cascade_fps.length > 0) msg += `\n\nThis will also restore ${cascade_fps.length} FP code${cascade_fps.length!==1?"s":""} that ${cascade_fps.length===1?"was":"were"} retired with it.`;
+  if (ind_fps.length > 0)     msg += `\n\n${ind_fps.length} FP code${ind_fps.length!==1?"s":""} that ${ind_fps.length===1?"was":"were"} retired separately will stay retired (restore individually if needed).`;
+  if (!confirm(msg)) return;
+
+  // Restore the coffee
+  const { error: ce } = await supabaseClient.from("coffees").update({ retired_at: null }).eq("id", coffee_id);
+  if (ce) { alert("Failed to restore coffee: " + ce.message); return; }
   coffee.retired_at = null;
+  // Cascade-restore the FPs that were retired alongside the coffee
+  if (cascade_fps.length > 0) {
+    const ids = cascade_fps.map(f => f.id);
+    const { error: fe } = await supabaseClient.from("fp_codes").update({ retired_at: null }).in("id", ids);
+    if (fe) { alert("Coffee restored, but failed to restore its FP codes: " + fe.message); render(); return; }
+    coffee.fp_codes.forEach(f => { if (ids.includes(f.id)) f.retired_at = null; });
+  }
   render();
 }
 
