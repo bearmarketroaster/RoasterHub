@@ -1925,14 +1925,15 @@ function attach_listeners() {
       const bucket_ids = packing_state.scanned_buckets.map(b => b.id);
       await supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids);
     }
-    // After save, check each container that was used and auto-flip to empty if remaining hits 0
+    // After save, check each container that was used and auto-flip to empty if it's now exhausted.
+    // c.remaining was already updated by load_data() inside save_dispatch_v2, so this is the
+    // POST-dispatch remaining — no need to subtract the dispatch's kg again.
     if (dispatch_id) {
       const containers_used = [...new Set(lines.map(l => l.container_id).filter(Boolean))];
       for (const cid of containers_used) {
         const c = state.containers.find(x => x.id === cid);
         if (!c) continue;
-        const used_kg = lines.filter(l => l.container_id === cid).reduce((s,l) => s+l.kg, 0);
-        if (c.remaining - used_kg <= 0.01) {
+        if ((c.remaining || 0) <= 0.01) {
           await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", cid);
         }
       }
