@@ -57,30 +57,28 @@
     body.mode-single .tile-descriptor strong { color: #1a1a1a; font-weight: 600; }
 
     /* A4 21-UP MODE — sheet of 21 bag stickers (3 cols × 7 rows), 63mm × 37mm each.
-       Layout: 15mm top/bottom margin, 7.5mm left/right, 3mm gap between columns, 0mm between rows. */
+       Uses absolute positioning in mm so the layout can't drift or stretch.
+       Label N (0..20): row = floor(N/3), col = N%3
+       top  = 15mm + row × 37mm
+       left = 7.5mm + col × 66mm  (66mm = 63 label + 3 gap) */
     body.mode-a4_21 .a4-sheet {
       width: 210mm;
       height: 297mm;
       background: #fff;
       margin: 20px auto;
-      padding: 15mm 7.5mm;
       box-shadow: 0 2px 16px rgba(0,0,0,0.08);
       box-sizing: border-box;
-      display: grid;
-      grid-template-columns: repeat(3, 63mm);
-      grid-template-rows: repeat(7, 37mm);
-      column-gap: 3mm;
-      row-gap: 0;
-      justify-content: center;
+      position: relative;
+      overflow: hidden;
     }
     body.mode-a4_21 .bag-label {
+      position: absolute;
       width: 63mm;
       height: 37mm;
       background: #fff;
       border: 1px dashed #e8e6e1;     /* dashed border for screen preview only — hidden in print */
       box-sizing: border-box;
       padding: 2mm 2.5mm;
-      position: relative;
       overflow: hidden;
       font-family: system-ui, -apple-system, sans-serif;
       color: #1a1a1a;
@@ -506,18 +504,25 @@
       // Build a single bag-label HTML block (gets repeated 21 times)
       const flavours = [label_data.flavour_1, label_data.flavour_2, label_data.flavour_3].filter(Boolean).join(" · ");
       const origin_lines = [label_data.region, label_data.process, label_data.altitude].filter(Boolean);
-      const label_html = `
-        <div class="bag-label">
+      const label_inner = `
           <div class="bl-qr" data-value="${esc_attr(fp_code)}"></div>
           <div class="bl-name">${esc(fp.coffee_name || "")}</div>
           ${label_data.roast_type ? `<div class="bl-roast">${esc(label_data.roast_type)}</div>` : ""}
           ${origin_lines.length ? `<div class="bl-origin">${origin_lines.map(l => esc(l)).join("<br>")}</div>` : ""}
           ${flavours ? `<div class="bl-flavours">${esc(flavours)}</div>` : ""}
-          ${label_data.price ? `<div class="bl-price">${esc(label_data.price)}</div>` : ""}
-        </div>`;
-      // 21 copies (3 cols × 7 rows)
-      const all_labels = Array(21).fill(label_html).join("");
-      grid.innerHTML = `<div class="a4-sheet">${all_labels}</div>`;
+          ${label_data.price ? `<div class="bl-price">${esc(label_data.price)}</div>` : ""}`;
+      // 21 copies (3 cols × 7 rows) — each positioned absolutely in mm.
+      // top  = 15mm + row × 37mm
+      // left = 7.5mm + col × 66mm (66 = 63 label + 3 gap)
+      const all_labels = [];
+      for (let i = 0; i < 21; i++) {
+        const row = Math.floor(i / 3);
+        const col = i % 3;
+        const top_mm  = 15  + row * 37;
+        const left_mm = 7.5 + col * 66;
+        all_labels.push(`<div class="bag-label" style="top:${top_mm}mm;left:${left_mm}mm">${label_inner}</div>`);
+      }
+      grid.innerHTML = `<div class="a4-sheet">${all_labels.join("")}</div>`;
 
       // Render the QR into every .bl-qr element. Same QRCode.js settings as everywhere else (H correction).
       grid.querySelectorAll(".bl-qr").forEach(el => {
