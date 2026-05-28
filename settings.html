@@ -878,6 +878,7 @@ function build_app() {
     <div class="header">
       <div class="header-left">
         <button class="header-back" id="go-dashboard">← Dashboard</button>
+        <button class="header-back" id="go-print-qr" style="color:#fff;background:#333;padding:6px 12px;border-radius:6px">🖨️ Print QR Codes</button>
         <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
         <div><div class="header-title">⚙️ Settings</div><div class="header-sub">Bear Mrkt</div></div>
       </div>
@@ -1264,6 +1265,7 @@ function attach_listeners() {
   const app = document.getElementById("app");
 
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
+  app.querySelector("#go-print-qr")?.addEventListener("click", () => window.location.href="print-qr.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
   app.querySelectorAll("[data-toggle-section]").forEach(el => el.addEventListener("click", () => {
     state.open_section = state.open_section===el.dataset.toggleSection ? null : el.dataset.toggleSection;
