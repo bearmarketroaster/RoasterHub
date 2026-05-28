@@ -146,7 +146,11 @@ async function save_session() {
     await supabaseClient.from("containers").upsert({ id: container_id, status: "waiting", status_changed_at: new Date().toISOString() }, { onConflict: "id" });
   }
   const { data: { user } } = await supabaseClient.auth.getUser();
-  const fill_id = container_id ? `${container_id}-${s.date.replace(/-/g,"")}` : null;
+  // fill_id = container + date + coffee-slug. Including the coffee slug ensures two different coffees
+  // roasted into the same container on the same day get distinct fill_ids (rare in normal ops, but
+  // possible — and the rest of the system uses fill_id as the join key for buckets/dispatches/stock).
+  const coffee_slug = (s.coffee || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const fill_id = container_id ? `${container_id}-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}` : null;
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
     id, coffee: s.coffee, date: s.date, container_id,
     roasted_weight: Number(s.roasted_weight), fill_id,
