@@ -108,6 +108,8 @@ const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },
 const state = {
   tab: 0, containers: [], roast_sessions: [], dispatches: [],
   coffees: [], fp_codes: [], shop_mappings: [], buckets: [],
+  active_coffees: [],  // names of coffees not retired — used for NEW input only (dropdowns, autocomplete)
+  active_fp_codes: [], // FP codes not retired AND whose parent coffee is not retired — same purpose
   user_role: null,
   loading: true, saving: false, scan_id: null,
   ui: {
@@ -203,10 +205,19 @@ async function render_qr(el, value, size=140) {
 }
 
 async function load_data() {
-  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
+  // Load all coffees + FPs (incl. retired) — used for historical lookups so dispatches that reference
+  // a now-retired FP still resolve to the right coffee name.
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name, retired_at").order("name");
   state.coffees = (coffees_data||[]).map(c => c.name);
-  const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, coffees(name)").order("fp_code");
+  // Active-only list for NEW input (dropdowns, autocomplete, scan suggestions)
+  state.active_coffees = (coffees_data||[]).filter(c => !c.retired_at).map(c => c.name);
+
+  const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code");
   state.fp_codes = (fp_codes_data||[]).map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
+  // Active-only: FP itself not retired, AND parent coffee not retired
+  state.active_fp_codes = (fp_codes_data||[])
+    .filter(f => !f.retired_at && !f.coffees?.retired_at)
+    .map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
   const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind");
   state.shop_mappings = shop_mappings_data || [];
 
@@ -922,7 +933,10 @@ function build_containers_tab() {
 
 
 function build_coffee_select(id, value) {
-  if (state.coffees.length>0) return `<select id="${id}"><option value="">— Select coffee —</option>${state.coffees.map(c=>`<option value="${esc(c)}" ${c===value?"selected":""}>${esc(c)}</option>`).join("")}</select>`;
+  // Show active coffees, plus the current value if it's set but no longer active (so editing a record doesn't lose it)
+  const list = state.active_coffees.slice();
+  if (value && !list.includes(value)) list.unshift(value);
+  if (list.length>0) return `<select id="${id}"><option value="">— Select coffee —</option>${list.map(c=>`<option value="${esc(c)}" ${c===value?"selected":""}>${esc(c)}${!state.active_coffees.includes(c)?" (retired)":""}</option>`).join("")}</select>`;
   return `<input id="${id}" value="${esc(value)}" placeholder="e.g. Ethiopia Yirgacheffe" />`;
 }
 
@@ -1741,9 +1755,11 @@ function attach_listeners() {
     const sug = document.getElementById("manual-scan-suggestions");
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
-    // Match against FP codes (code, coffee, size) AND filled buckets (id, name, coffee)
+    // Match against active FP codes only (code, coffee, size) AND filled buckets (id, name, coffee)
     // Bar 5kg is intentionally excluded — for bars, the packer scans/picks a bucket (which carries the FP code itself)
-    const fp_matches = state.fp_codes.filter(f => {
+    // Retired FP codes don't appear in autocomplete — but the packer can still manually type a retired
+    // FP code if they really need to (the lookup via state.fp_codes will resolve it).
+    const fp_matches = state.active_fp_codes.filter(f => {
       if (f.bag_size === "Bar 5kg") return false;
       const hay = `${f.fp_code} ${f.coffee_name} ${f.bag_size}`.toLowerCase();
       return hay.includes(q);
