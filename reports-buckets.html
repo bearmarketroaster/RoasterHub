@@ -414,13 +414,25 @@ function render() {
     render();
   });
   let filter_timer = null;
-  document.getElementById("filter-text")?.addEventListener("input", e => {
-    if (filter_timer) clearTimeout(filter_timer);
-    filter_timer = setTimeout(() => {
-      state.filter_text = e.target.value;
-      render();
-    }, 200);
-  });
+  const filter_input = document.getElementById("filter-text");
+  if (filter_input) {
+    filter_input.addEventListener("input", e => {
+      if (filter_timer) clearTimeout(filter_timer);
+      filter_timer = setTimeout(() => {
+        state.filter_text = e.target.value;
+        // Capture cursor position so we can restore it after re-render
+        state._filter_focus = { caret: e.target.selectionStart };
+        render();
+      }, 200);
+    });
+    // Restore focus + caret if we just re-rendered after a filter input change
+    if (state._filter_focus) {
+      filter_input.focus();
+      const pos = state._filter_focus.caret ?? filter_input.value.length;
+      try { filter_input.setSelectionRange(pos, pos); } catch (_) {}
+      state._filter_focus = null;
+    }
+  }
 
   // Sort
   document.querySelectorAll("th[data-sort]").forEach(th => {

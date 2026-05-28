@@ -813,9 +813,17 @@ function build_containers_tab() {
       </div>`;
   };
 
-  const new_dispatch_btn = active.length > 0
+  // Dispatch is possible if there's something to dispatch:
+  //   - An active container (for retail bag/FP scans), OR
+  //   - At least one filled bucket (carries its own provenance — works without an active container)
+  const any_filled_bucket = state.buckets.some(b => !b.retired_at && b.status === "filled");
+  const can_dispatch = active.length > 0 || any_filled_bucket;
+  const dispatch_disabled_reason = !can_dispatch
+    ? "Move a container to Active or fill a bucket first"
+    : "";
+  const new_dispatch_btn = can_dispatch
     ? `<button class="btn btn-dark" id="new-dispatch-btn" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`
-    : `<button class="btn btn-grey" disabled title="Move a container to Active first" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`;
+    : `<button class="btn btn-grey" disabled title="${esc(dispatch_disabled_reason)}" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`;
 
   // Bucket fleet — full lists
   const all_buckets = state.buckets.filter(b => !b.retired_at);
@@ -1061,7 +1069,7 @@ function packing_count_for(code) {
 
 // Process a scanned QR value
 let _last_scan = { value: null, at: 0 };
-const SCAN_DEBOUNCE_MS = 3000;
+const SCAN_DEBOUNCE_MS = 500;
 
 function process_scan(raw_value) {
   const value = (raw_value || "").trim().toUpperCase();
@@ -1403,14 +1411,25 @@ function build_packing_page(container, fill) {
     const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${ps.scanner_msg ? `background:${ps.scanner_msg_type==="success"?"#16a34a":ps.scanner_msg_type==="error"?"#dc2626":"#1a1a1a"}` : "display:none"}`;
     const flash = `<div id="scan-flash" style="${flash_style}">${esc(ps.scanner_msg||"")}</div>`;
 
-    // Show active container summary at the top so packer knows what's available
+    // Show available stock at the top of the scan screen.
+    // If active containers exist → show FIFO list (FP scans will work).
+    // If only filled buckets exist → show info note (bucket scans only).
+    // Otherwise → error (nothing to dispatch).
     const active_containers = state.containers.filter(c => c.status === "active" && c.remaining > 0);
-    const summary = active_containers.length === 0
-      ? `<div style="background:#fdecea;border:1px solid #dc2626;color:#dc2626;padding:10px;border-radius:8px;font-size:13px;text-align:center;margin-bottom:14px">⚠️ No active containers. Activate one in the Containers tab first.</div>`
-      : `<div style="background:#f4f2ed;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
+    const filled_buckets_available = state.buckets.filter(b => !b.retired_at && b.status === "filled");
+    let summary;
+    if (active_containers.length > 0) {
+      summary = `<div style="background:#f4f2ed;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
           <div style="font-weight:600;margin-bottom:4px">Available (FIFO):</div>
           ${active_containers.sort((a,b) => (a.latest_roast_date||"").localeCompare(b.latest_roast_date||"")).map(c => `<div>📦 ${esc(c.id)} · ${esc(c.coffee||"?")} · ${c.remaining.toFixed(1)}kg</div>`).join("")}
         </div>`;
+    } else if (filled_buckets_available.length > 0) {
+      summary = `<div style="background:#fff7ed;border:1px solid #d97706;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:14px">
+          ℹ️ No active containers — FP bag scans won't work. You can still scan filled buckets (${filled_buckets_available.length} available).
+        </div>`;
+    } else {
+      summary = `<div style="background:#fdecea;border:1px solid #dc2626;color:#dc2626;padding:10px;border-radius:8px;font-size:13px;text-align:center;margin-bottom:14px">⚠️ Nothing to dispatch. Activate a container or fill a bucket first.</div>`;
+    }
 
     return `<div class="overlay"><div class="modal" style="max-width:480px">
       <div style="text-align:center;margin-bottom:14px">
