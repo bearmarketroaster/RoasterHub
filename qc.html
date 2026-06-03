@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QC — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    input, select, button, textarea { font-family: inherit; font-size: 14px; }
+    button { cursor: pointer; }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .content { padding: 24px; max-width: 1000px; margin: 0 auto; }
+    .tabs { display: flex; border-bottom: 1px solid #e8e6e1; background: #fff; overflow-x: auto; }
+    .tab-btn { padding: 12px 20px; border: none; background: #fff; color: #666; font-weight: 500; font-size: 14px; white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+    .tab-btn:hover { color: #1a1a1a; }
+    .tab-btn.active { color: #1a1a1a; font-weight: 700; border-bottom-color: #1a1a1a; }
+    .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; margin-bottom: 16px; }
+    label.lbl { display: block; font-size: 12px; color: #666; margin-bottom: 4px; font-weight: 500; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #e8e6e1; font-size: 14px; background: #fff; color: #1a1a1a; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
+    textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; transition: all 0.15s; cursor: pointer; }
+    .btn-dark { background: #1a1a1a; }
+    .btn-dark:hover:not(:disabled) { background: #000; }
+    .btn-ghost { background: #f4f2ed; color: #1a1a1a; border: 1px solid #e8e6e1; }
+    .btn-ghost:hover:not(:disabled) { background: #e8e6e1; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #666; margin-bottom: 10px; }
+    .err { color: #dc2626; font-size: 13px; margin-top: 8px; }
+    .ok-msg { color: #16a34a; font-size: 13px; margin-top: 8px; font-weight: 600; }
+    .hint { color: #999; font-size: 13px; }
+    .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 10px 8px; background: #f4f2ed; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e8e6e1; }
+    td { padding: 10px 8px; border-bottom: 1px solid #f0eee9; vertical-align: middle; }
+    .num { text-align: right; font-family: monospace; }
+    .delete-btn { background: none; border: none; color: #dc2626; cursor: pointer; font-size: 16px; padding: 0 6px; line-height: 1; }
+    .delete-btn:hover { color: #b91c1c; }
+
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .filters select, .filters input { max-width: 220px; }
+
+    .placeholder { text-align: center; padding: 60px 20px; color: #999; }
+    .placeholder .ph-icon { font-size: 48px; margin-bottom: 12px; }
+    .placeholder .ph-title { font-size: 18px; font-weight: 600; color: #666; margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function today_iso() { return new Date().toISOString().split("T")[0]; }
+
+const state = {
+  loaded: false,
+  active_tab: "green",                 // "green" | "roasted"
+  stock_deliveries: [],                // for deriving in-stock greens
+  qc_entries: [],                      // green QC log
+  in_stock_greens: [],                 // derived: green coffees with positive stock, sorted by recency
+  green_form: {
+    coffee: "",
+    measured_at: today_iso(),
+    density_1: "",
+    moisture_1: "",
+    density_2: "",
+    moisture_2: "",
+    notes: "",
+    saving: false,
+    err: "",
+    ok: false,
+  },
+  filter_coffee: "all",                // for the log table
+};
+
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { window.location.href = "login.html"; return; }
+  await load();
+  render();
+})();
+
+async function load() {
+  // Load all stock deliveries (incl. items) to derive the in-stock greens list
+  const { data: deliveries } = await supabaseClient
+    .from("stock_deliveries")
+    .select("id, delivery_date, items:stock_delivery_items(coffee, kg)")
+    .order("delivery_date", { ascending: false });
+  state.stock_deliveries = deliveries || [];
+
+  // Load adjustments and roast usage to compute remaining per green
+  const { data: roasts } = await supabaseClient.from("roast_sessions").select("coffee, roasted_weight").eq("is_test", false);
+  const { data: adjs } = await supabaseClient.from("stock_adjustments").select("coffee, kg_delta, reason");
+
+  // Compute per-coffee in/out
+  const totals = {};                           // { coffee: { in_kg, out_kg, latest_in: 'YYYY-MM-DD' } }
+  const yield_factor = 0.84;                   // ~16% loss in roasting — same heuristic stock.html uses
+  (state.stock_deliveries || []).forEach(d => {
+    (d.items || []).forEach(it => {
+      if (!it.coffee) return;
+      if (!totals[it.coffee]) totals[it.coffee] = { in_kg: 0, out_kg: 0, latest_in: null };
+      totals[it.coffee].in_kg += Number(it.kg) || 0;
+      if (!totals[it.coffee].latest_in || d.delivery_date > totals[it.coffee].latest_in) {
+        totals[it.coffee].latest_in = d.delivery_date;
+      }
+    });
+  });
+  (roasts || []).forEach(r => {
+    if (!r.coffee) return;
+    if (!totals[r.coffee]) totals[r.coffee] = { in_kg: 0, out_kg: 0, latest_in: null };
+    // Convert roasted weight back to green-equivalent for stock accounting
+    totals[r.coffee].out_kg += (Number(r.roasted_weight) || 0) / yield_factor;
+  });
+  (adjs || []).forEach(a => {
+    if (!a.coffee) return;
+    if (!totals[a.coffee]) totals[a.coffee] = { in_kg: 0, out_kg: 0, latest_in: null };
+    // Adjustments: negative kg_delta = out (consumed), positive = in (correction in)
+    if ((Number(a.kg_delta) || 0) < 0) totals[a.coffee].out_kg += Math.abs(Number(a.kg_delta));
+    else totals[a.coffee].in_kg += Number(a.kg_delta) || 0;
+  });
+
+  // Filter to currently-in-stock greens, sort by latest delivery date desc (most recent first)
+  state.in_stock_greens = Object.entries(totals)
+    .filter(([_, v]) => (v.in_kg - v.out_kg) > 0.05)              // small tolerance
+    .map(([coffee, v]) => ({ coffee, remaining: v.in_kg - v.out_kg, latest_in: v.latest_in }))
+    .sort((a, b) => (b.latest_in || "").localeCompare(a.latest_in || ""));
+
+  // Load all QC entries
+  const { data: qc } = await supabaseClient
+    .from("green_qc_entries")
+    .select("*")
+    .order("measured_at", { ascending: false })
+    .order("created_at", { ascending: false });
+  state.qc_entries = qc || [];
+
+  state.loaded = true;
+}
+
+async function save_green_qc() {
+  const f = state.green_form;
+  if (!f.coffee) { f.err = "Select a coffee."; render(); return; }
+  if (!f.measured_at) { f.err = "Enter a measurement date."; render(); return; }
+  // At least one reading must be provided
+  const has_r1 = (f.density_1 !== "" || f.moisture_1 !== "");
+  const has_r2 = (f.density_2 !== "" || f.moisture_2 !== "");
+  if (!has_r1 && !has_r2) { f.err = "Enter at least one reading."; render(); return; }
+
+  f.saving = true; f.err = ""; f.ok = false; render();
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const payload = {
+    coffee: f.coffee,
+    measured_at: f.measured_at,
+    density_1: f.density_1 === "" ? null : Number(f.density_1),
+    moisture_1: f.moisture_1 === "" ? null : Number(f.moisture_1),
+    density_2: f.density_2 === "" ? null : Number(f.density_2),
+    moisture_2: f.moisture_2 === "" ? null : Number(f.moisture_2),
+    notes: f.notes || null,
+    created_by: user?.id || null,
+  };
+  const { data, error } = await supabaseClient.from("green_qc_entries").insert(payload).select().single();
+  if (error) {
+    f.saving = false;
+    f.err = "Save failed: " + error.message;
+    render();
+    return;
+  }
+  // Success — prepend to the log, reset form (keep date)
+  state.qc_entries.unshift(data);
+  state.green_form = {
+    coffee: "",
+    measured_at: f.measured_at,                // keep the date for easier successive entries
+    density_1: "", moisture_1: "",
+    density_2: "", moisture_2: "",
+    notes: "",
+    saving: false, err: "", ok: true,
+  };
+  render();
+  // Auto-clear "saved" message after a moment
+  setTimeout(() => {
+    if (state.green_form.ok) { state.green_form.ok = false; render(); }
+  }, 2000);
+}
+
+async function delete_qc_entry(id) {
+  if (!confirm("Delete this QC entry?")) return;
+  const { error } = await supabaseClient.from("green_qc_entries").delete().eq("id", id);
+  if (error) { alert("Delete failed: " + error.message); return; }
+  state.qc_entries = state.qc_entries.filter(e => e.id !== id);
+  render();
+}
+
+// ── RENDER ─────────────────────────────────────────────────────────────────
+function render() {
+  const app = document.getElementById("app");
+  if (!state.loaded) { app.innerHTML = `<div class="loading">Loading…</div>`; return; }
+  app.innerHTML = `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="back-btn">← Dashboard</button>
+        <div style="width:1px;height:24px;background:#333;margin:0 4px"></div>
+        <div>
+          <div class="header-title">🧪 QC</div>
+          <div class="header-sub">Bear Mrkt</div>
+        </div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn ${state.active_tab==="green"?"active":""}" data-tab="green">🌱 Green</button>
+      <button class="tab-btn ${state.active_tab==="roasted"?"active":""}" data-tab="roasted">🔥 Roasted</button>
+    </div>
+
+    <div class="content">
+      ${state.active_tab === "green" ? build_green_tab() : build_roasted_tab()}
+    </div>
+  `;
+  attach_listeners();
+}
+
+function build_green_tab() {
+  const f = state.green_form;
+  const log = state.qc_entries.slice();
+  const filtered = state.filter_coffee === "all" ? log : log.filter(e => e.coffee === state.filter_coffee);
+  // Distinct coffees ever measured — for the filter dropdown
+  const historical_coffees = [...new Set(log.map(e => e.coffee))].sort();
+
+  const coffees_for_dropdown = state.in_stock_greens;
+
+  const fmt_num = (n) => (n === null || n === undefined || n === "") ? "—" : Number(n).toFixed(2);
+
+  return `
+    <div class="card">
+      <div class="section-label">Log a measurement</div>
+      ${coffees_for_dropdown.length === 0 ? `
+        <p class="hint" style="font-style:italic;padding:14px 0">No green coffees in stock. Log a delivery in Stock first.</p>
+      ` : `
+        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:12px;margin-bottom:12px">
+          <div>
+            <label class="lbl">Coffee *</label>
+            <select id="qc-coffee">
+              <option value="">— Pick green coffee —</option>
+              ${coffees_for_dropdown.map(g => `
+                <option value="${esc(g.coffee)}" ${f.coffee===g.coffee?"selected":""}>
+                  ${esc(g.coffee)} (${g.remaining.toFixed(0)}kg)
+                </option>`).join("")}
+            </select>
+          </div>
+          <div>
+            <label class="lbl">Date *</label>
+            <input type="date" id="qc-date" value="${esc(f.measured_at)}" />
+          </div>
+        </div>
+        <div class="grid-4" style="margin-bottom:12px">
+          <div>
+            <label class="lbl">Density 1 (g/L)</label>
+            <input type="number" id="qc-d1" step="0.01" value="${esc(f.density_1)}" placeholder="e.g. 720" />
+          </div>
+          <div>
+            <label class="lbl">Moisture 1 (%)</label>
+            <input type="number" id="qc-m1" step="0.01" value="${esc(f.moisture_1)}" placeholder="e.g. 10.5" />
+          </div>
+          <div>
+            <label class="lbl">Density 2 (g/L)</label>
+            <input type="number" id="qc-d2" step="0.01" value="${esc(f.density_2)}" placeholder="e.g. 718" />
+          </div>
+          <div>
+            <label class="lbl">Moisture 2 (%)</label>
+            <input type="number" id="qc-m2" step="0.01" value="${esc(f.moisture_2)}" placeholder="e.g. 10.4" />
+          </div>
+        </div>
+        <div style="margin-bottom:12px">
+          <label class="lbl">Notes (optional)</label>
+          <textarea id="qc-notes" placeholder="Anything notable — odd smell, sample condition, batch reference…">${esc(f.notes)}</textarea>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <button class="btn btn-dark" id="qc-save-btn" ${f.saving?"disabled":""}>${f.saving?"Saving…":"💾 Save reading"}</button>
+          ${f.ok ? `<span class="ok-msg">✓ Saved</span>` : ""}
+          ${f.err ? `<span class="err">${esc(f.err)}</span>` : ""}
+        </div>
+      `}
+    </div>
+
+    <div class="card">
+      <div class="section-label">QC Log (${log.length})</div>
+      ${log.length === 0 ? '<p class="hint" style="font-style:italic">No QC entries logged yet.</p>' : `
+        <div class="filters">
+          <select id="filter-coffee">
+            <option value="all">All coffees</option>
+            ${historical_coffees.map(c => `<option value="${esc(c)}" ${state.filter_coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+          </select>
+          <span class="hint">${filtered.length} entr${filtered.length===1?"y":"ies"}</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr>
+              <th>Date</th><th>Coffee</th>
+              <th class="num">Density 1</th><th class="num">Moisture 1</th>
+              <th class="num">Density 2</th><th class="num">Moisture 2</th>
+              <th class="num">Avg Density</th><th class="num">Avg Moisture</th>
+              <th>Notes</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${filtered.map(e => {
+                const ds = [e.density_1, e.density_2].filter(v => v !== null && v !== undefined).map(Number);
+                const ms = [e.moisture_1, e.moisture_2].filter(v => v !== null && v !== undefined).map(Number);
+                const avg_d = ds.length ? (ds.reduce((a,b)=>a+b,0)/ds.length) : null;
+                const avg_m = ms.length ? (ms.reduce((a,b)=>a+b,0)/ms.length) : null;
+                return `
+                <tr>
+                  <td>${esc(e.measured_at)}</td>
+                  <td style="font-weight:600">${esc(e.coffee)}</td>
+                  <td class="num">${fmt_num(e.density_1)}</td>
+                  <td class="num">${fmt_num(e.moisture_1)}</td>
+                  <td class="num">${fmt_num(e.density_2)}</td>
+                  <td class="num">${fmt_num(e.moisture_2)}</td>
+                  <td class="num"><strong>${avg_d===null?"—":avg_d.toFixed(2)}</strong></td>
+                  <td class="num"><strong>${avg_m===null?"—":avg_m.toFixed(2)}</strong></td>
+                  <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.notes||"")}">${esc(e.notes||"")}</td>
+                  <td><button class="delete-btn" data-delete-id="${esc(e.id)}" title="Delete">✕</button></td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function build_roasted_tab() {
+  return `
+    <div class="card">
+      <div class="placeholder">
+        <div class="ph-icon">🔥</div>
+        <div class="ph-title">Roasted QC — coming soon</div>
+        <p class="hint">This is where roasted coffee quality checks (cupping notes, defect counts, etc.) will live.</p>
+      </div>
+    </div>
+  `;
+}
+
+// ── LISTENERS ──────────────────────────────────────────────────────────────
+function attach_listeners() {
+  document.getElementById("back-btn")?.addEventListener("click", () => window.location.href = "index.html");
+  document.getElementById("logout-btn")?.addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+    window.location.href = "login.html";
+  });
+  document.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => {
+    state.active_tab = btn.dataset.tab;
+    render();
+  }));
+
+  // Green form inputs — update form state on input so values survive re-renders
+  const bind = (id, key) => document.getElementById(id)?.addEventListener("input", e => { state.green_form[key] = e.target.value; });
+  bind("qc-coffee", "coffee");
+  bind("qc-date", "measured_at");
+  bind("qc-d1", "density_1");
+  bind("qc-m1", "moisture_1");
+  bind("qc-d2", "density_2");
+  bind("qc-m2", "moisture_2");
+  bind("qc-notes", "notes");
+  document.getElementById("qc-coffee")?.addEventListener("change", e => { state.green_form.coffee = e.target.value; });
+
+  document.getElementById("qc-save-btn")?.addEventListener("click", save_green_qc);
+
+  // Filter
+  document.getElementById("filter-coffee")?.addEventListener("change", e => {
+    state.filter_coffee = e.target.value;
+    render();
+  });
+
+  // Delete entry
+  document.querySelectorAll("[data-delete-id]").forEach(btn => btn.addEventListener("click", () => {
+    delete_qc_entry(btn.dataset.deleteId);
+  }));
+}
+</script>
+</body>
+</html>
