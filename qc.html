@@ -72,7 +72,6 @@ function today_iso() { return new Date().toISOString().split("T")[0]; }
 const state = {
   loaded: false,
   active_tab: "green",                 // "green" | "roasted"
-  stock_deliveries: [],                // for deriving in-stock greens
   qc_entries: [],                      // green QC log
   in_stock_greens: [],                 // derived: green coffees with positive stock, sorted by recency
   green_form: {
@@ -98,48 +97,34 @@ const state = {
 })();
 
 async function load() {
-  // Load all stock deliveries (incl. items) to derive the in-stock greens list
+  // Pull in-stock greens directly from the stock_items table (the same source stock.html uses).
+  // This is the canonical "current_kg per coffee" — no need to recompute it here.
+  const { data: stock_items } = await supabaseClient
+    .from("stock_items")
+    .select("coffee, current_kg")
+    .order("coffee");
+
+  // Also load the deliveries to get the latest delivery date per coffee — for sorting "most recent first"
   const { data: deliveries } = await supabaseClient
     .from("stock_deliveries")
-    .select("id, delivery_date, items:stock_delivery_items(coffee, kg)")
-    .order("delivery_date", { ascending: false });
-  state.stock_deliveries = deliveries || [];
+    .select("date, stock_delivery_items(coffee)")
+    .order("date", { ascending: false });
 
-  // Load adjustments and roast usage to compute remaining per green
-  const { data: roasts } = await supabaseClient.from("roast_sessions").select("coffee, roasted_weight").eq("is_test", false);
-  const { data: adjs } = await supabaseClient.from("stock_adjustments").select("coffee, kg_delta, reason");
-
-  // Compute per-coffee in/out
-  const totals = {};                           // { coffee: { in_kg, out_kg, latest_in: 'YYYY-MM-DD' } }
-  const yield_factor = 0.84;                   // ~16% loss in roasting — same heuristic stock.html uses
-  (state.stock_deliveries || []).forEach(d => {
-    (d.items || []).forEach(it => {
+  // Map: coffee → latest delivery date
+  const latest_delivery = {};
+  (deliveries || []).forEach(d => {
+    (d.stock_delivery_items || []).forEach(it => {
       if (!it.coffee) return;
-      if (!totals[it.coffee]) totals[it.coffee] = { in_kg: 0, out_kg: 0, latest_in: null };
-      totals[it.coffee].in_kg += Number(it.kg) || 0;
-      if (!totals[it.coffee].latest_in || d.delivery_date > totals[it.coffee].latest_in) {
-        totals[it.coffee].latest_in = d.delivery_date;
+      if (!latest_delivery[it.coffee] || d.date > latest_delivery[it.coffee]) {
+        latest_delivery[it.coffee] = d.date;
       }
     });
   });
-  (roasts || []).forEach(r => {
-    if (!r.coffee) return;
-    if (!totals[r.coffee]) totals[r.coffee] = { in_kg: 0, out_kg: 0, latest_in: null };
-    // Convert roasted weight back to green-equivalent for stock accounting
-    totals[r.coffee].out_kg += (Number(r.roasted_weight) || 0) / yield_factor;
-  });
-  (adjs || []).forEach(a => {
-    if (!a.coffee) return;
-    if (!totals[a.coffee]) totals[a.coffee] = { in_kg: 0, out_kg: 0, latest_in: null };
-    // Adjustments: negative kg_delta = out (consumed), positive = in (correction in)
-    if ((Number(a.kg_delta) || 0) < 0) totals[a.coffee].out_kg += Math.abs(Number(a.kg_delta));
-    else totals[a.coffee].in_kg += Number(a.kg_delta) || 0;
-  });
 
-  // Filter to currently-in-stock greens, sort by latest delivery date desc (most recent first)
-  state.in_stock_greens = Object.entries(totals)
-    .filter(([_, v]) => (v.in_kg - v.out_kg) > 0.05)              // small tolerance
-    .map(([coffee, v]) => ({ coffee, remaining: v.in_kg - v.out_kg, latest_in: v.latest_in }))
+  // In-stock greens: positive current_kg only, sorted by most recent delivery first
+  state.in_stock_greens = (stock_items || [])
+    .filter(s => (Number(s.current_kg) || 0) > 0.05)
+    .map(s => ({ coffee: s.coffee, remaining: Number(s.current_kg), latest_in: latest_delivery[s.coffee] || null }))
     .sort((a, b) => (b.latest_in || "").localeCompare(a.latest_in || ""));
 
   // Load all QC entries
