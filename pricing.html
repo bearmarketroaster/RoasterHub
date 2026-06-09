@@ -131,18 +131,21 @@ async function load() {
   const { data: coffees } = await supabaseClient.from("coffees").select("id, name, retired_at").is("retired_at", null).order("name");
   state.coffees = (coffees || []).map(c => ({ id: c.id, name: c.name }));
 
-  // Latest green price per coffee, from delivery items joined to delivery date.
-  const { data: items } = await supabaseClient
-    .from("stock_delivery_items")
-    .select("coffee, price_per_kg, stock_deliveries(date)");
+  // Latest green price per coffee. Walk deliveries newest-first (same join
+  // direction the rest of the app uses) and take the first delivery line that
+  // actually carries a price_per_kg for each coffee — so a coffee still shows a
+  // price even if its most recent delivery left the price blank.
+  const { data: deliveries } = await supabaseClient
+    .from("stock_deliveries")
+    .select("date, stock_delivery_items(coffee, price_per_kg)")
+    .order("date", { ascending: false });
   const green = {};
-  (items || []).forEach(it => {
-    if (it.price_per_kg == null) return;
-    const date = it.stock_deliveries?.date || null;
-    const cur = green[it.coffee];
-    if (!cur || (date && date > cur.date)) {
-      green[it.coffee] = { price: Number(it.price_per_kg), date };
-    }
+  (deliveries || []).forEach(d => {
+    (d.stock_delivery_items || []).forEach(it => {
+      if (it.price_per_kg == null || it.coffee == null) return;
+      if (green[it.coffee]) return;            // already captured a newer price
+      green[it.coffee] = { price: Number(it.price_per_kg), date: d.date || null };
+    });
   });
   state.green = green;
 
