@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pricing — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    input, select, button { font-family: inherit; font-size: 14px; } button { cursor: pointer; }
+    input, select { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #e8e6e1; font-size: 14px; background: #fff; color: #1a1a1a; }
+    input:focus, select:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .content { padding: 24px; max-width: 1000px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; margin-bottom: 16px; }
+    .section-title { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #666; margin-bottom: 12px; }
+    .hint { color: #999; font-style: italic; font-size: 13px; }
+    .note { font-size: 12px; color: #888; margin-top: 10px; line-height: 1.5; }
+
+    /* Config grid */
+    .cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .cfg-field label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #666; margin-bottom: 5px; }
+    .cfg-field .suffix { position: relative; }
+    .cfg-field .suffix span { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #999; font-size: 13px; pointer-events: none; }
+    .cfg-sub { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #999; margin: 16px 0 8px; }
+    .cfg-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+    .btn-save { background: #1a1a1a; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+    .btn-save:hover { opacity: 0.85; }
+    .btn-save:disabled { opacity: 0.5; cursor: default; }
+    .save-flash { color: #16a34a; font-size: 13px; font-weight: 600; }
+    .save-err { color: #dc2626; font-size: 13px; font-weight: 600; }
+    .dirty { color: #d97706; font-size: 12px; font-weight: 600; }
+
+    /* Coffee tables */
+    .coffee-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .coffee-name { font-size: 16px; font-weight: 700; color: #1a1a1a; }
+    .coffee-green { font-size: 12px; color: #666; }
+    .coffee-green b { color: #1a1a1a; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 9px 8px; background: #f4f2ed; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; border-bottom: 1px solid #e8e6e1; }
+    th.num, td.num { text-align: right; }
+    td { padding: 9px 8px; border-bottom: 1px solid #f0eee9; vertical-align: middle; }
+    td.size { font-weight: 600; }
+    .retail { font-weight: 700; color: #1a1a1a; white-space: nowrap; }
+    .retail-sub { font-size: 11px; color: #999; }
+    .no-green { color: #d97706; font-style: italic; font-size: 13px; }
+    .empty { color: #999; font-style: italic; padding: 20px 0; text-align: center; }
+    @media (max-width: 600px) {
+      .content { padding: 16px 12px; }
+      th, td { padding: 7px 5px; font-size: 12px; }
+      .retail-sub { display: none; }
+    }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function eur(n) { return "€" + (Number(n)||0).toFixed(2); }
+function pct(n) { return (Number(n)||0).toFixed(0) + "%"; }
+
+// Canonical bag sizes (matches BAG_SIZES in settings.html) + their weight in kg.
+const SIZES = [
+  { label: "100g",    kg: 0.1 },
+  { label: "200g",    kg: 0.2 },
+  { label: "500g",    kg: 0.5 },
+  { label: "1kg",     kg: 1   },
+  { label: "Bar 5kg", kg: 5   },
+];
+
+const DEFAULTS = {
+  roast_loss_pct: 15, roasting_fee_per_kg: 2.50, roastery_margin_pct: 15,
+  target_low_pct: 75, target_high_pct: 84,
+};
+
+const state = {
+  loaded: false,
+  cfg: { ...DEFAULTS },        // working draft of pricing_settings
+  pkg: {},                     // working draft of packaging: { "200g": 0.349, ... }
+  coffees: [],                 // [{ id, name }]
+  green: {},                   // { coffeeName: { price, date } }
+  dirty: false,
+  saving: false,
+  flash_until: 0,
+  err: "",
+};
+
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { window.location.href = "login.html"; return; }
+  // Admin-only — pricing exposes cost data.
+  const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+  if (role_row?.role !== "admin") { window.location.href = "index.html"; return; }
+  await load();
+  render();
+})();
+
+async function load() {
+  // Config
+  const { data: settings } = await supabaseClient.from("pricing_settings").select("*").eq("id", 1).maybeSingle();
+  if (settings) {
+    state.cfg = {
+      roast_loss_pct:      Number(settings.roast_loss_pct),
+      roasting_fee_per_kg: Number(settings.roasting_fee_per_kg),
+      roastery_margin_pct: Number(settings.roastery_margin_pct),
+      target_low_pct:      Number(settings.target_low_pct),
+      target_high_pct:     Number(settings.target_high_pct),
+    };
+  }
+
+  // Packaging
+  const { data: pkg_rows } = await supabaseClient.from("pricing_packaging").select("*");
+  const pkg = {};
+  (pkg_rows || []).forEach(r => { pkg[r.bag_size] = Number(r.cost); });
+  SIZES.forEach(s => { if (pkg[s.label] == null) pkg[s.label] = 0; });
+  state.pkg = pkg;
+
+  // Active coffees
+  const { data: coffees } = await supabaseClient.from("coffees").select("id, name, retired_at").is("retired_at", null).order("name");
+  state.coffees = (coffees || []).map(c => ({ id: c.id, name: c.name }));
+
+  // Latest green price per coffee, from delivery items joined to delivery date.
+  const { data: items } = await supabaseClient
+    .from("stock_delivery_items")
+    .select("coffee, price_per_kg, stock_deliveries(date)");
+  const green = {};
+  (items || []).forEach(it => {
+    if (it.price_per_kg == null) return;
+    const date = it.stock_deliveries?.date || null;
+    const cur = green[it.coffee];
+    if (!cur || (date && date > cur.date)) {
+      green[it.coffee] = { price: Number(it.price_per_kg), date };
+    }
+  });
+  state.green = green;
+
+  state.loaded = true;
+}
+
+// ── Pricing maths ───────────────────────────────────────────────────────────
+// Returns null if no green price for this coffee.
+function compute(coffeeName, kg, bagLabel) {
+  const g = state.green[coffeeName];
+  if (!g) return null;
+  const loss   = state.cfg.roast_loss_pct / 100;
+  const fee     = state.cfg.roasting_fee_per_kg;
+  const rmargin = state.cfg.roastery_margin_pct / 100;
+  const low      = state.cfg.target_low_pct / 100;
+  const high     = state.cfg.target_high_pct / 100;
+  const packaging = Number(state.pkg[bagLabel]) || 0;
+
+  const roasted_cost_per_kg = g.price / (1 - loss) + fee;   // blended € per roasted kg
+  const cogs       = roasted_cost_per_kg * kg + packaging;  // roastery cost for this bag
+  const wholesale  = cogs / (1 - rmargin);                  // what the shop pays
+
+  // Combined margin = (retail - COGS) / retail = target  ->  retail = COGS / (1 - target)
+  const retail_low  = cogs / (1 - low);   // price at the band floor (75%)
+  const retail_high = cogs / (1 - high);  // price at the band ceiling (84%)
+
+  return { roasted_cost_per_kg, cogs, wholesale, retail_low, retail_high };
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+function render() {
+  const app = document.getElementById("app");
+  if (!state.loaded) { app.innerHTML = `<div class="content"><div class="empty">Loading…</div></div>`; return; }
+  const c = state.cfg;
+
+  app.innerHTML = `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="back-btn">← Dashboard</button>
+        <div style="width:1px;height:24px;background:#333;margin:0 4px"></div>
+        <div>
+          <div class="header-title">💶 Pricing</div>
+          <div class="header-sub">Bear Mrkt · Suggested prices</div>
+        </div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>
+
+    <div class="content">
+
+      <div class="card">
+        <div class="section-title">Pricing Inputs</div>
+        <div class="cfg-grid">
+          ${cfg_num("roast_loss_pct",      "Roast loss",      c.roast_loss_pct,      "%")}
+          ${cfg_num("roasting_fee_per_kg", "Roasting fee",    c.roasting_fee_per_kg, "€/kg")}
+          ${cfg_num("roastery_margin_pct", "Roastery margin", c.roastery_margin_pct, "%")}
+          ${cfg_num("target_low_pct",      "Target band low", c.target_low_pct,      "%")}
+          ${cfg_num("target_high_pct",     "Target band high",c.target_high_pct,     "%")}
+        </div>
+        <div class="cfg-sub">Packaging cost per bag</div>
+        <div class="cfg-grid">
+          ${SIZES.map(s => cfg_pkg(s.label, state.pkg[s.label])).join("")}
+        </div>
+        <div class="cfg-actions">
+          <button class="btn-save" id="save-btn" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save inputs"}</button>
+          ${state.dirty ? `<span class="dirty">Unsaved changes</span>` : ""}
+          ${Date.now() < state.flash_until ? `<span class="save-flash">Saved ✓</span>` : ""}
+          ${state.err ? `<span class="save-err">${esc(state.err)}</span>` : ""}
+        </div>
+        <div class="note">
+          Wholesale (to shop) = COGS ÷ (1 − roastery margin). Suggested retail solves the
+          combined margin (retail − roastery COGS) ÷ retail to your target band. Prices are
+          suggestions — round to a clean number per coffee as you see fit. Live preview reflects
+          unsaved edits above.
+        </div>
+      </div>
+
+      <div id="results"></div>
+
+    </div>
+  `;
+
+  render_results();
+  attach();
+}
+
+function cfg_num(key, label, val, suffix) {
+  return `
+    <div class="cfg-field">
+      <label>${label}</label>
+      <div class="suffix">
+        <input type="number" step="any" data-cfg="${key}" value="${val}" />
+        <span>${suffix}</span>
+      </div>
+    </div>`;
+}
+function cfg_pkg(label, val) {
+  return `
+    <div class="cfg-field">
+      <label>${esc(label)}</label>
+      <div class="suffix">
+        <input type="number" step="any" data-pkg="${esc(label)}" value="${val}" />
+        <span>€</span>
+      </div>
+    </div>`;
+}
+
+function render_results() {
+  const el = document.getElementById("results");
+  if (!el) return;
+
+  if (!state.coffees.length) {
+    el.innerHTML = `<div class="card"><div class="empty">No active coffees found.</div></div>`;
+    return;
+  }
+
+  el.innerHTML = state.coffees.map(coffee => {
+    const g = state.green[coffee.name];
+    const head = `
+      <div class="coffee-head">
+        <div class="coffee-name">${esc(coffee.name)}</div>
+        ${g
+          ? `<div class="coffee-green">Green <b>${eur(g.price)}/kg</b>${g.date?` · latest delivery ${esc(g.date)}`:""}</div>`
+          : `<div class="no-green">No green price on record — add a delivery price in Stock.</div>`}
+      </div>`;
+
+    if (!g) return `<div class="card">${head}</div>`;
+
+    const rows = SIZES.map(s => {
+      const r = compute(coffee.name, s.kg, s.label);
+      return `
+        <tr>
+          <td class="size">${esc(s.label)}</td>
+          <td class="num">${eur(r.cogs)}</td>
+          <td class="num">${eur(r.wholesale)}</td>
+          <td class="num">
+            <span class="retail">${eur(r.retail_low)} – ${eur(r.retail_high)}</span>
+            <div class="retail-sub">${pct(state.cfg.target_low_pct)}–${pct(state.cfg.target_high_pct)} combined</div>
+          </td>
+        </tr>`;
+    }).join("");
+
+    return `
+      <div class="card">
+        ${head}
+        <table>
+          <thead>
+            <tr>
+              <th>Size</th>
+              <th class="num">Roastery COGS</th>
+              <th class="num">Wholesale</th>
+              <th class="num">Suggested retail</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }).join("");
+}
+
+// ── Listeners ───────────────────────────────────────────────────────────────
+function attach() {
+  document.getElementById("back-btn")?.addEventListener("click", () => window.location.href = "index.html");
+  document.getElementById("logout-btn")?.addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+    window.location.href = "login.html";
+  });
+
+  // Live recompute on config edits — update draft + re-render ONLY the results
+  // block so the input keeps focus while typing.
+  document.querySelectorAll("[data-cfg]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      state.cfg[inp.dataset.cfg] = Number(inp.value) || 0;
+      mark_dirty();
+      render_results();
+    });
+  });
+  document.querySelectorAll("[data-pkg]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      state.pkg[inp.dataset.pkg] = Number(inp.value) || 0;
+      mark_dirty();
+      render_results();
+    });
+  });
+
+  document.getElementById("save-btn")?.addEventListener("click", save);
+}
+
+function mark_dirty() {
+  if (!state.dirty || state.err || state.flash_until) {
+    state.dirty = true; state.err = ""; state.flash_until = 0;
+    // Refresh just the actions row label without nuking input focus.
+    const btn = document.getElementById("save-btn");
+    const actions = btn?.parentElement;
+    if (actions) {
+      actions.querySelector(".dirty")?.remove();
+      actions.querySelector(".save-flash")?.remove();
+      actions.querySelector(".save-err")?.remove();
+      if (!actions.querySelector(".dirty")) {
+        const span = document.createElement("span");
+        span.className = "dirty"; span.textContent = "Unsaved changes";
+        actions.appendChild(span);
+      }
+    }
+  }
+}
+
+async function save() {
+  state.saving = true; state.err = ""; render();
+  const now = new Date().toISOString();
+
+  const { error: e1 } = await supabaseClient.from("pricing_settings").upsert({
+    id: 1,
+    roast_loss_pct:      state.cfg.roast_loss_pct,
+    roasting_fee_per_kg: state.cfg.roasting_fee_per_kg,
+    roastery_margin_pct: state.cfg.roastery_margin_pct,
+    target_low_pct:      state.cfg.target_low_pct,
+    target_high_pct:     state.cfg.target_high_pct,
+    updated_at: now,
+  }, { onConflict: "id" });
+
+  const pkg_payload = SIZES.map(s => ({ bag_size: s.label, cost: Number(state.pkg[s.label]) || 0, updated_at: now }));
+  const { error: e2 } = await supabaseClient.from("pricing_packaging").upsert(pkg_payload, { onConflict: "bag_size" });
+
+  state.saving = false;
+  if (e1 || e2) { state.err = (e1 || e2).message; state.dirty = true; render(); return; }
+  state.dirty = false;
+  state.flash_until = Date.now() + 2000;
+  render();
+  setTimeout(() => { if (Date.now() >= state.flash_until) { state.flash_until = 0; render(); } }, 2100);
+}
+</script>
+</body>
+</html>
