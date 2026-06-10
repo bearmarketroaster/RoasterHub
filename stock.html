@@ -83,9 +83,12 @@ const LOW_STOCK_KG = 20;
 const state = {
   tab: 0,
   coffees: [],
+  coffees_obj: [],        // [{id, name}] for the contract green-coffee picker
   stock_items: [],
   deliveries: [],
   adjustments: [],
+  contracts: [],          // green_contracts rows
+  contract_delivered: {}, // { [contract_id]: bags drawn down }
   containers: [],         // active containers for staff takeaway picker
   staff_dispatches: [],   // recent staff takeaway log
   loading: true,
@@ -93,11 +96,16 @@ const state = {
   ui: {
     show_delivery_form: false,
     show_adj_form: false,
+    show_contract_form: false,
     delivery_err: "",
     adj_err: "",
+    contract_err: "",
     invoice_err: "",
+    contract_file_err: "",
     delivery: new_delivery(),
+    contract: new_contract(),
     pending_invoice_file: null,   // File object staged for upload after delivery saves
+    pending_contract_file: null,  // File staged for upload after contract saves
     adj: { coffee: "", change_kg: "", reason: "roast", note: "" },
     staff: { coffee: "", container_id: "", bag_size: "200g", err: "", saving: false },
   },
@@ -114,12 +122,18 @@ function new_delivery() {
   return { date: today(), supplier: "", invoice_ref: "", due_date: "", items: [new_delivery_item()] };
 }
 function new_delivery_item() {
-  return { coffee:"", green_name:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"" };
+  return { coffee:"", green_name:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"", contract_id:"" };
 }
+function new_contract() {
+  return { supplier:"", coffee_id:"", bag_count:"", low_bag_threshold:"100" };
+}
+function coffee_name_by_id(id) { const c = state.coffees_obj.find(x => x.id === id); return c ? c.name : "—"; }
+function contract_remaining(c) { return Number(c.bag_count||0) - Number(state.contract_delivered[c.id]||0); }
 
 async function load_data() {
   const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
   state.coffees = (coffees_data || []).map(c => c.name);
+  state.coffees_obj = coffees_data || [];
 
   const { data: stock_items } = await supabaseClient.from("stock_items").select("*").order("coffee");
   state.stock_items = stock_items || [];
@@ -129,6 +143,15 @@ async function load_data() {
 
   const { data: adjustments } = await supabaseClient.from("stock_adjustments").select("*").order("date", { ascending: false });
   state.adjustments = adjustments || [];
+
+  // Green contracts + live drawdown (bags delivered against each contract).
+  const { data: contracts } = await supabaseClient.from("green_contracts").select("*").order("created_at", { ascending: false });
+  state.contracts = contracts || [];
+  const drawn = {};
+  state.deliveries.forEach(d => (d.items||[]).forEach(it => {
+    if (it.contract_id) drawn[it.contract_id] = (drawn[it.contract_id]||0) + (Number(it.bags)||0);
+  }));
+  state.contract_delivered = drawn;
 
   // Load active containers + their fills + dispatches, compute remaining for the staff picker
   const [{ data: container_rows }, { data: roast_sessions }, { data: all_dispatches }, { data: all_buckets }] = await Promise.all([
@@ -190,6 +213,7 @@ async function save_delivery() {
     bags: Number(item.bags)||null,
     weight_kg: Number(item.weight_kg),
     price_per_kg: Number(item.price_per_kg)||null,
+    contract_id: item.contract_id||null,
   })));
 
   for (const item of valid_items) {
@@ -333,12 +357,12 @@ function build_app() {
   if (state.loading) return header + `<div class="loading">Loading stock…</div>`;
   const low_stock_items = state.stock_items.filter(s => s.current_kg < (s.low_stock_threshold||LOW_STOCK_KG) && s.current_kg > 0);
   const out_of_stock = state.stock_items.filter(s => s.current_kg===0 && s.coffee);
-  const tabs = ["🌱 Green Stock","📦 Deliveries","⚖️ Adjustments","👤 Staff Takeaway"];
+  const tabs = ["🌱 Green Stock","📦 Deliveries","⚖️ Adjustments","👤 Staff Takeaway","📑 Contracts"];
   return header + `
     <div class="tabs">${tabs.map((t,i) => `<button class="tab-btn${state.tab===i?" active":""}" data-tab="${i}">${t}</button>`).join("")}</div>
     <div class="content">
       ${low_stock_items.length>0||out_of_stock.length>0?`<div class="low-stock">⚠️ Low stock: ${[...out_of_stock.map(s=>`<strong>${esc(s.coffee)}</strong> — out of stock`),...low_stock_items.map(s=>`<strong>${esc(s.coffee)}</strong> — ${s.current_kg.toFixed(1)}kg remaining`)].join(" · ")}</div>`:""}
-      ${state.tab===0?build_green_stock():state.tab===1?build_deliveries():state.tab===2?build_adjustments():state.tab===3?build_staff():""}
+      ${state.tab===0?build_green_stock():state.tab===1?build_deliveries():state.tab===2?build_adjustments():state.tab===3?build_staff():state.tab===4?build_contracts():""}
     </div>`;
 }
 
@@ -483,8 +507,115 @@ function build_delivery_item_row(item, i) {
         <div><label class="lbl">No. of Bags</label><input type="number" class="item-bags" data-idx="${i}" value="${item.bags}" placeholder="0" /></div>
         <div><label class="lbl">Total Weight (kg) *</label><input type="number" class="item-weight" data-idx="${i}" value="${item.weight_kg}" placeholder="0.0" step="0.1" /></div>
         <div><label class="lbl">Price per kg (€)</label><input type="number" class="item-price" data-idx="${i}" value="${item.price_per_kg}" placeholder="0.00" step="0.01" /></div>
+        <div><label class="lbl">From Contract?</label>
+          <select class="item-contract" data-idx="${i}">
+            <option value="">— Spot (no contract) —</option>
+            ${state.contracts.map(co=>`<option value="${esc(co.id)}" ${item.contract_id===co.id?"selected":""}>${esc(co.supplier)} · ${esc(coffee_name_by_id(co.coffee_id))} · ${contract_remaining(co)} bags left</option>`).join("")}
+          </select>
+        </div>
       </div>
     </div>`;
+}
+
+function build_contracts() {
+  const { show_contract_form, contract, contract_err, contract_file_err } = state.ui;
+  const pending = state.ui.pending_contract_file;
+
+  const form = show_contract_form ? `
+    <div class="card mb-16">
+      <h3>New Contract</h3>
+      <div class="grid-2 mb-12">
+        <div><label class="lbl">Supplier *</label><input id="con-supplier" value="${esc(contract.supplier)}" placeholder="e.g. D.R. Wakefield" /></div>
+        <div><label class="lbl">Green Coffee *</label>
+          <select id="con-coffee">
+            <option value="">— Select —</option>
+            ${state.coffees_obj.map(c=>`<option value="${c.id}" ${String(contract.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div><label class="lbl">Total Bags *</label><input type="number" id="con-bags" value="${esc(contract.bag_count)}" placeholder="e.g. 275" /></div>
+        <div><label class="lbl">Flag when below (bags)</label><input type="number" id="con-threshold" value="${esc(contract.low_bag_threshold)}" placeholder="100" /></div>
+      </div>
+      <div class="section-label" style="margin-bottom:8px">Attach Contract PDF (optional)</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;background:#f4f2ed;border-radius:8px;padding:10px 14px">
+        <input type="file" id="con-pdf" accept=".pdf" style="display:none" />
+        <button class="btn btn-ghost btn-sm" id="choose-con-pdf">📎 Attach PDF</button>
+        ${pending
+          ? `<span style="font-size:13px;color:#16a34a;font-weight:600">✓ ${esc(pending.name)}</span><button id="clear-con-pdf" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px">✕</button>`
+          : `<span class="hint" style="font-size:13px">No file attached</span>`}
+        ${contract_file_err?`<span style="color:#dc2626;font-size:12px">${esc(contract_file_err)}</span>`:""}
+      </div>
+      ${contract_err?`<p class="err mt-8">${esc(contract_err)}</p>`:""}
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-dark btn-lg" id="save-contract" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Contract"}</button>
+        <button class="btn btn-ghost btn-lg" id="cancel-contract">Cancel</button>
+      </div>
+    </div>` : "";
+
+  const rows = state.contracts.map(c => {
+    const total = Number(c.bag_count||0);
+    const delivered = Number(state.contract_delivered[c.id]||0);
+    const remaining = total - delivered;
+    const threshold = Number(c.low_bag_threshold||0);
+    const depleted = remaining <= 0;
+    const low = remaining < threshold;
+    const rem_style = depleted ? "color:#dc2626;font-weight:800"
+                    : low      ? "color:#dc2626;font-weight:700"
+                    :            "color:#1a1a1a;font-weight:700";
+    return `
+      <div class="card" style="border-left:3px solid ${(depleted||low)?'#dc2626':'#16a34a'}">
+        <div class="flex-between flex-wrap mb-8">
+          <div class="flex-wrap">
+            <span style="font-weight:700;font-size:15px">${esc(c.supplier)}</span>
+            <span class="tag" style="background:#f4f2ed;color:#666">${esc(coffee_name_by_id(c.coffee_id))}</span>
+            ${c.contract_path?`<button class="btn btn-ghost btn-sm" style="font-size:11px" data-download-invoice="${esc(c.contract_path)}">📄 Contract PDF</button>`:""}
+          </div>
+          <div style="text-align:right">
+            <div style="${rem_style};font-size:16px">${remaining} bags left</div>
+            <div class="hint" style="font-size:12px">${delivered} of ${total} delivered${depleted?" · depleted":low?` · low (&lt;${threshold})`:""}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="flex-between mb-16">
+      <h2>Contracts</h2>
+      <button class="btn btn-dark" id="toggle-contract-form">+ New Contract</button>
+    </div>
+    ${form}
+    ${state.contracts.length===0&&!show_contract_form
+      ? `<div class="card empty"><div class="icon">📑</div>No contracts yet. Log one to track bag drawdown against deliveries.</div>`
+      : rows}`;
+}
+
+async function save_contract() {
+  state.saving = true; render();
+  const c = state.ui.contract;
+  if (!c.supplier || !c.coffee_id || !(Number(c.bag_count) > 0)) {
+    state.ui.contract_err = "Supplier, green coffee, and a bag count are required.";
+    state.saving = false; render(); return;
+  }
+  const id = gen_id("CON");
+  let contract_path = null;
+  if (state.ui.pending_contract_file) {
+    const file = state.ui.pending_contract_file;
+    const safe_name = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+    const path = `contracts/${id}/${safe_name}`;
+    const { error: up_err } = await supabaseClient.storage.from("invoices").upload(path, file);
+    if (up_err) { state.ui.contract_err = "Failed to upload contract PDF: " + up_err.message; state.saving = false; render(); return; }
+    contract_path = path;
+  }
+  const { error } = await supabaseClient.from("green_contracts").insert({
+    id, supplier: c.supplier, coffee_id: Number(c.coffee_id),
+    bag_count: Number(c.bag_count),
+    low_bag_threshold: Number(c.low_bag_threshold) || 100,
+    contract_path,
+  });
+  if (error) { state.ui.contract_err = "Failed to save contract: " + error.message; state.saving = false; render(); return; }
+  state.saving = false;
+  state.ui.show_contract_form = false; state.ui.contract = new_contract();
+  state.ui.contract_err = ""; state.ui.pending_contract_file = null;
+  await load_data(); render();
 }
 
 function build_adjustments() {
@@ -695,6 +826,7 @@ function attach_listeners() {
   });
   sync(".item-coffee","coffee"); sync(".item-green-name","green_name"); sync(".item-origin","origin");
   sync(".item-lot","lot_number"); sync(".item-bags","bags"); sync(".item-weight","weight_kg"); sync(".item-price","price_per_kg");
+  sync(".item-contract","contract_id");
 
   app.querySelector("#save-delivery")?.addEventListener("click", () => {
     app.querySelectorAll(".item-coffee").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].coffee=el.value; });
@@ -704,11 +836,34 @@ function attach_listeners() {
     app.querySelectorAll(".item-bags").forEach(el       => { state.ui.delivery.items[Number(el.dataset.idx)].bags=el.value; });
     app.querySelectorAll(".item-weight").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].weight_kg=el.value; });
     app.querySelectorAll(".item-price").forEach(el      => { state.ui.delivery.items[Number(el.dataset.idx)].price_per_kg=el.value; });
+    app.querySelectorAll(".item-contract").forEach(el   => { state.ui.delivery.items[Number(el.dataset.idx)].contract_id=el.value; });
     state.ui.delivery.date=document.getElementById("del-date")?.value||state.ui.delivery.date;
     state.ui.delivery.supplier=document.getElementById("del-supplier")?.value||state.ui.delivery.supplier;
     state.ui.delivery.invoice_ref=document.getElementById("del-invoice")?.value||state.ui.delivery.invoice_ref;
     state.ui.delivery.due_date=document.getElementById("del-due-date")?.value||state.ui.delivery.due_date;
     save_delivery();
+  });
+
+  // Contracts
+  app.querySelector("#toggle-contract-form")?.addEventListener("click", () => { state.ui.show_contract_form=!state.ui.show_contract_form; state.ui.contract_err=""; render(); });
+  app.querySelector("#cancel-contract")?.addEventListener("click", () => { state.ui.show_contract_form=false; state.ui.contract_err=""; state.ui.pending_contract_file=null; render(); });
+  app.querySelector("#con-supplier")?.addEventListener("input", e => { state.ui.contract.supplier=e.target.value; });
+  app.querySelector("#con-coffee")?.addEventListener("change", e => { state.ui.contract.coffee_id=e.target.value; });
+  app.querySelector("#con-bags")?.addEventListener("input", e => { state.ui.contract.bag_count=e.target.value; });
+  app.querySelector("#con-threshold")?.addEventListener("input", e => { state.ui.contract.low_bag_threshold=e.target.value; });
+  app.querySelector("#choose-con-pdf")?.addEventListener("click", () => { document.getElementById("con-pdf")?.click(); });
+  app.querySelector("#con-pdf")?.addEventListener("change", e => {
+    const file = e.target.files?.[0]; if (!file) return;
+    if (file.type !== "application/pdf") { state.ui.contract_file_err="Please select a PDF file."; render(); return; }
+    state.ui.pending_contract_file=file; state.ui.contract_file_err=""; render();
+  });
+  app.querySelector("#clear-con-pdf")?.addEventListener("click", () => { state.ui.pending_contract_file=null; render(); });
+  app.querySelector("#save-contract")?.addEventListener("click", () => {
+    state.ui.contract.supplier=document.getElementById("con-supplier")?.value||state.ui.contract.supplier;
+    state.ui.contract.coffee_id=document.getElementById("con-coffee")?.value||state.ui.contract.coffee_id;
+    state.ui.contract.bag_count=document.getElementById("con-bags")?.value||state.ui.contract.bag_count;
+    state.ui.contract.low_bag_threshold=document.getElementById("con-threshold")?.value||state.ui.contract.low_bag_threshold;
+    save_contract();
   });
 
   app.querySelector("#toggle-adj-form")?.addEventListener("click", () => { state.ui.show_adj_form=!state.ui.show_adj_form; state.ui.adj_err=""; render(); });
