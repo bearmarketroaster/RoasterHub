@@ -116,6 +116,7 @@ const state = {
   current_user: null,
   loading: true,
   open_section: "coffees",
+  active_tab: "catalogue",   // catalogue | operations | people
   ui: {
     open_coffee: null,
     new_coffee_name: "",
@@ -998,15 +999,26 @@ function build_app() {
       <button class="btn-logout" id="logout-btn">Log Out</button>
     </div>`;
   if (state.loading) return header + `<div class="loading">Loading settings…</div>`;
+  const tabs = [
+    { id: "catalogue",  label: "Catalogue",  icon: "📚" },
+    { id: "operations", label: "Operations", icon: "🏭" },
+    { id: "people",     label: "People",     icon: "👥" },
+  ];
+  const active = state.active_tab || "catalogue";
+  const tab_bar = `
+    <div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid #e8e6e1;flex-wrap:wrap">
+      ${tabs.map(t => `
+        <button data-settings-tab="${t.id}" style="background:none;border:none;border-bottom:3px solid ${active===t.id?'#1a1a1a':'transparent'};color:${active===t.id?'#1a1a1a':'#999'};font-weight:${active===t.id?'700':'500'};font-size:14px;padding:10px 16px;cursor:pointer;margin-bottom:-2px">${t.icon} ${t.label}</button>
+      `).join("")}
+    </div>`;
+  const sections =
+      active === "operations" ? `${build_shops_section()}${build_containers_section()}${build_buckets_section()}`
+    : active === "people"     ? `${build_users_section()}`
+    :                           `${build_coffees_section()}${build_label_data_section()}`;
   return header + `
     <div class="content">
-      <p class="hint" style="margin-bottom:20px">Manage coffees, FP codes, shops, containers, buckets, and users.</p>
-      ${build_coffees_section()}
-      ${build_label_data_section()}
-      ${build_shops_section()}
-      ${build_buckets_section()}
-      ${build_containers_section()}
-      ${build_users_section()}
+      ${tab_bar}
+      ${sections}
     </div>`;
 }
 
@@ -1409,6 +1421,13 @@ function attach_listeners() {
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
   app.querySelector("#go-print-qr")?.addEventListener("click", () => window.location.href="print-qr.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
+  app.querySelectorAll("[data-settings-tab]").forEach(btn => btn.addEventListener("click", () => {
+    const t = btn.dataset.settingsTab;
+    state.active_tab = t;
+    // Open the first section of the tab so it isn't a wall of collapsed headers.
+    state.open_section = t === "operations" ? "shops" : t === "people" ? "users" : "coffees";
+    render();
+  }));
   app.querySelectorAll("[data-toggle-section]").forEach(el => el.addEventListener("click", () => {
     state.open_section = state.open_section===el.dataset.toggleSection ? null : el.dataset.toggleSection;
     render();
