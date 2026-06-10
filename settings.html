@@ -110,6 +110,7 @@ const state = {
   buckets: [],          // [{ id, created_at, retired_at, notes }]
   containers: [],       // [{ id, name, status, retired_at, ... }]
   fp_label_data: {},    // { [fp_code]: { roast_type, region, process, altitude, flavour_1, flavour_2, flavour_3, price } }
+  fp_assignments: [],   // [{ id, fp_code, coffee_id, bag_size, effective_start, effective_end }] — version history
   user_roles: [],
   pending_invites: [],
   current_user: null,
@@ -148,6 +149,38 @@ const state = {
 
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
+function today() { return new Date().toISOString().split("T")[0]; }
+
+// ── FP VERSIONING HELPERS ───────────────────────────────────────────────────
+// fp_assignments is the time-versioned source of truth (fp_code -> coffee).
+// fp_codes stays the "current view" cache; these helpers keep the open
+// assignment in lockstep with retire/restore/add on fp_codes.
+function assignments_for(fp_code) {
+  return (state.fp_assignments || [])
+    .filter(a => a.fp_code === fp_code)
+    .sort((a,b) => (a.effective_start || "").localeCompare(b.effective_start || ""));
+}
+function coffee_name_by_id(id) { const c = state.coffees.find(c => c.id === id); return c ? c.name : ""; }
+
+// Close the open version of a code (retire). end_date defaults to today.
+async function close_open_assignment(fp_code, end_date) {
+  const open = (state.fp_assignments || []).find(a => a.fp_code === fp_code && a.effective_end == null);
+  if (!open) return;
+  const end = end_date || today();
+  const { error } = await supabaseClient.from("fp_assignments").update({ effective_end: end }).eq("id", open.id);
+  if (error) { console.error("close_open_assignment failed:", error); return; }
+  open.effective_end = end;
+}
+
+// Open a fresh version of a code (add / restore / —reassign in 2b—).
+async function open_new_assignment(fp_code, coffee_id, bag_size, start_date) {
+  const { data, error } = await supabaseClient.from("fp_assignments")
+    .insert({ fp_code, coffee_id, bag_size, effective_start: start_date || null, effective_end: null })
+    .select().single();
+  if (error) { console.error("open_new_assignment failed:", error); return; }
+  if (data) state.fp_assignments.push(data);
+}
+
 // ── LOAD ──────────────────────────────────────────────────────────────────────
 async function load_coffees() {
   const { data: coffees, error: ce } = await supabaseClient.from("coffees").select("*").order("name");
@@ -172,6 +205,13 @@ async function load_fp_label_data() {
   const map = {};
   (data||[]).forEach(r => { map[r.fp_code] = r; });
   state.fp_label_data = map;
+}
+
+async function load_fp_assignments() {
+  const { data, error } = await supabaseClient.from("fp_assignments")
+    .select("id, fp_code, coffee_id, bag_size, effective_start, effective_end").order("fp_code");
+  if (error) { console.error("Failed to load fp_assignments:", error); return; }
+  state.fp_assignments = data || [];
 }
 
 // Sanitise a master name into a URL/QR-safe slug
@@ -427,7 +467,7 @@ async function init() {
   await load_current_user();
   // Viewers shouldn't be in Settings at all — redirect to Reports
   if (state.current_user?.role !== "admin") { window.location.href = "reports.html"; return; }
-  await Promise.all([load_coffees(), load_shop_mappings(), load_fp_label_data(), load_users(), load_buckets(), load_containers()]);
+  await Promise.all([load_coffees(), load_shop_mappings(), load_fp_label_data(), load_fp_assignments(), load_users(), load_buckets(), load_containers()]);
   state.loading = false;
   render();
 }
@@ -472,17 +512,28 @@ async function add_fp_code(coffee_id, fp_code, bag_size) {
   }
   const coffee = state.coffees.find(c=>c.id===coffee_id);
   if (coffee) { coffee.fp_codes.push(data); coffee.fp_codes.sort((a,b)=>a.fp_code.localeCompare(b.fp_code)); }
+  // Open the code's first version (open start + open end) so it resolves from day one.
+  await open_new_assignment(data.fp_code, coffee_id, bag_size, null);
   state.ui.new_fp[coffee_id] = { fp_code:"", bag_size:"100g", err:"" };
   render();
 }
 
 async function delete_fp_code(coffee_id, fp_id) {
+  const coffee = state.coffees.find(c=>c.id===coffee_id);
+  const fp = coffee?.fp_codes.find(f=>f.id===fp_id);
+  const fp_code_val = fp?.fp_code;
+  if (error_guard_missing(fp_code_val)) return;
+  // Permanent delete: clear dependents first (label FKs an assignment), then the code.
+  await supabaseClient.from("fp_label_data").delete().eq("fp_code", fp_code_val);
+  await supabaseClient.from("fp_assignments").delete().eq("fp_code", fp_code_val);
   const { error } = await supabaseClient.from("fp_codes").delete().eq("id",fp_id);
   if (error) { alert("Failed to delete FP code: " + error.message); return; }
-  const coffee = state.coffees.find(c=>c.id===coffee_id);
+  state.fp_assignments = state.fp_assignments.filter(a => a.fp_code !== fp_code_val);
+  delete state.fp_label_data[fp_code_val];
   if (coffee) coffee.fp_codes = coffee.fp_codes.filter(f=>f.id!==fp_id);
   render();
 }
+function error_guard_missing(v) { if (!v) { alert("Could not resolve FP code to delete."); return true; } return false; }
 
 // ── RETIRE / RESTORE ──────────────────────────────────────────────────────────
 // Soft-delete pattern. Retired coffees/FPs stay in the database (so reports keep working)
@@ -506,6 +557,8 @@ async function retire_coffee(coffee_id) {
     const { error: fe } = await supabaseClient.from("fp_codes").update({ retired_at: now }).in("id", active_fp_ids);
     if (fe) { alert("Coffee retired, but failed to retire its FP codes: " + fe.message); render(); return; }
     coffee.fp_codes.forEach(f => { if (active_fp_ids.includes(f.id)) f.retired_at = now; });
+    // Close each code's open version (per-version retirement).
+    for (const f of active_fps) { await close_open_assignment(f.fp_code); }
   }
   if (state.ui.open_coffee === coffee_id) state.ui.open_coffee = null;
   render();
@@ -535,6 +588,8 @@ async function restore_coffee(coffee_id) {
     const { error: fe } = await supabaseClient.from("fp_codes").update({ retired_at: null }).in("id", ids);
     if (fe) { alert("Coffee restored, but failed to restore its FP codes: " + fe.message); render(); return; }
     coffee.fp_codes.forEach(f => { if (ids.includes(f.id)) f.retired_at = null; });
+    // Restore = open a NEW version from today (history keeps the closed gap).
+    for (const f of cascade_fps) { await open_new_assignment(f.fp_code, f.coffee_id, f.bag_size, today()); }
   }
   render();
 }
@@ -549,6 +604,7 @@ async function retire_fp_code(coffee_id, fp_id) {
   const { error } = await supabaseClient.from("fp_codes").update({ retired_at: now }).eq("id", fp_id);
   if (error) { alert("Failed to retire FP code: " + error.message); return; }
   fp.retired_at = now;
+  await close_open_assignment(fp.fp_code);
   render();
 }
 
@@ -560,6 +616,7 @@ async function restore_fp_code(coffee_id, fp_id) {
   const { error } = await supabaseClient.from("fp_codes").update({ retired_at: null }).eq("id", fp_id);
   if (error) { alert("Failed to restore: " + error.message); return; }
   fp.retired_at = null;
+  await open_new_assignment(fp.fp_code, fp.coffee_id, fp.bag_size, today());
   render();
 }
 
@@ -917,7 +974,13 @@ function build_coffees_section() {
     const retired_fps = c.fp_codes.filter(f =>  f.retired_at);
     const show_retired_fps = !!state.ui.show_retired_fp[c.id];
 
-    const fp_row = (f, retired) => `
+    const fp_row = (f, retired) => {
+      const versions = assignments_for(f.fp_code);
+      const history = versions.length > 1 ? `<div style="padding:2px 12px 8px;font-size:11px;color:#888;background:#fafaf8">
+          <span style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#aaa">Versions:</span>
+          ${versions.map(v => `<span style="margin-left:6px;${v.effective_end==null?'color:#1a1a1a;font-weight:600':''}">${esc(coffee_name_by_id(v.coffee_id))} <span class="mono" style="color:#999">(${v.effective_start||"start"}→${v.effective_end||"now"})</span></span>`).join(" · ")}
+        </div>` : "";
+      return `
       <div class="fp-row" style="${retired?'opacity:0.6':''}">
         <span class="mono" style="font-size:13px;font-weight:600;color:#1a1a1a">${esc(f.fp_code)}</span>
         <span class="tag" style="background:#f0eee9;color:#1a1a1a;font-size:11px">${esc(f.bag_size)}</span>
@@ -928,7 +991,8 @@ function build_coffees_section() {
                <button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;padding:0 2px" data-delete-fp="${c.id}__${f.id}" title="Delete FP code (permanent)">✕</button>`
           }
         </div>
-      </div>`;
+      </div>${history}`;
+    };
 
     const active_fp_rows  = active_fps.map(f => fp_row(f, false)).join("");
     const retired_fp_rows = retired_fps.map(f => fp_row(f, true)).join("");
