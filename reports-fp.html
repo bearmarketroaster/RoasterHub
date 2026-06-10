@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FP Code History — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    .header { background: #1a1a1a; color: #fff; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
+    .header-logo { font-size: 28px; }
+    .header-title { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+    .header-sub   { font-size: 12px; color: #999; margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
+    .btn-auth { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-auth:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .main { padding: 32px; max-width: 960px; margin: 0 auto; }
+    .search { width: 100%; max-width: 420px; padding: 10px 14px; border: 1px solid #e8e6e1; border-radius: 8px; font-size: 14px; margin-bottom: 28px; background: #fff; }
+    .search:focus { outline: none; border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #666; margin: 0 0 14px; }
+    .section-label .count { color: #999; font-weight: 600; letter-spacing: 0; }
+    .card { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 32px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 11px 14px; background: #f4f2ed; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; }
+    td { padding: 11px 14px; border-top: 1px solid #f0eee9; }
+    .mono { font-family: ui-monospace, monospace; }
+    .code { font-weight: 700; }
+    .muted { color: #999; }
+    .tag { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+    .tag.current { background: #e7f5ec; color: #16a34a; }
+    .tag.ended   { background: #f0eee9; color: #888; }
+    .hist-block { padding: 14px; border-top: 1px solid #f0eee9; }
+    .hist-block:first-child { border-top: none; }
+    .hist-code { font-weight: 700; margin-bottom: 8px; }
+    .hist-code .sz { font-weight: 400; color: #888; font-size: 12px; margin-left: 6px; }
+    .hist-row { display: flex; align-items: center; gap: 12px; padding: 6px 0 6px 14px; font-size: 13px; flex-wrap: wrap; }
+    .hist-row .coffee { font-weight: 600; min-width: 140px; }
+    .hist-row .period { color: #666; font-family: ui-monospace, monospace; font-size: 12px; flex: 1; }
+    .empty { padding: 28px; text-align: center; color: #999; font-style: italic; font-size: 14px; }
+    @media (max-width: 600px) { .header { padding: 16px 20px; } .main { padding: 20px 14px; } th, td { padding: 9px 8px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <button class="header-back" id="go-reports">← Reports</button>
+      <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+      <div class="header-logo">🏷️</div>
+      <div><div class="header-title">FP Code History</div><div class="header-sub">Bear Mrkt</div></div>
+    </div>
+    <button class="btn-auth" id="auth-btn">Log Out</button>
+  </div>
+  <div class="main" id="main"><div class="empty">Loading…</div></div>
+
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const state = { loaded: false, assignments: [], q: "" };
+
+function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+document.getElementById("go-reports").addEventListener("click", () => window.location.href = "reports.html");
+document.getElementById("auth-btn").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut(); window.location.href = "login.html";
+});
+
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { window.location.href = "login.html"; return; }
+  const { data } = await supabaseClient.from("fp_assignments")
+    .select("fp_code, bag_size, effective_start, effective_end, coffees(name)")
+    .order("fp_code");
+  state.assignments = (data || []).map(a => ({
+    fp_code: a.fp_code,
+    bag_size: a.bag_size,
+    effective_start: a.effective_start,
+    effective_end: a.effective_end,
+    coffee_name: a.coffees?.name || "—",
+  }));
+  state.loaded = true;
+  render();
+})();
+
+// Group assignments by fp_code, each sorted chronologically (open start first).
+function grouped() {
+  const by = {};
+  state.assignments.forEach(a => { (by[a.fp_code] ||= []).push(a); });
+  Object.values(by).forEach(vs => vs.sort((x, y) =>
+    (x.effective_start || "0000-00-00").localeCompare(y.effective_start || "0000-00-00")));
+  return by;
+}
+
+function matches(code, versions) {
+  const q = state.q.trim().toLowerCase();
+  if (!q) return true;
+  if (code.toLowerCase().includes(q)) return true;
+  return versions.some(v => v.coffee_name.toLowerCase().includes(q));
+}
+
+function render() {
+  const main = document.getElementById("main");
+  if (!state.loaded) { main.innerHTML = `<div class="empty">Loading…</div>`; return; }
+  main.innerHTML = `
+    <input class="search" id="fp-search" placeholder="Search by FP code or coffee…" value="${esc(state.q)}" />
+    <div id="fp-results"></div>`;
+  const inp = document.getElementById("fp-search");
+  inp.addEventListener("input", () => { state.q = inp.value; render_results(); });
+  render_results();
+  // keep focus + caret while typing
+  if (document.activeElement !== inp && state.q) { inp.focus(); inp.setSelectionRange(state.q.length, state.q.length); }
+}
+
+function render_results() {
+  const el = document.getElementById("fp-results");
+  if (!el) return;
+  const by = grouped();
+  const codes = Object.keys(by).filter(code => matches(code, by[code]));
+
+  // ── Section 1: current assignments (open version per code) ──
+  const current = codes
+    .map(code => ({ code, open: by[code].find(v => v.effective_end == null) }))
+    .filter(r => r.open)
+    .sort((a, b) => a.code.localeCompare(b.code));
+
+  const current_rows = current.map(r => `
+    <tr>
+      <td class="mono code">${esc(r.code)}</td>
+      <td>${esc(r.open.coffee_name)}</td>
+      <td>${esc(r.open.bag_size)}</td>
+      <td class="mono muted">${r.open.effective_start ? esc(r.open.effective_start) : "baseline"}</td>
+    </tr>`).join("");
+
+  const current_html = `
+    <div class="section-label">Current Assignments <span class="count">· ${current.length}</span></div>
+    <div class="card">
+      ${current.length === 0 ? `<div class="empty">No active FP codes match.</div>` : `
+      <table>
+        <thead><tr><th>FP Code</th><th>Coffee</th><th>Size</th><th>Since</th></tr></thead>
+        <tbody>${current_rows}</tbody>
+      </table>`}
+    </div>`;
+
+  // ── Section 2: change history (codes that have been reassigned/retired/restored) ──
+  const changed = codes
+    .filter(code => by[code].length > 1 || by[code].some(v => v.effective_end != null))
+    .map(code => {
+      const vs = by[code];
+      const key = vs.reduce((m, v) => {
+        const d = v.effective_end || v.effective_start || "";
+        return d > m ? d : m;
+      }, "");
+      return { code, vs, key };
+    })
+    .sort((a, b) => b.key.localeCompare(a.key)); // most recent activity first
+
+  const changed_html = changed.map(({ code, vs }) => {
+    const size = (vs.find(v => v.effective_end == null) || vs[vs.length - 1]).bag_size;
+    const rows = vs.map(v => `
+      <div class="hist-row">
+        <span class="coffee">${esc(v.coffee_name)}</span>
+        <span class="period">${v.effective_start ? esc(v.effective_start) : "baseline"} → ${v.effective_end ? esc(v.effective_end) : "now"}</span>
+        <span class="tag ${v.effective_end == null ? "current" : "ended"}">${v.effective_end == null ? "Current" : "Ended"}</span>
+      </div>`).join("");
+    return `
+      <div class="hist-block">
+        <div class="hist-code mono">${esc(code)}<span class="sz">${esc(size)}</span></div>
+        <div>${rows}</div>
+      </div>`;
+  }).join("");
+
+  const history_html = `
+    <div class="section-label">Change History <span class="count">· ${changed.length}</span></div>
+    <div class="card">
+      ${changed.length === 0
+        ? `<div class="empty">No reassignments, retirements, or restores yet — every code is on its original assignment.</div>`
+        : changed_html}
+    </div>`;
+
+  el.innerHTML = current_html + history_html;
+}
+</script>
+</body>
+</html>
