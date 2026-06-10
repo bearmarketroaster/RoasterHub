@@ -122,6 +122,8 @@ const state = {
     coffee_err: "",
     // per-coffee inline new FP row: { [coffee_id]: { fp_code:"", bag_size:"100g", err:"" } }
     new_fp: {},
+    reassign_open: null,          // fp_id whose reassign form is open
+    reassign_form: {},            // { coffee_id, date, err, saving }
     // per-FP-code label-edit working draft + save state:
     // { [fp_code]: { roast_type, region, ..., price, dirty, saving, saved, err } }
     label_edit: {},
@@ -172,13 +174,22 @@ async function close_open_assignment(fp_code, end_date) {
   open.effective_end = end;
 }
 
-// Open a fresh version of a code (add / restore / —reassign in 2b—).
+// Open a fresh version of a code (add / restore / reassign).
 async function open_new_assignment(fp_code, coffee_id, bag_size, start_date) {
   const { data, error } = await supabaseClient.from("fp_assignments")
     .insert({ fp_code, coffee_id, bag_size, effective_start: start_date || null, effective_end: null })
     .select().single();
   if (error) { console.error("open_new_assignment failed:", error); return; }
   if (data) state.fp_assignments.push(data);
+}
+
+// The current/open version of a code, and its label row (labels are per-version).
+function open_assignment_for(fp_code) {
+  return (state.fp_assignments || []).find(a => a.fp_code === fp_code && a.effective_end == null) || null;
+}
+function label_for_fp(fp_code) {
+  const open = open_assignment_for(fp_code);
+  return open ? (state.fp_label_data[open.id] || null) : null;
 }
 
 // ── LOAD ──────────────────────────────────────────────────────────────────────
@@ -203,8 +214,8 @@ async function load_fp_label_data() {
   const { data, error } = await supabaseClient.from("fp_label_data").select("*");
   if (error) { console.error("Failed to load fp_label_data:", error); return; }
   const map = {};
-  (data||[]).forEach(r => { map[r.fp_code] = r; });
-  state.fp_label_data = map;
+  (data||[]).forEach(r => { if (r.assignment_id != null) map[r.assignment_id] = r; });
+  state.fp_label_data = map;   // keyed by assignment_id (the version), not fp_code
 }
 
 async function load_fp_assignments() {
@@ -529,7 +540,7 @@ async function delete_fp_code(coffee_id, fp_id) {
   const { error } = await supabaseClient.from("fp_codes").delete().eq("id",fp_id);
   if (error) { alert("Failed to delete FP code: " + error.message); return; }
   state.fp_assignments = state.fp_assignments.filter(a => a.fp_code !== fp_code_val);
-  delete state.fp_label_data[fp_code_val];
+  Object.keys(state.fp_label_data).forEach(k => { if (state.fp_label_data[k]?.fp_code === fp_code_val) delete state.fp_label_data[k]; });
   if (coffee) coffee.fp_codes = coffee.fp_codes.filter(f=>f.id!==fp_id);
   render();
 }
@@ -620,13 +631,57 @@ async function restore_fp_code(coffee_id, fp_id) {
   render();
 }
 
+// Reassign a code to a different coffee from an effective date forward (BC reuse).
+// Closes the open version at the date and opens a new one — so historical records
+// before the date keep resolving to the old coffee. The new version starts with a
+// blank label (its own story); the old version's label row is left untouched.
+async function reassign_fp(coffee_id_current, fp_id) {
+  const coffee = state.coffees.find(c => c.id === coffee_id_current);
+  const fp = coffee?.fp_codes.find(f => f.id === fp_id);
+  if (!fp) return;
+  const form = state.ui.reassign_form || {};
+  const new_coffee_id = Number(form.coffee_id);
+  const eff = form.date || today();
+  if (!new_coffee_id)                      { state.ui.reassign_form = { ...form, err: "Pick a coffee." }; render(); return; }
+  if (new_coffee_id === coffee_id_current) { state.ui.reassign_form = { ...form, err: "That's the same coffee." }; render(); return; }
+  const open = open_assignment_for(fp.fp_code);
+  if (open && open.effective_start && eff < open.effective_start) {
+    state.ui.reassign_form = { ...form, err: `Date must be on or after ${open.effective_start}.` }; render(); return;
+  }
+  const new_coffee = state.coffees.find(c => c.id === new_coffee_id);
+  if (!confirm(`Reassign ${fp.fp_code} (${fp.bag_size}) from "${coffee.name}" to "${new_coffee?.name}" effective ${eff}?\n\nRecords before ${eff} stay as "${coffee.name}". The new version starts with a blank label.`)) return;
+
+  state.ui.reassign_form = { ...form, saving: true, err: "" }; render();
+  // Order matters for the one-open invariant: close the current version first…
+  await close_open_assignment(fp.fp_code, eff);
+  // …then open the new one.
+  await open_new_assignment(fp.fp_code, new_coffee_id, fp.bag_size, eff);
+  // Point the current-view cache at the new coffee.
+  const { error } = await supabaseClient.from("fp_codes").update({ coffee_id: new_coffee_id }).eq("id", fp_id);
+  if (error) { state.ui.reassign_form = { ...form, saving: false, err: error.message }; render(); return; }
+  // Move the FP row under the new coffee in local state.
+  coffee.fp_codes = coffee.fp_codes.filter(f => f.id !== fp_id);
+  fp.coffee_id = new_coffee_id;
+  if (new_coffee) { new_coffee.fp_codes.push(fp); new_coffee.fp_codes.sort((a,b)=>a.fp_code.localeCompare(b.fp_code)); }
+  state.ui.reassign_open = null;
+  state.ui.reassign_form = {};
+  if (state.ui.open_coffee === coffee_id_current) state.ui.open_coffee = new_coffee_id;
+  render();
+}
+
 async function save_fp_label_data(fp_code) {
   const draft = state.ui.label_edit[fp_code];
   if (!draft) return;
+  const open = open_assignment_for(fp_code);
+  if (!open) {
+    state.ui.label_edit[fp_code] = { ...draft, saving: false, err: "No active version for this code." };
+    render(); return;
+  }
   // Mark saving
   state.ui.label_edit[fp_code] = { ...draft, saving: true, err: "" };
   render();
   const payload = {
+    assignment_id: open.id,     // label belongs to the current version
     fp_code,
     roast_type: draft.roast_type || null,
     region:     draft.region     || null,
@@ -640,7 +695,7 @@ async function save_fp_label_data(fp_code) {
   };
   const { data, error } = await supabaseClient
     .from("fp_label_data")
-    .upsert(payload, { onConflict: "fp_code" })
+    .upsert(payload, { onConflict: "assignment_id" })
     .select()
     .single();
   if (error) {
@@ -648,7 +703,7 @@ async function save_fp_label_data(fp_code) {
     render();
     return;
   }
-  state.fp_label_data[fp_code] = data;
+  state.fp_label_data[open.id] = data;
   // Clear the working draft — display will fall back to saved state
   delete state.ui.label_edit[fp_code];
   // Show a brief "Saved" hint
@@ -980,6 +1035,27 @@ function build_coffees_section() {
           <span style="font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#aaa">Versions:</span>
           ${versions.map(v => `<span style="margin-left:6px;${v.effective_end==null?'color:#1a1a1a;font-weight:600':''}">${esc(coffee_name_by_id(v.coffee_id))} <span class="mono" style="color:#999">(${v.effective_start||"start"}→${v.effective_end||"now"})</span></span>`).join(" · ")}
         </div>` : "";
+      const ra_open = !retired && state.ui.reassign_open === f.id;
+      const ra = state.ui.reassign_form || {};
+      const coffee_opts = state.coffees.filter(x => !x.retired_at && x.id !== c.id)
+        .map(x => `<option value="${x.id}" ${String(ra.coffee_id)===String(x.id)?"selected":""}>${esc(x.name)}</option>`).join("");
+      const reassign_block = ra_open ? `
+        <div style="padding:8px 12px;background:#fbf7ef;border-top:1px solid #f0eee9">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#a07b1f;margin-bottom:6px">Reassign ${esc(f.fp_code)} to a different coffee</div>
+          <div style="display:grid;grid-template-columns:1.6fr 1fr auto auto;gap:8px;align-items:flex-end">
+            <div>
+              <label class="lbl">New coffee</label>
+              <select class="reassign-coffee" style="font-size:13px"><option value="">— pick —</option>${coffee_opts}</select>
+            </div>
+            <div>
+              <label class="lbl">Effective date</label>
+              <input type="date" class="reassign-date" value="${esc(ra.date||today())}" style="font-size:13px" />
+            </div>
+            <button class="btn btn-amber btn-sm" data-reassign-confirm="${c.id}__${f.id}" ${ra.saving?"disabled":""} style="margin-top:18px">${ra.saving?"Saving…":"Confirm"}</button>
+            <button class="btn btn-ghost btn-sm" data-reassign-cancel="1" style="margin-top:18px">Cancel</button>
+          </div>
+          ${ra.err?`<p class="inline-err">${esc(ra.err)}</p>`:""}
+        </div>` : "";
       return `
       <div class="fp-row" style="${retired?'opacity:0.6':''}">
         <span class="mono" style="font-size:13px;font-weight:600;color:#1a1a1a">${esc(f.fp_code)}</span>
@@ -987,11 +1063,12 @@ function build_coffees_section() {
         <div style="display:flex;gap:4px">
           ${retired
             ? `<button class="btn btn-ghost btn-sm" data-restore-fp="${c.id}__${f.id}" title="Restore FP code">♻️ Restore</button>`
-            : `<button style="background:none;border:none;color:#666;cursor:pointer;font-size:13px;padding:0 4px" data-retire-fp="${c.id}__${f.id}" title="Retire FP code">🗄️</button>
+            : `<button style="background:none;border:none;color:#666;cursor:pointer;font-size:14px;padding:0 4px" data-reassign-toggle="${f.id}" title="Reassign to another coffee">⇄</button>
+               <button style="background:none;border:none;color:#666;cursor:pointer;font-size:13px;padding:0 4px" data-retire-fp="${c.id}__${f.id}" title="Retire FP code">🗄️</button>
                <button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;line-height:1;padding:0 2px" data-delete-fp="${c.id}__${f.id}" title="Delete FP code (permanent)">✕</button>`
           }
         </div>
-      </div>${history}`;
+      </div>${reassign_block}${history}`;
     };
 
     const active_fp_rows  = active_fps.map(f => fp_row(f, false)).join("");
@@ -1118,7 +1195,7 @@ function build_label_data_section() {
         .forEach(f => rows.push({ coffee: c, fp: f }));
     });
 
-  const filled_count = rows.filter(r => state.fp_label_data[r.fp.fp_code]).length;
+  const filled_count = rows.filter(r => label_for_fp(r.fp.fp_code)).length;
 
   // Group rows by coffee for readability
   const by_coffee = {};
@@ -1128,7 +1205,7 @@ function build_label_data_section() {
   });
 
   const get_draft = (fp_code) => {
-    const saved = state.fp_label_data[fp_code] || {};
+    const saved = label_for_fp(fp_code) || {};
     const draft = state.ui.label_edit[fp_code];
     // If there's a working draft with dirty=true, use it; otherwise show saved
     if (draft && draft.dirty) return draft;
@@ -1138,13 +1215,13 @@ function build_label_data_section() {
   const groups_html = Object.values(by_coffee).map(g => {
     const fps_html = g.fps.map(f => {
       const d = get_draft(f.fp_code);
-      const saved = state.fp_label_data[f.fp_code];
+      const saved = label_for_fp(f.fp_code);
       const ui_state = state.ui.label_edit[f.fp_code] || {};
       const is_dirty = ui_state.dirty;
       const is_saving = ui_state.saving;
       const flash_active = ui_state.saved_flash_until && Date.now() < ui_state.saved_flash_until;
       // Build copy-from options: siblings of this FP (same coffee, different fp_code, has saved data)
-      const siblings = g.fps.filter(s => s.fp_code !== f.fp_code && state.fp_label_data[s.fp_code]);
+      const siblings = g.fps.filter(s => s.fp_code !== f.fp_code && label_for_fp(s.fp_code));
       const copy_options = siblings.map(s => `<option value="${esc(s.fp_code)}">${esc(s.fp_code)} (${esc(s.bag_size)})</option>`).join("");
       return `
         <div class="label-fp-card" data-fp-card="${esc(f.fp_code)}">
@@ -1407,6 +1484,26 @@ function attach_listeners() {
     const [cid, fid] = btn.dataset.restoreFp.split("__").map(Number);
     restore_fp_code(cid, fid);
   }));
+  // ── Reassign (BC reuse)
+  app.querySelectorAll("[data-reassign-toggle]").forEach(btn => btn.addEventListener("click", () => {
+    const fid = Number(btn.dataset.reassignToggle);
+    state.ui.reassign_open = state.ui.reassign_open === fid ? null : fid;
+    state.ui.reassign_form = { coffee_id: "", date: today(), err: "", saving: false };
+    render();
+  }));
+  app.querySelectorAll(".reassign-coffee").forEach(sel => sel.addEventListener("change", () => {
+    state.ui.reassign_form = { ...state.ui.reassign_form, coffee_id: sel.value };
+  }));
+  app.querySelectorAll(".reassign-date").forEach(inp => inp.addEventListener("change", () => {
+    state.ui.reassign_form = { ...state.ui.reassign_form, date: inp.value };
+  }));
+  app.querySelectorAll("[data-reassign-confirm]").forEach(btn => btn.addEventListener("click", () => {
+    const [cid, fid] = btn.dataset.reassignConfirm.split("__").map(Number);
+    reassign_fp(cid, fid);
+  }));
+  app.querySelectorAll("[data-reassign-cancel]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.reassign_open = null; state.ui.reassign_form = {}; render();
+  }));
   // Coffee filter tabs (active / retired)
   app.querySelectorAll("[data-coffee-filter]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.coffee_filter = btn.dataset.coffeeFilter;
@@ -1424,7 +1521,7 @@ function attach_listeners() {
   app.querySelectorAll(".label-input").forEach(inp => inp.addEventListener("input", e => {
     const fp = inp.dataset.fp;
     const field = inp.dataset.field;
-    const existing = state.ui.label_edit[fp] || { ...(state.fp_label_data[fp] || {}) };
+    const existing = state.ui.label_edit[fp] || { ...(label_for_fp(fp) || {}) };
     state.ui.label_edit[fp] = { ...existing, [field]: e.target.value, dirty: true };
     // Toggle the Save button's appearance without a full re-render
     const card = document.querySelector(`[data-fp-card="${fp.replace(/"/g, '\\"')}"]`);
@@ -1444,9 +1541,9 @@ function attach_listeners() {
     const target_fp = sel.dataset.fp;
     const source_fp = e.target.value;
     if (!source_fp) return;
-    const source = state.fp_label_data[source_fp];
+    const source = label_for_fp(source_fp);
     if (!source) return;
-    const existing = state.ui.label_edit[target_fp] || { ...(state.fp_label_data[target_fp] || {}) };
+    const existing = state.ui.label_edit[target_fp] || { ...(label_for_fp(target_fp) || {}) };
     // Copy shared fields, leave price alone
     state.ui.label_edit[target_fp] = {
       ...existing,

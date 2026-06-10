@@ -384,12 +384,13 @@
         render_grid();
       }));
 
-      const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }, { data: fp_label_data }] = await Promise.all([
+      const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }, { data: fp_label_data }, { data: fp_assignments }] = await Promise.all([
         supabaseClient.from("buckets").select("id, name, retired_at").order("created_at", { ascending: false }),
         supabaseClient.from("containers").select("id, name, retired_at").order("id"),
         supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
         supabaseClient.from("shop_mappings").select("master_name, shop_qr_id").order("master_name"),
         supabaseClient.from("fp_label_data").select("*"),
+        supabaseClient.from("fp_assignments").select("fp_code, effective_end").order("fp_code"),
       ]);
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
       state.containers = (containers||[]).filter(c => !c.retired_at);
@@ -399,8 +400,16 @@
         .filter(f => !f.retired_at)
         .filter(f => !f.coffees?.retired_at)
         .map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
+      // Labels are per-version. A fresh print uses the OPEN version's label, so map
+      // each fp_code to the label row whose assignment is the current/open one.
+      const open_aid_by_fp = {};
+      (fp_assignments||[]).forEach(a => { if (a.effective_end == null) open_aid_by_fp[a.fp_code] = a.id; });
       state.fp_label_data = {};
-      (fp_label_data||[]).forEach(r => { state.fp_label_data[r.fp_code] = r; });
+      (fp_label_data||[]).forEach(r => {
+        if (r.assignment_id != null && r.assignment_id === open_aid_by_fp[r.fp_code]) {
+          state.fp_label_data[r.fp_code] = r;
+        }
+      });
       const shop_seen = new Set();
       state.shops = (shop_mappings||[]).filter(s => {
         if (!s.shop_qr_id || shop_seen.has(s.master_name)) return false;
