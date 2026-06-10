@@ -108,7 +108,7 @@ const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },
 
 const state = {
   tab: 0, containers: [], roast_sessions: [], dispatches: [],
-  coffees: [], fp_codes: [], shop_mappings: [], buckets: [],
+  coffees: [], fp_codes: [], fp_assignments: [], shop_mappings: [], buckets: [],
   active_coffees: [],  // names of coffees not retired — used for NEW input only (dropdowns, autocomplete)
   active_fp_codes: [], // FP codes not retired AND whose parent coffee is not retired — same purpose
   user_role: null,
@@ -123,6 +123,24 @@ const state = {
 };
 
 function today() { return new Date().toISOString().split("T")[0]; }
+
+// Resolve an FP code to its coffee AS-OF a given date (default today).
+// Dates are 'YYYY-MM-DD' strings — ISO order == chronological order.
+// Boundaries: start inclusive, end exclusive (the day a new version starts
+// belongs to the new version). Returns the assignment row, or null if no
+// version covers that date (e.g. a code that is retired as of that date).
+function resolveFp(code, asOf) {
+  const d = asOf || today();
+  const matches = (state.fp_assignments || []).filter(a =>
+    a.fp_code === code &&
+    (a.effective_start == null || a.effective_start <= d) &&
+    (a.effective_end == null || d < a.effective_end)
+  );
+  if (!matches.length) return null;
+  // If more than one somehow matches, prefer the most specific (latest start).
+  matches.sort((x, y) => (x.effective_start || "").localeCompare(y.effective_start || ""));
+  return matches[matches.length - 1];
+}
 function active_fill(c) { return { coffee: c.coffee, remaining: c.remaining||0, fill_number: 1, date: c.roast_sessions?.[0]?.date||"" }; }
 
 // ── HTML5 QR scanner integration ──
@@ -225,6 +243,20 @@ async function load_data() {
   state.active_fp_codes = (fp_codes_data||[])
     .filter(f => !f.retired_at && !f.coffees?.retired_at)
     .map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
+
+  // Time-versioned FP -> coffee assignments (source of truth for as-of resolution).
+  // Seeds are open-ended, so today() resolves to the current coffee — identical to
+  // the old behaviour until a real reuse introduces a version boundary.
+  const { data: fp_assign_data } = await supabaseClient.from("fp_assignments")
+    .select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)");
+  state.fp_assignments = (fp_assign_data||[]).map(a => ({
+    fp_code: a.fp_code,
+    coffee_id: a.coffee_id,
+    bag_size: a.bag_size,
+    coffee_name: a.coffees?.name || "",
+    effective_start: a.effective_start,   // null = open start
+    effective_end: a.effective_end,       // null = open/current
+  }));
   const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind");
   state.shop_mappings = shop_mappings_data || [];
 
@@ -1131,14 +1163,20 @@ function process_scan(raw_value) {
     return;
   }
 
+  // Match on the coffee this FP code resolves to AS-OF today (the live date),
+  // not on the raw fp_codes row. Today lands on the open version, so this is
+  // identical to current behaviour until a real reuse creates a boundary —
+  // at which point the packer correctly gets the coffee the code means *now*.
+  const packCoffee = (resolveFp(value, today()) || fp).coffee_name;
+
   // FIFO: find the oldest active container for this coffee with stock available for this bag size
   const bag_kg = BAG_SIZE_KG[fp.bag_size] || 0;
   const candidates = state.containers
-    .filter(c => c.status === "active" && c.coffee === fp.coffee_name && c.remaining > 0)
+    .filter(c => c.status === "active" && c.coffee === packCoffee && c.remaining > 0)
     .sort((a,b) => (a.latest_roast_date || "").localeCompare(b.latest_roast_date || ""));  // oldest first
 
   if (candidates.length === 0) {
-    flash_scan(`No active ${fp.coffee_name} container — activate one first`, "error");
+    flash_scan(`No active ${packCoffee} container — activate one first`, "error");
     return;
   }
 
@@ -1166,7 +1204,7 @@ function process_scan(raw_value) {
   }
 
   if (!chosen) {
-    flash_scan(`Not enough ${fp.coffee_name} left in active containers`, "error");
+    flash_scan(`Not enough ${packCoffee} left in active containers`, "error");
     return;
   }
 
@@ -1181,7 +1219,7 @@ function process_scan(raw_value) {
     packing_state.scanned_items[value].lines.push({ container_id: chosen.id, fill_id: chosen.fill_id, count: 1 });
   }
 
-  flash_scan(`✓ ${fp.coffee_name} ${fp.bag_size} (from ${chosen.id})`, "success");
+  flash_scan(`✓ ${packCoffee} ${fp.bag_size} (from ${chosen.id})`, "success");
   update_scan_panel();
 }
 
