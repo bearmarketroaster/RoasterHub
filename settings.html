@@ -753,6 +753,10 @@ function test_qr(raw) {
     else res = { ok: !b.retired_at, kind:"Bucket", title: b.name || b.id,
       lines:[ `ID: ${b.id}`, b.name ? `Name: ${b.name}` : null, `Status: ${b.status || "—"}`, b.retired_at ? "⚠️ RETIRED — should not be in circulation" : null ].filter(Boolean),
       reprint: b.retired_at ? null : "bucket" };
+  } else if (up.startsWith("SHOP-")) {
+    const s = state.shop_mappings.find(m => (m.shop_qr_id || "").toUpperCase() === up);
+    if (!s) res = { ok:false, kind:"Shop QR", title: token, lines:["Reads fine, but this shop code isn't registered — it may have been regenerated. Create a fresh QR for the shop."] };
+    else res = { ok:true, kind:"Shop", title: s.master_name, lines:[ `Shop: ${s.master_name}`, `Code: ${s.shop_qr_id}`, s.kind ? `Type: ${s.kind}` : null ].filter(Boolean), reprint_shop: s.shop_qr_id };
   } else {
     let fpHit = null;
     for (const c of state.coffees) {
@@ -786,6 +790,7 @@ function build_qr_tester_section() {
     const bg = r.ok ? "#f0faf3" : "#fff8f8";
     const reprint = r.reprint === "fp"     ? `<a href="print-qr.html?type=fp" target="_blank" class="btn btn-amber btn-sm" style="text-decoration:none;margin-top:10px;display:inline-block">🖨️ Reprint bag labels</a>`
                   : r.reprint === "bucket" ? `<a href="print-qr.html" target="_blank" class="btn btn-amber btn-sm" style="text-decoration:none;margin-top:10px;display:inline-block">🖨️ Reprint bucket QRs</a>`
+                  : r.reprint_shop          ? `<a href="print-qr.html?type=shop&ids=${encodeURIComponent(r.reprint_shop)}" target="_blank" class="btn btn-amber btn-sm" style="text-decoration:none;margin-top:10px;display:inline-block">🖨️ Reprint shop QR</a>`
                   : "";
     result_html = `<div class="card" style="border:1px solid ${color}55;background:${bg};margin-top:10px">
       <div style="font-weight:700;font-size:13px;color:${color};margin-bottom:6px">${r.ok ? "✓" : "✗"} ${esc(r.kind)} — ${esc(r.title)}</div>
@@ -796,7 +801,7 @@ function build_qr_tester_section() {
   return `
     <div class="section-label" style="margin-top:16px">QR Code Tester</div>
     <div class="card">
-      <p class="hint mb-12">Scan a label (or type its code) to check what it is — handy for damaged or half-torn labels, to confirm it still reads and identify what to reprint. Recognises bag-label codes (FPxxxx), bucket QRs (BKT-xxxx) and container IDs.</p>
+      <p class="hint mb-12">Scan a label (or type its code) to check what it is — handy for damaged or half-torn labels, to confirm it still reads and identify what to reprint. Recognises bag-label codes (FPxxxx), bucket QRs (BKT-xxxx), shop QRs (SHOP-…) and container IDs.</p>
       <div style="display:flex;gap:8px">
         <input id="qr-test-input" type="text" placeholder="Scan or type a code…" autocomplete="off" style="flex:1;font-size:14px;padding:10px 12px" />
         <button class="btn btn-dark btn-sm" id="qr-test-btn">Test</button>
