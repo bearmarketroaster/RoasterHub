@@ -142,6 +142,7 @@ const state = {
     bucket_filter: "active",
     bucket_err: "",
     bucket_msg: "",
+    qr_test_result: null,
     new_container_id: "",
     new_container_name: "",
     new_container_empty: "",
@@ -737,6 +738,73 @@ async function save_fp_label_data(fp_code) {
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
 // ── BUCKETS SECTION ──────────────────────────────────────────────────────────
+function test_qr(raw) {
+  const value = (raw || "").trim();
+  if (!value) { state.ui.qr_test_result = null; render(); return; }
+  // Some QRs encode a URL (e.g. a container scan link) — take the last path segment if so.
+  let token = value;
+  if (token.includes("/")) token = (token.split(/[\/?#]/).filter(Boolean).pop()) || token;
+  const up = token.toUpperCase();
+  let res;
+
+  if (up.startsWith("BKT-")) {
+    const b = state.buckets.find(x => (x.id || "").toUpperCase() === up);
+    if (!b) res = { ok:false, kind:"Bucket QR", title: token, lines:["Reads fine, but this bucket isn't registered in the system."] };
+    else res = { ok: !b.retired_at, kind:"Bucket", title: b.name || b.id,
+      lines:[ `ID: ${b.id}`, b.name ? `Name: ${b.name}` : null, `Status: ${b.status || "—"}`, b.retired_at ? "⚠️ RETIRED — should not be in circulation" : null ].filter(Boolean),
+      reprint: b.retired_at ? null : "bucket" };
+  } else {
+    let fpHit = null;
+    for (const c of state.coffees) {
+      const f = (c.fp_codes || []).find(x => (x.fp_code || "").toUpperCase() === up);
+      if (f) { fpHit = { coffee: c.name, bag_size: f.bag_size, retired: !!(f.retired_at || c.retired_at) }; break; }
+    }
+    if (fpHit) {
+      const open = open_assignment_for(token) || open_assignment_for(up);
+      const open_coffee = open ? (state.coffees.find(c => c.id === open.coffee_id)?.name) : null;
+      const lines = [ `Coffee: ${fpHit.coffee}`, `Bag size: ${fpHit.bag_size || "—"}` ];
+      if (open_coffee && open_coffee !== fpHit.coffee) lines.push(`Current assignment: ${open_coffee}`);
+      if (fpHit.retired) lines.push("⚠️ RETIRED — should not be in circulation");
+      res = { ok: !fpHit.retired, kind:"Bag label (FP code)", title: up, lines, reprint: fpHit.retired ? null : "fp" };
+    } else {
+      const cont = state.containers.find(x => (x.id || "").toUpperCase() === up);
+      if (cont) res = { ok: !cont.retired_at, kind:"Container", title: cont.name || cont.id,
+        lines:[ `ID: ${cont.id}`, cont.name ? `Name: ${cont.name}` : null, `Status: ${cont.status || "—"}`, cont.retired_at ? "⚠️ RETIRED" : null ].filter(Boolean) };
+      else res = { ok:false, kind:"Unrecognised", title: token, lines:["Doesn't match any bag-label code, bucket, or container. If the label is torn, enough of the code may be missing to identify it — try scanning a cleaner part."] };
+    }
+  }
+  state.ui.qr_test_result = res;
+  render();
+  setTimeout(() => document.getElementById("qr-test-input")?.focus(), 50);
+}
+
+function build_qr_tester_section() {
+  const r = state.ui.qr_test_result;
+  let result_html = "";
+  if (r) {
+    const color = r.ok ? "#16a34a" : "#dc2626";
+    const bg = r.ok ? "#f0faf3" : "#fff8f8";
+    const reprint = r.reprint === "fp"     ? `<a href="print-qr.html?type=fp" target="_blank" class="btn btn-amber btn-sm" style="text-decoration:none;margin-top:10px;display:inline-block">🖨️ Reprint bag labels</a>`
+                  : r.reprint === "bucket" ? `<a href="print-qr.html" target="_blank" class="btn btn-amber btn-sm" style="text-decoration:none;margin-top:10px;display:inline-block">🖨️ Reprint bucket QRs</a>`
+                  : "";
+    result_html = `<div class="card" style="border:1px solid ${color}55;background:${bg};margin-top:10px">
+      <div style="font-weight:700;font-size:13px;color:${color};margin-bottom:6px">${r.ok ? "✓" : "✗"} ${esc(r.kind)} — ${esc(r.title)}</div>
+      ${r.lines.map(l => `<div style="font-size:13px;color:#444;margin-bottom:2px">${esc(l)}</div>`).join("")}
+      ${reprint}
+    </div>`;
+  }
+  return `
+    <div class="section-label" style="margin-top:16px">QR Code Tester</div>
+    <div class="card">
+      <p class="hint mb-12">Scan a label (or type its code) to check what it is — handy for damaged or half-torn labels, to confirm it still reads and identify what to reprint. Recognises bag-label codes (FPxxxx), bucket QRs (BKT-xxxx) and container IDs.</p>
+      <div style="display:flex;gap:8px">
+        <input id="qr-test-input" type="text" placeholder="Scan or type a code…" autocomplete="off" style="flex:1;font-size:14px;padding:10px 12px" />
+        <button class="btn btn-dark btn-sm" id="qr-test-btn">Test</button>
+      </div>
+      ${result_html}
+    </div>`;
+}
+
 function build_buckets_section() {
   const open = state.open_section === "buckets";
   const { bucket_count, bucket_prefix, bucket_filter, bucket_err, bucket_msg } = state.ui;
@@ -1039,7 +1107,7 @@ function build_app() {
       `).join("")}
     </div>`;
   const sections =
-      active === "operations" ? `${build_shops_section()}${build_containers_section()}${build_buckets_section()}`
+      active === "operations" ? `${build_shops_section()}${build_containers_section()}${build_buckets_section()}${build_qr_tester_section()}`
     : active === "people"     ? `${build_users_section()}`
     :                           `${build_coffees_section()}${build_label_data_section()}`;
   return header + `
@@ -1628,6 +1696,8 @@ function attach_listeners() {
     const p = document.getElementById("bucket-prefix")?.value;
     generate_buckets(n, p);
   });
+  app.querySelector("#qr-test-btn")?.addEventListener("click", () => { test_qr(document.getElementById("qr-test-input")?.value); });
+  app.querySelector("#qr-test-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); test_qr(e.target.value); } });
   app.querySelectorAll("[data-bucket-filter]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.bucket_filter = btn.dataset.bucketFilter;
     render();
