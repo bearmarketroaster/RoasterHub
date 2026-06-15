@@ -390,7 +390,7 @@
         supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
         supabaseClient.from("shop_mappings").select("master_name, shop_qr_id").order("master_name"),
         supabaseClient.from("fp_label_data").select("*"),
-        supabaseClient.from("fp_assignments").select("fp_code, effective_end").order("fp_code"),
+        supabaseClient.from("fp_assignments").select("id, fp_code, effective_end").order("fp_code"),
       ]);
       state.buckets = (buckets||[]).filter(b => !b.retired_at);
       state.containers = (containers||[]).filter(c => !c.retired_at);
