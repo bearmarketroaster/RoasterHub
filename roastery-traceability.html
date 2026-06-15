@@ -440,12 +440,14 @@ const fill_state = {
   err: "",
   scanner_msg: "",
   scanner_msg_type: "info",
+  scan_mode: "scanner", // "scanner" (HID/manual) | "camera" — defaults to scanner
 };
 
 function reset_fill_state() {
   fill_state.filled = [];
   fill_state.err = "";
   fill_state.scanner_msg = "";
+  fill_state.scan_mode = "scanner";
 }
 
 function process_fill_scan(raw_value) {
@@ -554,10 +556,21 @@ function build_fill_buckets_overlay() {
       <div class="hint" style="font-size:13px;margin-top:4px">From ${esc(container.id)} · ${esc(container.coffee||"?")} · ${container.remaining.toFixed(1)}kg available</div>
     </div>
 
+    <div style="display:flex;gap:6px;margin-bottom:10px;background:#f4f2ed;padding:4px;border-radius:8px">
+      <button class="btn ${fill_state.scan_mode==="scanner"?"btn-dark":"btn-ghost"} btn-sm" data-fill-scan-mode="scanner" style="flex:1;${fill_state.scan_mode==="scanner"?"color:#fff":""}">⌨️ Scanner / Manual</button>
+      <button class="btn ${fill_state.scan_mode==="camera"?"btn-dark":"btn-ghost"} btn-sm" data-fill-scan-mode="camera" style="flex:1;${fill_state.scan_mode==="camera"?"color:#fff":""}">📷 Camera</button>
+    </div>
+
+    ${fill_state.scan_mode === "camera" ? `
     <div style="position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
       <div id="fill-flash" style="${flash_style}">${esc(fill_state.scanner_msg||"")}</div>
       <div id="fill-qr-scanner" style="width:100%;min-height:240px"></div>
-    </div>
+    </div>` : `
+    <div style="position:relative;background:#f4f2ed;border-radius:12px;padding:18px;margin-bottom:14px;text-align:center;color:#666;font-size:13px;border:1px dashed #d4d1ca">
+      <div id="fill-flash" style="${flash_style}">${esc(fill_state.scanner_msg||"")}</div>
+      <div style="font-size:22px;margin-bottom:4px">⌨️</div>
+      Scan with your barcode scanner or type a bucket ID below, then press Enter.
+    </div>`}
 
     <div style="position:relative;margin-bottom:14px">
       <div style="display:flex;gap:8px">
@@ -568,7 +581,7 @@ function build_fill_buckets_overlay() {
     </div>
 
     <div id="fill-panel" style="background:#f4f2ed;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
-      <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets filled yet — scan empty bucket QRs</p>
+      <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets filled yet — ${fill_state.scan_mode==="camera"?"scan empty bucket QRs":"scan or type a bucket ID to begin"}</p>
     </div>
 
     ${fill_state.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(fill_state.err)}</p>`:""}
@@ -1669,9 +1682,21 @@ function attach_listeners() {
     stop_fill_scanner();
     save_filled_buckets();
   });
-  // Start fill scanner when overlay is shown
-  if (state.ui.fill_bucket_container) {
+  // Scan-mode toggle (Scanner/Manual ↔ Camera) — mirrors the dispatch packing flow
+  app.querySelectorAll("[data-fill-scan-mode]").forEach(btn => btn.addEventListener("click", () => {
+    const new_mode = btn.dataset.fillScanMode;
+    if (new_mode === fill_state.scan_mode) return;
+    fill_state.scan_mode = new_mode;
+    if (new_mode !== "camera") stop_fill_scanner();
+    render();
+  }));
+  // Start the camera only when the overlay is open AND camera mode is selected.
+  // In Scanner/Manual mode keep the camera off and focus the input so an HID scanner fires straight in.
+  if (state.ui.fill_bucket_container && fill_state.scan_mode === "camera") {
     setTimeout(() => { start_fill_scanner(); update_fill_panel(); }, 100);
+  } else if (state.ui.fill_bucket_container) {
+    stop_fill_scanner();
+    setTimeout(() => { update_fill_panel(); document.getElementById("fill-manual-input")?.focus(); }, 50);
   } else {
     stop_fill_scanner();
   }
