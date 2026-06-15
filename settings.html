@@ -741,9 +741,12 @@ async function save_fp_label_data(fp_code) {
 function test_qr(raw) {
   const value = (raw || "").trim();
   if (!value) { state.ui.qr_test_result = null; render(); return; }
-  // Some QRs encode a URL (e.g. a container scan link) — take the last path segment if so.
+  // Shop QRs encode a URL like …/delivery-confirm.html?scan=SHOP-xxx — pull the scan param first;
+  // otherwise take the last path segment for any other URL-style QR.
   let token = value;
-  if (token.includes("/")) token = (token.split(/[\/?#]/).filter(Boolean).pop()) || token;
+  const scan_param = value.match(/[?&]scan=([^&#]+)/i);
+  if (scan_param) token = decodeURIComponent(scan_param[1]);
+  else if (token.includes("/")) token = (token.split(/[\/?#]/).filter(Boolean).pop()) || token;
   const up = token.toUpperCase();
   let res;
 
