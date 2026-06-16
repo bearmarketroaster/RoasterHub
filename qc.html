@@ -124,7 +124,7 @@ async function load() {
   // In-stock greens: positive current_kg only, sorted by most recent delivery first
   state.in_stock_greens = (stock_items || [])
     .filter(s => (Number(s.current_kg) || 0) > 0.05)
-    .map(s => ({ coffee: s.coffee, remaining: Number(s.current_kg), latest_in: latest_delivery[s.coffee] || null }))
+    .map(s => ({ coffee: s.coffee, coffee_id: s.coffee_id, remaining: Number(s.current_kg), latest_in: latest_delivery[s.coffee] || null }))
     .sort((a, b) => (b.latest_in || "").localeCompare(a.latest_in || ""));
 
   // Load all QC entries
@@ -151,6 +151,7 @@ async function save_green_qc() {
   const { data: { user } } = await supabaseClient.auth.getUser();
   const payload = {
     coffee: f.coffee,
+    coffee_id: (state.in_stock_greens.find(g => g.coffee === f.coffee)?.coffee_id) ?? null,
     measured_at: f.measured_at,
     density_1: f.density_1 === "" ? null : Number(f.density_1),
     moisture_1: f.moisture_1 === "" ? null : Number(f.moisture_1),

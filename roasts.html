@@ -126,6 +126,7 @@ function yield_class(pct) { if (pct===null) return "hint"; if (pct>=80&&pct<=90)
 async function load_data() {
   const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
   state.coffees = (coffees_data || []).map(c => c.name);
+  state.coffee_id_by_name = Object.fromEntries((coffees_data || []).map(c => [c.name, c.id]));
 
   // Load containers list (non-retired) so the user can pick from a dropdown
   const { data: containers_data } = await supabaseClient.from("containers").select("id, name, status, retired_at, empty_kg").order("id");
@@ -151,9 +152,10 @@ async function save_session() {
   // roasted into the same container on the same day get distinct fill_ids (rare in normal ops, but
   // possible — and the rest of the system uses fill_id as the join key for buckets/dispatches/stock).
   const coffee_slug = (s.coffee || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const coffee_id = state.coffee_id_by_name?.[s.coffee] ?? null;
   const fill_id = container_id ? `${container_id}-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}` : null;
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
-    id, coffee: s.coffee, date: s.date, container_id,
+    id, coffee: s.coffee, coffee_id, date: s.date, container_id,
     roasted_weight: Number(s.roasted_weight), fill_id,
     roaster_id: user?.id || null,
     is_test: !!s.is_test,
@@ -168,12 +170,12 @@ async function save_session() {
 
   if (total_green > 0) {
     await supabaseClient.from("stock_adjustments").insert({
-      id: `ADJ-${id}`, date: s.date, coffee: s.coffee, change_kg: -total_green,
+      id: `ADJ-${id}`, date: s.date, coffee: s.coffee, coffee_id, change_kg: -total_green,
       reason: s.is_test ? "sample" : "roast",
       note: s.is_test ? `Auto-deducted from test roast ${id}` : `Auto-deducted from roast session ${id}`,
       auto: true, roast_session_id: id,
     });
-    const { data: stock_item } = await supabaseClient.from("stock_items").select("id, current_kg").eq("coffee", s.coffee).maybeSingle();
+    const { data: stock_item } = await supabaseClient.from("stock_items").select("id, current_kg").eq("coffee_id", coffee_id).maybeSingle();
     if (stock_item) {
       await supabaseClient.from("stock_items").update({ current_kg: Math.max(0, stock_item.current_kg - total_green) }).eq("id", stock_item.id);
     }
@@ -476,7 +478,7 @@ function attach_listeners() {
     // Validate green stock availability
     const total_green = state.session.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
     if (total_green > 0) {
-      const { data: stock_item } = await supabaseClient.from("stock_items").select("current_kg").eq("coffee", state.session.coffee).maybeSingle();
+      const { data: stock_item } = await supabaseClient.from("stock_items").select("current_kg").eq("coffee_id", state.coffee_id_by_name?.[state.session.coffee] ?? -1).maybeSingle();
       if (!stock_item) {
         err_el.textContent = `No green stock found for ${state.session.coffee}. Log a delivery in the Stock module before roasting.`;
         err_el.style.display = "block"; return;

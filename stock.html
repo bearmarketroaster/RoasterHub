@@ -128,6 +128,7 @@ function new_contract() {
   return { supplier:"", coffee_id:"", bag_count:"", low_bag_threshold:"100" };
 }
 function coffee_name_by_id(id) { const c = state.coffees_obj.find(x => x.id === id); return c ? c.name : "—"; }
+function coffee_id_by_name(name) { const c = state.coffees_obj.find(x => x.name === name); return c ? c.id : null; }
 function contract_remaining(c) { return Number(c.bag_count||0) - Number(state.contract_delivered[c.id]||0); }
 
 async function load_data() {
@@ -207,6 +208,7 @@ async function save_delivery() {
   await supabaseClient.from("stock_delivery_items").insert(valid_items.map((item,i) => ({
     id: `${delivery_id}-I${i+1}`, delivery_id,
     coffee: item.coffee,
+    coffee_id: coffee_id_by_name(item.coffee),
     green_name: item.green_name||null,
     origin: item.origin||null,
     lot_number: item.lot_number||null,
@@ -217,13 +219,14 @@ async function save_delivery() {
   })));
 
   for (const item of valid_items) {
-    const existing = state.stock_items.find(s => s.coffee===item.coffee);
+    const cid = coffee_id_by_name(item.coffee);
+    const existing = state.stock_items.find(s => s.coffee_id === cid);
     if (existing) {
       await supabaseClient.from("stock_items").update({ current_kg: existing.current_kg+Number(item.weight_kg), origin: item.origin||existing.origin }).eq("id", existing.id);
     } else {
-      await supabaseClient.from("stock_items").insert({ id: gen_id("STK"), coffee: item.coffee, origin: item.origin||null, current_kg: Number(item.weight_kg), low_stock_threshold: LOW_STOCK_KG });
+      await supabaseClient.from("stock_items").insert({ id: gen_id("STK"), coffee: item.coffee, coffee_id: cid, origin: item.origin||null, current_kg: Number(item.weight_kg), low_stock_threshold: LOW_STOCK_KG });
     }
-    await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: d.date, coffee: item.coffee, change_kg: Number(item.weight_kg), reason: "delivery", note: `Delivery ${delivery_id}${d.invoice_ref?" · "+d.invoice_ref:""}`, auto: true });
+    await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: d.date, coffee: item.coffee, coffee_id: cid, change_kg: Number(item.weight_kg), reason: "delivery", note: `Delivery ${delivery_id}${d.invoice_ref?" · "+d.invoice_ref:""}`, auto: true });
   }
   state.saving=false; state.ui.show_delivery_form=false; state.ui.delivery_err="";
   state.ui.delivery=new_delivery(); state.ui.pending_invoice_file=null;
@@ -252,20 +255,21 @@ async function save_adjustment() {
   if (!raw || isNaN(change_kg) || change_kg === 0) { state.ui.adj_err="Please enter a non-zero kg value (use - for deductions)."; state.saving=false; render(); return; }
   // Validate deductions don't exceed available stock
   if (change_kg < 0) {
-    const existing_check = state.stock_items.find(s => s.coffee === coffee);
+    const existing_check = state.stock_items.find(s => s.coffee_id === coffee_id_by_name(coffee));
     const available = existing_check?.current_kg || 0;
     if (Math.abs(change_kg) > available) {
       state.ui.adj_err = `Cannot deduct ${Math.abs(change_kg).toFixed(1)}kg of ${coffee} — only ${available.toFixed(1)}kg available.`;
       state.saving=false; render(); return;
     }
   }
-  const { error } = await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: today(), coffee, change_kg, reason, note: note||null, auto: false });
+  const adj_cid = coffee_id_by_name(coffee);
+  const { error } = await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: today(), coffee, coffee_id: adj_cid, change_kg, reason, note: note||null, auto: false });
   if (error) { state.ui.adj_err="Failed to save adjustment."; state.saving=false; render(); return; }
-  const existing = state.stock_items.find(s => s.coffee===coffee);
+  const existing = state.stock_items.find(s => s.coffee_id === adj_cid);
   if (existing) {
     await supabaseClient.from("stock_items").update({ current_kg: Math.max(0, existing.current_kg+change_kg) }).eq("id", existing.id);
   } else {
-    await supabaseClient.from("stock_items").insert({ id: gen_id("STK"), coffee, current_kg: Math.max(0,change_kg), low_stock_threshold: LOW_STOCK_KG });
+    await supabaseClient.from("stock_items").insert({ id: gen_id("STK"), coffee, coffee_id: adj_cid, current_kg: Math.max(0,change_kg), low_stock_threshold: LOW_STOCK_KG });
   }
   state.saving=false; state.ui.adj={ coffee:"", change_kg:"", reason:"roast", note:"" }; state.ui.show_adj_form=false; state.ui.adj_err="";
   await load_data(); render();

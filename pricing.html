@@ -141,40 +141,40 @@ async function load() {
   // price even if its most recent delivery left the price blank.
   const { data: deliveries } = await supabaseClient
     .from("stock_deliveries")
-    .select("date, stock_delivery_items(coffee, price_per_kg)")
+    .select("date, stock_delivery_items(coffee_id, price_per_kg)")
     .order("date", { ascending: false });
   const green = {};
   (deliveries || []).forEach(d => {
     (d.stock_delivery_items || []).forEach(it => {
-      if (it.price_per_kg == null || it.coffee == null) return;
-      if (green[it.coffee]) return;            // already captured a newer price
-      green[it.coffee] = { price: Number(it.price_per_kg), date: d.date || null };
+      if (it.price_per_kg == null || it.coffee_id == null) return;
+      if (green[it.coffee_id]) return;            // already captured a newer price
+      green[it.coffee_id] = { price: Number(it.price_per_kg), date: d.date || null };
     });
   });
   state.green_delivery = green;
 
   // Manual per-coffee green prices entered in this tool (override deliveries).
-  const { data: overrides } = await supabaseClient.from("pricing_green").select("coffee, green_price");
+  const { data: overrides } = await supabaseClient.from("pricing_green").select("coffee_id, green_price");
   const ov = {};
-  (overrides || []).forEach(r => { if (r.green_price != null) ov[r.coffee] = Number(r.green_price); });
+  (overrides || []).forEach(r => { if (r.green_price != null && r.coffee_id != null) ov[r.coffee_id] = Number(r.green_price); });
   state.green_override = ov;
 
   state.loaded = true;
 }
 
 // Effective green price for a coffee: manual override wins, else latest delivery.
-function green_for(coffeeName) {
-  const ov = state.green_override[coffeeName];
+function green_for(coffeeId) {
+  const ov = state.green_override[coffeeId];
   if (ov != null && !isNaN(ov)) return { price: ov, source: "manual" };
-  const d = state.green_delivery[coffeeName];
+  const d = state.green_delivery[coffeeId];
   if (d) return { price: d.price, source: "delivery", date: d.date };
   return null;
 }
 
 // ── Pricing maths ───────────────────────────────────────────────────────────
 // Returns null if no green price for this coffee.
-function compute(coffeeName, kg, bagLabel) {
-  const g = green_for(coffeeName);
+function compute(coffeeId, kg, bagLabel) {
+  const g = green_for(coffeeId);
   if (!g) return null;
   const loss   = state.cfg.roast_loss_pct / 100;
   const fee     = state.cfg.roasting_fee_per_kg;
@@ -282,10 +282,10 @@ function render_results() {
   }
 
   el.innerHTML = state.coffees.map(coffee => {
-    const g = green_for(coffee.name);
-    const input_val = state.green_override[coffee.name] != null
-      ? state.green_override[coffee.name]
-      : (state.green_delivery[coffee.name]?.price ?? "");
+    const g = green_for(coffee.id);
+    const input_val = state.green_override[coffee.id] != null
+      ? state.green_override[coffee.id]
+      : (state.green_delivery[coffee.id]?.price ?? "");
     let src_hint = "";
     if (g && g.source === "delivery") src_hint = `from delivery${g.date?` ${esc(g.date)}`:""}`;
     else if (g && g.source === "manual") src_hint = "manual entry";
@@ -296,7 +296,7 @@ function render_results() {
         <div class="coffee-name">${esc(coffee.name)}</div>
         <div class="coffee-green">
           <span class="green-lbl">Green €/kg</span>
-          <input type="number" step="0.01" min="0" class="green-input" data-green="${esc(coffee.name)}"
+          <input type="number" step="0.01" min="0" class="green-input" data-green="${coffee.id}"
                  value="${input_val}" placeholder="0.00" />
           <span class="green-src">${src_hint}</span>
         </div>
@@ -305,7 +305,7 @@ function render_results() {
     if (!g) return `<div class="card">${head}</div>`;
 
     const rows = SIZES.map(s => {
-      const r = compute(coffee.name, s.kg, s.label);
+      const r = compute(coffee.id, s.kg, s.label);
       return `
         <tr>
           <td class="size">${esc(s.label)}</td>
@@ -339,16 +339,18 @@ function render_results() {
 }
 
 // Persist a per-coffee manual green price (blank clears it → falls back to delivery).
-async function save_green(coffee, raw) {
+async function save_green(coffeeId, raw) {
+  const id = Number(coffeeId);
+  const name = state.coffees.find(c => c.id === id)?.name || null;
   const val = String(raw).trim();
   if (val === "" || isNaN(Number(val))) {
-    delete state.green_override[coffee];
-    await supabaseClient.from("pricing_green").delete().eq("coffee", coffee);
+    delete state.green_override[id];
+    await supabaseClient.from("pricing_green").delete().eq("coffee_id", id);
   } else {
-    state.green_override[coffee] = Number(val);
+    state.green_override[id] = Number(val);
     await supabaseClient.from("pricing_green").upsert(
-      { coffee, green_price: Number(val), updated_at: new Date().toISOString() },
-      { onConflict: "coffee" }
+      { coffee_id: id, coffee: name, green_price: Number(val), updated_at: new Date().toISOString() },
+      { onConflict: "coffee_id" }
     );
   }
   render_results();
