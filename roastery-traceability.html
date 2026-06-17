@@ -223,6 +223,35 @@ async function send_to_samples(container_id) {
   await load_data();
   render();
 }
+async function revert_dispatch(dispatch_id) {
+  const d = state.dispatches.find(x => x.id === dispatch_id);
+  if (!d) return;
+  const warn = d.confirmed_at ? "\n\n⚠️ This dispatch was already marked delivered — reverting will pull it back into stock." : "";
+  if (!confirm(`Revert the ${d.shop} dispatch (${d.total_kg}kg)?\n\nAll its stock returns to the containers and any dispatched buckets go back to "filled".${warn}\n\nThis can't be undone.`)) return;
+  state.saving = true; render();
+  // Put back any buckets that went out on this dispatch
+  const { data: db_rows } = await supabaseClient.from("dispatch_buckets").select("bucket_id").eq("dispatch_id", dispatch_id);
+  const bucket_ids = (db_rows || []).map(r => r.bucket_id);
+  if (bucket_ids.length) {
+    await supabaseClient.from("buckets").update({ status: "filled" }).in("id", bucket_ids);
+    await supabaseClient.from("dispatch_buckets").delete().eq("dispatch_id", dispatch_id);
+  }
+  // Delete the lines (returns kg to each container) then the dispatch row
+  await supabaseClient.from("dispatch_lines").delete().eq("dispatch_id", dispatch_id);
+  await supabaseClient.from("dispatches").delete().eq("id", dispatch_id);
+  // Any container this dispatch had emptied (e.g. Send to Samples) → back to Waiting now it has stock again
+  const cids = [...new Set([d.container_id, ...(d.lines||[]).map(l => l.container_id)].filter(Boolean))];
+  for (const cid of cids) {
+    const c = state.containers.find(x => x.id === cid);
+    if (c && c.status === "empty") {
+      await supabaseClient.from("containers").update({ status: "waiting", status_changed_at: new Date().toISOString() }).eq("id", cid);
+    }
+  }
+  await load_data();
+  state.saving = false;
+  render();
+}
+
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 async function render_qr(el, value, size=140) {
   if (!window.QRCode) { await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
@@ -1097,7 +1126,10 @@ function build_dispatch_card(d, c, fill, confirmed, show_scan=true) {
         ${b_line?`<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>🪣 ${esc(line_coffee(b_line))} · Bar</span><span style="font-weight:600">${b_line.kg}kg</span></div>`:""}
         ${r_lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>🛍️ ${esc(line_coffee(l))} · ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label||l.bag_size}</span><span style="font-weight:600">${l.bags} bags (${l.kg}kg)</span></div>`).join("")}
       </div>
-      ${!confirmed && state.user_role === "admin" ? `<button class="btn btn-green btn-sm" data-mark-delivered="${esc(d.id)}" style="margin-top:6px">✓ Mark Delivered</button>` : ""}
+      ${state.user_role === "admin" ? `<div class="flex gap-8" style="margin-top:8px;flex-wrap:wrap">
+        ${!confirmed ? `<button class="btn btn-green btn-sm" data-mark-delivered="${esc(d.id)}">✓ Mark Delivered</button>` : ""}
+        <button class="btn btn-ghost btn-sm" data-revert-dispatch="${esc(d.id)}" style="color:#dc2626;border-color:#f3c4c4">↩ Revert Dispatch</button>
+      </div>` : ""}
     </div>`;
 }
 
@@ -2140,6 +2172,7 @@ function attach_listeners() {
     await load_data();
     render();
   }));
+  app.querySelectorAll("[data-revert-dispatch]").forEach(btn => btn.addEventListener("click", () => revert_dispatch(btn.dataset.revertDispatch)));
 }
 </script>
 </body>
