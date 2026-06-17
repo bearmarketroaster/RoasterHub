@@ -99,6 +99,8 @@ const state = {
     show_contract_form: false,
     show_quick_stock: false,
     quick_err: "",
+    quick_ok: "",
+    quick_saving: false,
     delivery_err: "",
     adj_err: "",
     contract_err: "",
@@ -348,30 +350,47 @@ async function save_staff_takeaway() {
 
 async function init() { await load_data(); state.loading=false; render(); }
 
-async function set_green_stock(coffee_id, new_kg) {
-  state.ui.quick_err = "";
-  const cid = Number(coffee_id);
-  const name = coffee_name_by_id(cid);
-  const target = Number(new_kg);
-  if (isNaN(target) || target < 0) { state.ui.quick_err = `Enter a valid amount (0 or more) for ${name}.`; render(); return; }
-  const existing = state.stock_items.find(s => s.coffee_id === cid);
-  const current = existing ? Number(existing.current_kg) : 0;
-  const delta = Number((target - current).toFixed(3));
-  if (delta !== 0) {
-    await supabaseClient.from("stock_adjustments").insert({
-      id: gen_id("ADJ"), date: today(), coffee: name, coffee_id: cid,
-      change_kg: delta, reason: "correction", note: "Quick stock set", auto: false,
-    });
+async function save_quick_stock() {
+  const app = document.getElementById("app");
+  const inputs = [...app.querySelectorAll(".qs-input")];
+  const changes = [];
+  for (const inp of inputs) {
+    const cid = Number(inp.dataset.qsId);
+    const target = Number(inp.value);
+    if (inp.value.trim() === "" || isNaN(target) || target < 0) {
+      state.ui.quick_ok = "";
+      state.ui.quick_err = `Enter a valid amount (0 or more) for ${coffee_name_by_id(cid)}.`;
+      render(); return;
+    }
+    const existing = state.stock_items.find(s => s.coffee_id === cid);
+    const current = existing ? Number(existing.current_kg) : 0;
+    const delta = Number((target - current).toFixed(3));
+    if (delta !== 0) changes.push({ cid, target, delta, existing });
   }
-  if (existing) {
-    await supabaseClient.from("stock_items").update({ current_kg: target }).eq("id", existing.id);
-  } else {
-    await supabaseClient.from("stock_items").insert({
-      id: gen_id("STK"), coffee: name, coffee_id: cid, current_kg: target, low_stock_threshold: LOW_STOCK_KG,
-    });
+  if (changes.length === 0) { state.ui.quick_err = ""; state.ui.quick_ok = "Nothing changed."; render(); return; }
+
+  state.ui.quick_saving = true; state.ui.quick_err = ""; state.ui.quick_ok = ""; render();
+
+  // One batch of ledger corrections...
+  await supabaseClient.from("stock_adjustments").insert(changes.map(ch => ({
+    id: gen_id("ADJ"), date: today(), coffee: coffee_name_by_id(ch.cid), coffee_id: ch.cid,
+    change_kg: ch.delta, reason: "correction", note: "Quick stock set", auto: false,
+  })));
+
+  // ...then set each stock level (new coffees get a row created).
+  const new_rows = [];
+  for (const ch of changes) {
+    if (ch.existing) {
+      await supabaseClient.from("stock_items").update({ current_kg: ch.target }).eq("id", ch.existing.id);
+    } else {
+      new_rows.push({ id: gen_id("STK"), coffee: coffee_name_by_id(ch.cid), coffee_id: ch.cid, current_kg: ch.target, low_stock_threshold: LOW_STOCK_KG });
+    }
   }
-  await load_data();
-  render();
+  if (new_rows.length) await supabaseClient.from("stock_items").insert(new_rows);
+
+  state.ui.quick_saving = false;
+  state.ui.quick_ok = `Saved ${changes.length} change${changes.length>1?"s":""}.`;
+  await load_data(); render();
 }
 
 function render() { document.getElementById("app").innerHTML=build_app(); attach_listeners(); }
@@ -408,7 +427,6 @@ function build_quick_stock() {
         <div style="flex:1;font-weight:600;font-size:14px">${esc(c.name)}</div>
         <div style="font-size:12px;color:#666;width:78px;text-align:right">now ${cur.toFixed(1)}kg</div>
         <input type="number" step="0.1" min="0" class="qs-input" data-qs-id="${c.id}" value="${cur}" style="width:84px;padding:5px 8px;font-size:13px;text-align:right" />
-        <button class="btn btn-sm qs-set" data-qs-id="${c.id}">Set</button>
         <button class="btn btn-ghost btn-sm qs-zero" data-qs-id="${c.id}">Zero</button>
       </div>`;
   }).join("");
@@ -419,9 +437,13 @@ function build_quick_stock() {
         <span style="font-size:13px;color:#666">${open?"▲ hide":"▼ show"}</span>
       </div>
       ${open ? `
-        <div class="hint" style="margin:8px 0 12px">Set each coffee to the actual weighed green stock. Each change logs a correction to the ledger. Use <strong>Zero</strong> to empty a coffee.</div>
+        <div class="hint" style="margin:8px 0 12px">Enter the actual weighed green stock for each coffee, then hit <strong>Save changes</strong>. <strong>Zero</strong> sets a line to 0 — it's still saved when you press Save. Every change is logged as a correction.</div>
         ${state.ui.quick_err?`<div class="low-stock" style="margin-bottom:10px">${esc(state.ui.quick_err)}</div>`:""}
+        ${state.ui.quick_ok?`<div style="background:#e7f5ec;color:#16a34a;font-weight:600;font-size:13px;padding:8px 12px;border-radius:8px;margin-bottom:10px">✓ ${esc(state.ui.quick_ok)}</div>`:""}
         <div>${rows||`<div class="hint" style="padding:8px 0">No coffees in your list yet.</div>`}</div>
+        <div style="margin-top:14px;text-align:right">
+          <button class="btn qs-save-all" ${state.ui.quick_saving?"disabled":""}>${state.ui.quick_saving?"Saving…":"💾 Save changes"}</button>
+        </div>
       ` : ""}
     </div>`;
 }
@@ -833,13 +855,12 @@ function attach_listeners() {
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
   app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => { state.tab=Number(btn.dataset.tab); render(); }));
   app.querySelectorAll("[data-adj-coffee]").forEach(btn => btn.addEventListener("click", () => { state.ui.adj.coffee=btn.dataset.adjCoffee; state.ui.show_adj_form=true; state.tab=2; render(); }));
-  app.querySelector("#toggle-quick-stock")?.addEventListener("click", () => { state.ui.show_quick_stock = !state.ui.show_quick_stock; render(); });
-  app.querySelectorAll(".qs-set").forEach(btn => btn.addEventListener("click", () => {
-    const id = btn.dataset.qsId;
-    const inp = app.querySelector(`.qs-input[data-qs-id="${id}"]`);
-    set_green_stock(id, inp ? inp.value : 0);
+  app.querySelector("#toggle-quick-stock")?.addEventListener("click", () => { state.ui.show_quick_stock = !state.ui.show_quick_stock; state.ui.quick_err=""; state.ui.quick_ok=""; render(); });
+  app.querySelectorAll(".qs-zero").forEach(btn => btn.addEventListener("click", () => {
+    const inp = app.querySelector(`.qs-input[data-qs-id="${btn.dataset.qsId}"]`);
+    if (inp) inp.value = "0";
   }));
-  app.querySelectorAll(".qs-zero").forEach(btn => btn.addEventListener("click", () => set_green_stock(btn.dataset.qsId, 0)));
+  app.querySelector(".qs-save-all")?.addEventListener("click", save_quick_stock);
   app.querySelectorAll("[data-set-threshold]").forEach(btn => btn.addEventListener("click", () => {
     const coffee=btn.dataset.setThreshold, current=Number(btn.dataset.threshold)||LOW_STOCK_KG;
     const val=prompt(`Low stock alert threshold for ${coffee} (kg):`, current);
