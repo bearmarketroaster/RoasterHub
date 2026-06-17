@@ -68,6 +68,12 @@
     .empty .icon { font-size: 36px; margin-bottom: 8px; }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 24px; z-index: 100; }
     .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 520px; box-shadow: 0 4px 24px rgba(0,0,0,0.15); margin: auto; border: 1px solid #e8e6e1; }
+    .modal h2 { font-size: 23px; }
+    .modal h3 { font-size: 18px; }
+    .modal .btn-sm { padding: 9px 15px; font-size: 14px; }
+    .modal .btn-full { padding: 15px; font-size: 16px; }
+    .modal label.lbl { font-size: 13px; }
+    .modal input, .modal select, .modal textarea { font-size: 16px; padding: 11px 12px; }
     .mono { font-family: monospace; }
     .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
     .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
@@ -116,6 +122,7 @@ const state = {
   ui: {
     expanded_qr: null,
     expanded_deliveries: {},
+    coffee_filter: "all",
     fill_bucket_container: null,  // Container ID currently being filled with buckets
     bucket_return_open: false,
     bucket_return_condition: "clean",
@@ -935,6 +942,34 @@ function build_containers_tab() {
       <div class="hint" style="font-size:12px">Ready to fill from any active container.</div>
     </div>`;
 
+  // ── Coffee filter + grouped waiting list, so you can find a coffee fast ──
+  const all_pack = [...active, ...waiting];
+  const coffee_counts = {};
+  all_pack.forEach(c => { const k = c.coffee || "(no coffee)"; coffee_counts[k] = (coffee_counts[k]||0)+1; });
+  const coffee_keys = Object.keys(coffee_counts).sort();
+  const cfilter = state.ui.coffee_filter || "all";
+  const cmatch = c => cfilter === "all" || (c.coffee || "(no coffee)") === cfilter;
+  const fa = active.filter(cmatch);
+  const fw = waiting.filter(cmatch);
+  const chip_style = sel => `padding:7px 14px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid ${sel?"#1a1a1a":"#e8e6e1"};background:${sel?"#1a1a1a":"#fff"};color:${sel?"#fff":"#1a1a1a"}`;
+  const chips_html = coffee_keys.length > 1 ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+      <button data-coffee-filter="all" style="${chip_style(cfilter==="all")}">All (${all_pack.length})</button>
+      ${coffee_keys.map(k => `<button data-coffee-filter="${esc(k)}" style="${chip_style(cfilter===k)}">${esc(k)} (${coffee_counts[k]})</button>`).join("")}
+    </div>` : "";
+  const wbc = {};
+  fw.forEach(c => { const k = c.coffee || "(no coffee)"; (wbc[k] = wbc[k] || []).push(c); });
+  const waiting_grouped = Object.keys(wbc).sort().map(coffee => {
+    const list = wbc[coffee];
+    const total = list.reduce((s,c)=>s+(c.remaining||0),0);
+    return `<div style="margin-bottom:14px">
+      <div style="font-weight:700;font-size:14px;color:#1a1a1a;margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid #eee;padding-bottom:5px">
+        <span>☕ ${esc(coffee)}</span>
+        <span class="hint" style="font-weight:400;font-size:12px">${list.length} container${list.length>1?"s":""} · ${total.toFixed(0)}kg available</span>
+      </div>
+      ${list.map(c => render_container_card(c, "waiting")).join("")}
+    </div>`;
+  }).join("");
+
   return `
     <div class="flex-between mb-16">
       <h2 style="margin:0">Containers</h2>
@@ -958,23 +993,24 @@ function build_containers_tab() {
         </div>
       </details>` : ""}
 
+    ${chips_html}
     <div style="margin-bottom:18px">
       <div style="font-weight:700;color:#16a34a;margin-bottom:8px;display:flex;align-items:center;gap:6px">
         <span>✅ ACTIVE FOR PACKING</span>
-        <span class="hint" style="font-weight:400;font-size:12px">(${active.length})</span>
+        <span class="hint" style="font-weight:400;font-size:12px">(${cfilter==="all"?active.length:fa.length})</span>
       </div>
-      ${active.length === 0
-        ? `<div class="card empty" style="padding:20px;font-size:13px">No active containers. Move a container from Waiting to start packing.</div>`
-        : active.map(c => render_container_card(c, "active")).join("")}
+      ${fa.length === 0
+        ? `<div class="card empty" style="padding:20px;font-size:13px">${cfilter==="all"?"No active containers. Move a container from Waiting to start packing.":"No active containers for this coffee."}</div>`
+        : fa.map(c => render_container_card(c, "active")).join("")}
     </div>
 
     ${waiting.length > 0 ? `
     <div style="margin-bottom:18px">
       <div style="font-weight:700;color:#666;margin-bottom:8px;display:flex;align-items:center;gap:6px">
         <span>⏳ WAITING</span>
-        <span class="hint" style="font-weight:400;font-size:12px">(${waiting.length}) · ready to activate when you start packing from them</span>
+        <span class="hint" style="font-weight:400;font-size:12px">(${cfilter==="all"?waiting.length:fw.length}) · ready to activate when you start packing from them</span>
       </div>
-      ${waiting.map(c => render_container_card(c, "waiting")).join("")}
+      ${fw.length ? waiting_grouped : `<div class="hint" style="font-size:13px;padding:8px 0">No waiting containers for this coffee.</div>`}
     </div>` : ""}
 
     ${empty.length > 0 ? `
@@ -1613,6 +1649,7 @@ function attach_listeners() {
     render();
   }));
   app.querySelectorAll("[data-toggle-delivery]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_deliveries[btn.dataset.toggleDelivery]=!state.ui.expanded_deliveries[btn.dataset.toggleDelivery]; render(); }));
+  app.querySelectorAll("[data-coffee-filter]").forEach(btn => btn.addEventListener("click", () => { state.ui.coffee_filter = btn.dataset.coffeeFilter; render(); }));
   app.querySelector("#close-scan")?.addEventListener("click", () => { state.scan_id=null; const url=new URL(window.location); url.searchParams.delete("scan"); window.history.replaceState({},"",url); render(); });
 
   // Container status management
