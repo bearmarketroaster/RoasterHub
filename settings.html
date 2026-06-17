@@ -109,6 +109,7 @@ const state = {
   shop_mappings: [],    // [{ id, parsed_name, master_name }]
   buckets: [],          // [{ id, created_at, retired_at, notes }]
   containers: [],       // [{ id, name, status, retired_at, ... }]
+  restore_log: [],      // bucket-restore scans this session: [{ id, status }]
   fp_label_data: {},    // { [fp_code]: { roast_type, region, process, altitude, flavour_1, flavour_2, flavour_3, price } }
   fp_assignments: [],   // [{ id, fp_code, coffee_id, bag_size, effective_start, effective_end }] — version history
   user_roles: [],
@@ -785,6 +786,56 @@ function test_qr(raw) {
   setTimeout(() => document.getElementById("qr-test-input")?.focus(), 50);
 }
 
+async function restore_bucket(raw, name) {
+  const v = String(raw || "").trim();
+  if (!v) return;
+  const m = v.match(/BKT-[A-Za-z0-9]+/i);
+  const id = m ? m[0].toUpperCase() : null;
+  const nm = (name || "").trim() || id || v.slice(0, 40);
+  if (!id) {
+    state.restore_log.push({ id: v.slice(0, 40), name: nm, status: "invalid" });
+  } else {
+    const { data: existing } = await supabaseClient.from("buckets").select("id").eq("id", id).maybeSingle();
+    if (existing) {
+      state.restore_log.push({ id, name: nm, status: "exists" });
+    } else {
+      const { error } = await supabaseClient.from("buckets").insert({ id, name: nm, status: "empty", condition: "clean" });
+      if (error) { state.restore_log.push({ id, name: nm, status: "error" }); }
+      else { state.restore_log.push({ id, name: nm, status: "created" }); state.buckets.push({ id, name: nm, status: "empty", retired_at: null }); }
+    }
+  }
+  render();
+  setTimeout(() => document.getElementById("bucket-restore-name")?.focus(), 50);
+}
+
+function build_bucket_restore_section() {
+  const log = state.restore_log || [];
+  const created = log.filter(x => x.status === "created").length;
+  const exists  = log.filter(x => x.status === "exists").length;
+  const log_html = log.length ? `
+    <div style="font-size:13px;font-weight:600;margin:12px 0 6px">✓ ${created} restored${exists ? ` · ${exists} already existed` : ""}</div>
+    <div style="max-height:260px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:6px 10px">
+      ${log.slice().reverse().map(x => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px solid #f3f3f3;gap:10px">
+        <span style="min-width:0"><span style="font-weight:600">${esc(x.name||"—")}</span> <span class="mono" style="color:#888;font-size:12px">${esc(x.id)}</span></span>
+        <span style="font-weight:700;white-space:nowrap;color:${x.status==="created"?"#16a34a":x.status==="exists"?"#888":"#dc2626"}">${x.status==="created"?"✓ restored":x.status==="exists"?"already there":"✕ not a bucket code"}</span>
+      </div>`).join("")}
+    </div>
+    <button class="btn btn-ghost btn-sm mt-8" id="bucket-restore-clear">Clear list</button>` : "";
+  return `
+    <div class="section-label" style="margin-top:16px">Restore Buckets by Scan</div>
+    <div class="card">
+      <p class="hint mb-12">Re-create lost buckets with their exact ID so the labels work again. Type the bucket's name from the sticker, then scan its QR — already-existing buckets are skipped.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input id="bucket-restore-name" type="text" placeholder="1. Name on the sticker (e.g. Shop Bucket 3)" autocomplete="off" style="font-size:14px;padding:10px 12px" />
+        <div style="display:flex;gap:8px">
+          <input id="bucket-restore-input" type="text" placeholder="2. Scan the QR (BKT-…)" autocomplete="off" style="flex:1;font-size:14px;padding:10px 12px" />
+          <button class="btn btn-dark btn-sm" id="bucket-restore-btn">Restore</button>
+        </div>
+      </div>
+      ${log_html}
+    </div>`;
+}
+
 function build_qr_tester_section() {
   const r = state.ui.qr_test_result;
   let result_html = "";
@@ -1115,7 +1166,7 @@ function build_app() {
       `).join("")}
     </div>`;
   const sections =
-      active === "operations" ? `${build_shops_section()}${build_containers_section()}${build_buckets_section()}${build_qr_tester_section()}`
+      active === "operations" ? `${build_shops_section()}${build_containers_section()}${build_buckets_section()}${build_bucket_restore_section()}${build_qr_tester_section()}`
     : active === "people"     ? `${build_users_section()}`
     :                           `${build_coffees_section()}${build_label_data_section()}`;
   return header + `
@@ -1706,6 +1757,10 @@ function attach_listeners() {
   });
   app.querySelector("#qr-test-btn")?.addEventListener("click", () => { test_qr(document.getElementById("qr-test-input")?.value); });
   app.querySelector("#qr-test-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); test_qr(e.target.value); } });
+  app.querySelector("#bucket-restore-name")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); document.getElementById("bucket-restore-input")?.focus(); } });
+  app.querySelector("#bucket-restore-btn")?.addEventListener("click", () => restore_bucket(document.getElementById("bucket-restore-input")?.value, document.getElementById("bucket-restore-name")?.value));
+  app.querySelector("#bucket-restore-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); restore_bucket(e.target.value, document.getElementById("bucket-restore-name")?.value); } });
+  app.querySelector("#bucket-restore-clear")?.addEventListener("click", () => { state.restore_log = []; render(); });
   app.querySelectorAll("[data-bucket-filter]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.bucket_filter = btn.dataset.bucketFilter;
     render();
