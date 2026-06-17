@@ -1427,6 +1427,32 @@ function flash_scan(msg, type) {
   }, 2000);
 }
 
+// In-place render of the hand-packed sample list on the scan screen (no full re-render → scanner stays alive).
+function sample_list_html() {
+  const ps = packing_state;
+  if (!ps.samples.length) return "";
+  return ps.samples.map((s, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:8px 12px;margin-bottom:6px">
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600;font-size:14px">🎁 ${esc(s.coffee)} — 30g sample</div>
+      <div class="hint" style="font-size:11px;font-family:monospace;margin-top:2px">${esc(s.container_id)} · ${(s.count*0.03).toFixed(2)}kg</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="font-weight:700;font-size:16px;width:42px;text-align:center">× ${s.count}</span>
+      <button data-remove-sample="${idx}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px" title="Remove">✕</button>
+    </div>
+  </div>`).join("");
+}
+function update_sample_list() {
+  const el = document.getElementById("sample-list");
+  if (!el) return;
+  el.innerHTML = sample_list_html();
+  el.querySelectorAll("[data-remove-sample]").forEach(btn => btn.addEventListener("click", () => {
+    packing_state.samples.splice(Number(btn.dataset.removeSample), 1);
+    update_sample_list();
+    update_scan_panel();   // refresh the running total
+  }));
+}
+
 function build_packing_page(container, fill) {
   const ps = packing_state;
 
@@ -1474,25 +1500,11 @@ function build_packing_page(container, fill) {
       ? `<div style="background:#fff7ed;border-radius:6px;padding:10px;margin-top:10px;font-size:12px"><div style="font-weight:600;margin-bottom:4px">From ${Object.keys(by_container).length} containers:</div>${Object.entries(by_container).map(([cid, kg]) => `<div>📦 ${esc(cid)}: ${kg.toFixed(1)}kg</div>`).join("")}</div>`
       : "";
 
-    // Hand-packed 30g sample bags (manually added, not scanned). Each deducts from its OWN coffee's container.
-    const sample_conts = state.containers.filter(c => c.coffee && c.remaining > 0).sort((a,b)=>(a.coffee||"").localeCompare(b.coffee||""));
-    const sample_rows = ps.samples.map((s, idx) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:6px;gap:8px">
-        <span>🎁 ${esc(s.coffee)} — 30g sample <span style="background:#1a1a1a;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace;margin-left:4px">${esc(s.container_id)}</span></span>
-        <span style="white-space:nowrap;font-weight:600">× ${s.count} (${(s.count*0.03).toFixed(2)}kg) <button class="btn btn-ghost btn-sm sample-remove" data-sample-idx="${idx}" style="margin-left:6px;padding:2px 8px">✕</button></span>
-      </div>`).join("");
-    const sample_add = `<div style="background:#fff;border-radius:8px;padding:12px;margin-top:12px">
-        <div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:600">🎁 SAMPLE BAGS (30g · hand-packed)</div>
-        ${sample_rows}
-        ${ps.sample_err?`<div style="color:#dc2626;font-size:12px;margin:2px 0 6px">${esc(ps.sample_err)}</div>`:""}
-        <div style="display:flex;gap:6px;align-items:center;margin-top:${ps.samples.length||ps.sample_err?"8px":"0"}">
-          <select id="sample-container" style="flex:1;font-size:14px;padding:9px">
-            <option value="">— Coffee to sample —</option>
-            ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${c.remaining.toFixed(1)}kg)</option>`).join("")}
-          </select>
-          <input type="number" id="sample-count" min="1" step="1" value="1" style="width:58px;font-size:14px;padding:9px;text-align:center" />
-          <button class="btn btn-dark btn-sm" id="sample-add">+ Add</button>
-        </div>
-      </div>`;
+    // Hand-packed 30g samples are added on the scan screen; on review we just show them read-only.
+    const sample_summary = ps.samples.length ? ps.samples.map(s => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:6px">
+        <span>🎁 ${esc(s.coffee)} · 30g sample <span style="background:#1a1a1a;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace;margin-left:4px">${esc(s.container_id)}</span></span>
+        <span style="font-weight:600;white-space:nowrap">× ${s.count} (${(s.count*0.03).toFixed(2)}kg)</span>
+      </div>`).join("") : "";
 
     return `<div class="overlay"><div class="modal">
       <div style="text-align:center;margin-bottom:20px">
@@ -1509,9 +1521,9 @@ function build_packing_page(container, fill) {
           <div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:600">BREAKDOWN</div>
           ${item_rows.length ? item_rows.join("") : '<p class="hint" style="font-size:13px;color:#666">No bags scanned</p>'}
           ${bucket_rows}
+          ${sample_summary}
         </div>
         ${container_summary}
-        ${sample_add}
       </div>
       <div class="grid-2">
         <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="packing-back-edit">✏️ Edit</button>
@@ -1532,6 +1544,7 @@ function build_packing_page(container, fill) {
     // Otherwise → error (nothing to dispatch).
     const active_containers = state.containers.filter(c => c.status === "active" && c.remaining > 0);
     const filled_buckets_available = state.buckets.filter(b => !b.retired_at && b.status === "filled");
+    const sample_conts = state.containers.filter(c => c.coffee && c.remaining > 0).sort((a,b)=>(a.coffee||"").localeCompare(b.coffee||""));
     let summary;
     if (active_containers.length > 0) {
       summary = `<div style="background:#f4f2ed;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
@@ -1580,6 +1593,19 @@ function build_packing_page(container, fill) {
 
       <div id="scan-panel" style="background:#f4f2ed;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
         <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">Nothing scanned yet — ${ps.scan_mode === "camera" ? "point the camera at a QR code" : "scan or type to begin"}</p>
+      </div>
+
+      <div style="background:#fff7ed;border:1px solid #fde4c2;border-radius:10px;padding:12px;margin-bottom:14px">
+        <div style="font-size:12px;color:#92400e;margin-bottom:8px;font-weight:700">🎁 ADD 30g SAMPLE BAG</div>
+        <div id="sample-list">${sample_list_html()}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:${ps.samples.length?"8px":"0"}">
+          <select id="sample-container" style="flex:1;font-size:14px;padding:9px">
+            <option value="">— Coffee to sample —</option>
+            ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${c.remaining.toFixed(1)}kg)</option>`).join("")}
+          </select>
+          <input type="number" id="sample-count" min="1" step="1" value="1" style="width:58px;font-size:14px;padding:9px;text-align:center" />
+          <button class="btn btn-amber btn-sm" id="sample-add">+ Add</button>
+        </div>
       </div>
 
       ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
@@ -1854,6 +1880,24 @@ function attach_listeners() {
   }
 
   // ── Scan-to-pack flow listeners ──
+  // Hand-packed 30g sample bag — added live on the scan screen, deducts from the chosen coffee's container
+  app.querySelector("#sample-add")?.addEventListener("click", () => {
+    const cid = app.querySelector("#sample-container")?.value;
+    const cnt_el = app.querySelector("#sample-count");
+    const count = Math.max(1, Math.floor(Number(cnt_el?.value) || 0));
+    if (!cid) { flash_scan("Pick a coffee to sample", "error"); return; }
+    const cont = state.containers.find(c => c.id === cid);
+    if (!cont) { flash_scan("Container not found", "error"); return; }
+    const queued = packing_state.samples.filter(s => s.container_id === cid).reduce((a,s)=>a+s.count*0.03, 0);
+    if (count*0.03 + queued > cont.remaining + 1e-9) { flash_scan(`Only ${(cont.remaining-queued).toFixed(2)}kg left in ${cont.coffee}`, "error"); return; }
+    const existing = packing_state.samples.find(s => s.container_id === cid);
+    if (existing) existing.count += count;
+    else packing_state.samples.push({ container_id: cid, fill_id: cont.fill_id, coffee: cont.coffee, count });
+    flash_scan(`+ ${count} × 30g ${cont.coffee} sample`, "success");
+    if (cnt_el) cnt_el.value = "1";
+    update_sample_list();
+    update_scan_panel();
+  });
   // Shop step: pick a shop or type custom
   app.querySelectorAll("[data-pick-shop]").forEach(btn => btn.addEventListener("click", () => {
     packing_state.shop = btn.dataset.pickShop;
@@ -2002,23 +2046,6 @@ function attach_listeners() {
     packing_state.err = ""; packing_state.step = "review"; render();
   });
   app.querySelector("#packing-back-edit")?.addEventListener("click", () => { packing_state.step="scan"; render(); });
-  app.querySelector("#sample-add")?.addEventListener("click", () => {
-    const cid = app.querySelector("#sample-container")?.value;
-    const count = Math.max(1, Math.floor(Number(app.querySelector("#sample-count")?.value) || 0));
-    packing_state.sample_err = "";
-    if (!cid) { packing_state.sample_err = "Pick a coffee to sample."; render(); return; }
-    const cont = state.containers.find(c => c.id === cid);
-    if (!cont) { packing_state.sample_err = "Container not found."; render(); return; }
-    const queued = packing_state.samples.filter(s => s.container_id === cid).reduce((a,s)=>a+s.count*0.03, 0);
-    if (count*0.03 + queued > cont.remaining + 1e-9) {
-      packing_state.sample_err = `Only ${(cont.remaining-queued).toFixed(2)}kg left in ${cont.coffee} (${cid}).`; render(); return;
-    }
-    packing_state.samples.push({ container_id: cid, fill_id: cont.fill_id, coffee: cont.coffee, count });
-    render();
-  });
-  app.querySelectorAll(".sample-remove").forEach(btn => btn.addEventListener("click", () => {
-    packing_state.samples.splice(Number(btn.dataset.sampleIdx), 1); packing_state.sample_err = ""; render();
-  }));
   app.querySelector("#packing-confirm")?.addEventListener("click", async () => {
     // Build dispatch_lines: ONE line per (FP code × container)
     const lines = [];
