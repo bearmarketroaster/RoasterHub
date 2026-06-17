@@ -67,13 +67,13 @@
     .empty { text-align: center; color: #999; padding: 40px 20px; }
     .empty .icon { font-size: 36px; margin-bottom: 8px; }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 24px; z-index: 100; }
-    .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 520px; box-shadow: 0 4px 24px rgba(0,0,0,0.15); margin: auto; border: 1px solid #e8e6e1; }
-    .modal h2 { font-size: 23px; }
-    .modal h3 { font-size: 18px; }
-    .modal .btn-sm { padding: 9px 15px; font-size: 14px; }
-    .modal .btn-full { padding: 15px; font-size: 16px; }
-    .modal label.lbl { font-size: 13px; }
-    .modal input, .modal select, .modal textarea { font-size: 16px; padding: 11px 12px; }
+    .modal { background: #fff; border-radius: 16px; padding: 28px; width: 100%; max-width: 560px !important; box-shadow: 0 4px 24px rgba(0,0,0,0.15); margin: auto; border: 1px solid #e8e6e1; }
+    .modal h2 { font-size: 24px !important; }
+    .modal h3 { font-size: 18px !important; }
+    .modal label.lbl { font-size: 13px !important; }
+    .modal input, .modal select, .modal textarea { font-size: 16px !important; }
+    .modal .btn-sm { font-size: 14px !important; padding: 9px 14px !important; }
+    .modal .btn-full { font-size: 16px !important; padding: 15px !important; }
     .mono { font-family: monospace; }
     .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
     .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
@@ -1076,9 +1076,11 @@ function build_manual_order_entry() {
 
 function build_deliveries_tab() {
   const get_ref=d=>{ const c=state.containers.find(x=>x.id===d.container_id); return {c, fill: c ? { coffee: c.coffee, date: c.roast_sessions?.[0]?.date||"", fill_number: 1 } : null}; };
-  if (state.dispatches.length===0) return `<h2>Deliveries</h2><div class="card empty"><div class="icon">🚚</div>No dispatches yet.</div>`;
-  const in_transit = state.dispatches.filter(d => !d.confirmed_at);
-  const delivered  = state.dispatches.filter(d => d.confirmed_at);
+  // "Send to Samples" writes an internal Samples dispatch purely to empty the container — it's not a real delivery, so keep it out of this list.
+  const visible = state.dispatches.filter(d => d.shop !== "Samples");
+  if (visible.length===0) return `<h2>Deliveries</h2><div class="card empty"><div class="icon">🚚</div>No dispatches yet.</div>`;
+  const in_transit = visible.filter(d => !d.confirmed_at);
+  const delivered  = visible.filter(d => d.confirmed_at);
   return `<h2>Deliveries</h2>
     ${in_transit.length>0?`<h3 style="color:#d97706;margin-top:0">⏳ In Transit (${in_transit.length})</h3>${in_transit.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,false); }).join("")}`:""}
     ${delivered.length>0?`<h3 style="color:#16a34a;margin-top:${in_transit.length?24:0}px">✓ Delivered (${delivered.length})</h3>${delivered.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,true); }).join("")}`:""}`;
