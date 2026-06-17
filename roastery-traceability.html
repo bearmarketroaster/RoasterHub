@@ -18,7 +18,7 @@
   </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; font-size: 15px; }
     input, select, button { font-family: inherit; font-size: 14px; }
     button { cursor: pointer; }
     #app { min-height: 100vh; }
@@ -253,6 +253,31 @@ async function revert_dispatch(dispatch_id) {
 }
 
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+// ── Language: English is the default; УКР shows Ukrainian with English underneath ──
+let LANG = (function(){ try { return localStorage.getItem("rh_lang") || "en"; } catch { return "en"; } })();
+function set_lang(l) { LANG = l; try { localStorage.setItem("rh_lang", l); } catch {} }
+function tr(en, uk) {
+  if (LANG !== "uk") return esc(en);
+  return `${esc(uk)}<span style="display:block;font-size:0.76em;font-weight:500;opacity:0.7">${esc(en)}</span>`;
+}
+// Compact 3-step progress bar for the packing flow (always bilingual so the stage is unmistakable)
+function pack_step_bar(current) {
+  const steps = [ {k:"shop",en:"Shop",uk:"Магазин"}, {k:"scan",en:"Pack",uk:"Пакувати"}, {k:"review",en:"Check",uk:"Перевірити"} ];
+  const idx = steps.findIndex(s => s.k === current);
+  return `<div style="display:flex;align-items:flex-start;margin-bottom:18px">
+    ${steps.map((s,i) => {
+      const done = i < idx, now = i === idx;
+      const bg = now ? "#16a34a" : done ? "#86c79b" : "#e8e6e1", col = (now||done) ? "#fff" : "#999";
+      return `<div style="flex:1;text-align:center;position:relative">
+        ${i>0?`<div style="position:absolute;top:15px;left:0;width:50%;height:3px;background:${i<=idx?"#86c79b":"#e8e6e1"}"></div>`:""}
+        ${i<steps.length-1?`<div style="position:absolute;top:15px;right:0;width:50%;height:3px;background:${i<idx?"#86c79b":"#e8e6e1"}"></div>`:""}
+        <div style="position:relative;width:32px;height:32px;border-radius:50%;background:${bg};color:${col};font-weight:700;display:flex;align-items:center;justify-content:center;font-size:16px;margin:0 auto">${done?"✓":i+1}</div>
+        <div style="font-size:12px;font-weight:${now?"700":"500"};color:${now?"#16a34a":"#888"};margin-top:5px;line-height:1.2">${s.en}<span style="display:block;font-size:11px;opacity:0.85">${s.uk}</span></div>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
 async function render_qr(el, value, size=140) {
   if (!window.QRCode) { await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
   el.innerHTML="";
@@ -437,7 +462,7 @@ function build_app() {
   if (state.scan_id) return build_scan_overlay();
   if (state.ui.fill_bucket_container) return build_fill_buckets_overlay();
   if (state.ui.bucket_return_open) return build_bucket_return_overlay();
-  const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Mrkt</div></div></div><button class="btn-logout" id="logout-btn">Log Out</button></div>`;
+  const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Mrkt</div></div></div><div style="display:flex;align-items:center;gap:10px"><button id="lang-toggle" style="background:none;border:1px solid #888;color:#1a1a1a;border-radius:6px;padding:5px 12px;font-size:14px;font-weight:700;cursor:pointer">${LANG==="uk"?"УКР ▾":"EN ▾"}</button><button class="btn-logout" id="logout-btn">Log Out</button></div></div>`;
   if (state.loading) return header+`<div class="loading">Loading…</div>`;
   const badges={Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
   return header+`
@@ -904,8 +929,8 @@ function build_containers_tab() {
     ? "Move a container to Active or fill a bucket first"
     : "";
   const new_dispatch_btn = can_dispatch
-    ? `<button class="btn btn-dark" id="new-dispatch-btn" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`
-    : `<button class="btn btn-grey" disabled title="${esc(dispatch_disabled_reason)}" style="padding:10px 20px;font-size:15px">+ New Dispatch</button>`;
+    ? `<button class="btn btn-dark" id="new-dispatch-btn" style="padding:14px 22px;font-size:16px">+ ${tr("New Dispatch","Нове відправлення")}</button>`
+    : `<button class="btn btn-grey" disabled title="${esc(dispatch_disabled_reason)}" style="padding:14px 22px;font-size:16px">+ ${tr("New Dispatch","Нове відправлення")}</button>`;
 
   // Bucket fleet — full lists
   const all_buckets = state.buckets.filter(b => !b.retired_at);
@@ -1541,15 +1566,16 @@ function build_packing_page(container, fill) {
       </div>`).join("") : "";
 
     return `<div class="overlay"><div class="modal">
+      ${pack_step_bar("review")}
       <div style="text-align:center;margin-bottom:20px">
         <div style="font-size:36px">🔍</div>
-        <h2 style="margin:8px 0 4px">Check your entry</h2>
-        <p style="color:#666;font-size:14px">Make sure everything looks right</p>
+        <h2 style="margin:8px 0 4px">${tr("Check your entry","Перевірте введене")}</h2>
+        <p style="color:#666;font-size:14px">${tr("Make sure everything looks right","Переконайтеся, що все правильно")}</p>
       </div>
       <div style="background:#f4f2ed;border-radius:12px;padding:16px;margin-bottom:16px">
         <div class="grid-2 mb-12">
-          ${info_row("Shop", ps.shop)}
-          ${info_row("Total", `${total_kg.toFixed(1)}kg`)}
+          ${info_row(LANG==="uk"?"Магазин":"Shop", ps.shop)}
+          ${info_row(LANG==="uk"?"Всього":"Total", `${total_kg.toFixed(1)}kg`)}
         </div>
         <div style="background:#fff;border-radius:8px;padding:12px">
           <div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:600">BREAKDOWN</div>
@@ -1560,8 +1586,8 @@ function build_packing_page(container, fill) {
         ${container_summary}
       </div>
       <div class="grid-2">
-        <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="packing-back-edit">✏️ Edit</button>
-        <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="packing-confirm" ${state.saving?"disabled":""}>${state.saving?"Saving…":"✓ Confirm"}</button>
+        <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="packing-back-edit">✏️ ${tr("Edit","Редагувати")}</button>
+        <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="packing-confirm" ${state.saving?"disabled":""}>${state.saving?tr("Saving…","Збереження…"):tr("✓ Confirm","✓ Підтвердити")}</button>
       </div>
     </div></div>`;
   }
@@ -1594,8 +1620,9 @@ function build_packing_page(container, fill) {
     }
 
     return `<div class="overlay"><div class="modal" style="max-width:480px">
+      ${pack_step_bar("scan")}
       <div style="text-align:center;margin-bottom:14px">
-        <div style="font-weight:600;font-size:13px;color:#666">Packing for</div>
+        <div style="font-weight:600;font-size:13px;color:#666">${tr("Packing for","Пакування для")}</div>
         <h2 style="margin:2px 0 0">${esc(ps.shop)}</h2>
       </div>
 
@@ -1614,7 +1641,7 @@ function build_packing_page(container, fill) {
       <div style="position:relative;background:#f4f2ed;border-radius:12px;padding:18px;margin-bottom:14px;text-align:center;color:#666;font-size:13px;border:1px dashed #d4d1ca">
         ${flash}
         <div style="font-size:22px;margin-bottom:4px">⌨️</div>
-        Scan with your barcode scanner or type an ID below, then press Enter.
+        ${tr("Scan with your barcode scanner or type an ID below, then press Enter.","Скануйте сканером або введіть ID нижче, потім натисніть Enter.")}
       </div>`}
 
       <div style="position:relative;margin-bottom:14px">
@@ -1630,23 +1657,23 @@ function build_packing_page(container, fill) {
       </div>
 
       <div style="background:#fff7ed;border:1px solid #fde4c2;border-radius:10px;padding:12px;margin-bottom:14px">
-        <div style="font-size:12px;color:#92400e;margin-bottom:8px;font-weight:700">🎁 ADD 30g SAMPLE BAG</div>
+        <div style="font-size:12px;color:#92400e;margin-bottom:8px;font-weight:700">🎁 ${tr("ADD 30g SAMPLE BAG","ДОДАТИ ЗРАЗОК 30г")}</div>
         <div id="sample-list">${sample_list_html()}</div>
         <div style="display:flex;gap:6px;align-items:center;margin-top:${ps.samples.length?"8px":"0"}">
           <select id="sample-container" style="flex:1;font-size:14px;padding:9px">
-            <option value="">— Coffee to sample —</option>
+            <option value="">— ${LANG==="uk"?"Кава для зразка":"Coffee to sample"} —</option>
             ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${c.remaining.toFixed(1)}kg)</option>`).join("")}
           </select>
           <input type="number" id="sample-count" min="1" step="1" value="1" style="width:58px;font-size:14px;padding:9px;text-align:center" />
-          <button class="btn btn-amber btn-sm" id="sample-add">+ Add</button>
+          <button class="btn btn-amber btn-sm" id="sample-add">+ ${tr("Add","Додати")}</button>
         </div>
       </div>
 
       ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
 
       <div class="grid-2">
-        <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="pack-back-shop">← Shop</button>
-        <button class="btn btn-dark" style="padding:14px;font-size:15px;border-radius:10px" id="pack-review" ${!has_items?"disabled":""}>Review →</button>
+        <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="pack-back-shop">← ${tr("Shop","Магазин")}</button>
+        <button class="btn btn-dark" style="padding:14px;font-size:15px;border-radius:10px" id="pack-review" ${!has_items?"disabled":""}>${tr("Review →","Перевірити →")}</button>
       </div>
     </div></div>`;
   }
@@ -1671,23 +1698,24 @@ function build_packing_page(container, fill) {
     <div style="display:grid;gap:10px">${list.map(e => render_btn(e, badge_color, badge_label)).join("")}</div>`;
 
   return `<div class="overlay"><div class="modal">
+    ${pack_step_bar("shop")}
     <div style="text-align:center;margin-bottom:24px">
       <div style="font-size:40px">📦</div>
       <h2 style="margin:8px 0 2px">${esc(fill.coffee)}</h2>
       <div class="mono" style="color:#666;font-size:15px;font-weight:700">${esc(container.id)}</div>
-      <div style="color:#16a34a;font-size:15px;margin-top:4px">${fill.remaining.toFixed(1)}kg available</div>
+      <div style="color:#16a34a;font-size:15px;margin-top:4px">${fill.remaining.toFixed(1)}kg ${tr("available","доступно")}</div>
     </div>
-    <h3 style="font-size:18px;margin-bottom:8px">Where is this going?</h3>
+    <h3 style="font-size:18px;margin-bottom:8px">${tr("Where is this going?","Куди це відправляється?")}</h3>
     ${group("Shops", shops_only, "#16a34a", "")}
     ${group("Wholesale", wholesale_only, "#7e57c2", "WHOLESALE")}
     ${group("Online", online_only, "#666", "ONLINE")}
     <div style="background:#fff7ed;border-radius:8px;padding:14px;margin-top:18px;margin-bottom:14px">
-      <label class="lbl" style="font-size:14px">Or type a custom destination</label>
+      <label class="lbl" style="font-size:14px">${tr("Or type a custom destination","Або введіть інше місце")}</label>
       <input id="pack-shop-custom" placeholder="e.g. Stillorgan" style="font-size:16px;padding:12px 14px" />
-      <button class="btn btn-dark mt-8" id="pack-shop-custom-go" style="width:100%;padding:12px;font-size:15px">Use this →</button>
+      <button class="btn btn-dark mt-8" id="pack-shop-custom-go" style="width:100%;padding:12px;font-size:15px">${tr("Use this →","Використати →")}</button>
     </div>
     ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
-    <button class="btn btn-muted btn-full" id="close-scan">Cancel</button>
+    <button class="btn btn-muted btn-full" id="close-scan">${tr("Cancel","Скасувати")}</button>
   </div></div>`;
 }
 
@@ -1700,6 +1728,7 @@ function build_shop_confirm_page(container, fill, dispatch) {
 function attach_listeners() {
   const app=document.getElementById("app");
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
+  app.querySelector("#lang-toggle")?.addEventListener("click", () => { set_lang(LANG==="uk"?"en":"uk"); render(); });
   app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => { state.tab=Number(btn.dataset.tab); render(); }));
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
   app.querySelectorAll("[data-toggle-qr]").forEach(btn => btn.addEventListener("click", () => { state.ui.expanded_qr=state.ui.expanded_qr===btn.dataset.toggleQr?null:btn.dataset.toggleQr; render(); }));
