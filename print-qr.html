@@ -392,7 +392,7 @@
         supabaseClient.from("fp_label_data").select("*"),
         supabaseClient.from("fp_assignments").select("id, fp_code, effective_end").order("fp_code"),
       ]);
-      state.buckets = (buckets||[]).filter(b => !b.retired_at);
+      state.buckets = (buckets||[]).filter(b => !b.retired_at).sort((a,b)=>{ const n=x=>{const m=String(x.name||x.id||"").match(/(\d+)\s*$/);return m?+m[1]:Infinity;}; return n(a)-n(b)||String(a.name||a.id).localeCompare(String(b.name||b.id)); });
       state.containers = (containers||[]).filter(c => !c.retired_at);
       // Print/label workflows are forward-only — never need retired FPs or retired coffees.
       // Filter out: retired FP codes, AND any FP whose parent coffee is retired.

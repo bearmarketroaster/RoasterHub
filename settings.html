@@ -868,9 +868,11 @@ function build_buckets_section() {
   const open = state.open_section === "buckets";
   const { bucket_count, bucket_prefix, bucket_filter, bucket_err, bucket_msg } = state.ui;
   const buckets = state.buckets;
-  const filtered = bucket_filter === "active"  ? buckets.filter(b => !b.retired_at)
-                 : bucket_filter === "retired" ? buckets.filter(b =>  b.retired_at)
-                 : buckets;
+  const _filt = bucket_filter === "active"  ? buckets.filter(b => !b.retired_at)
+              : bucket_filter === "retired" ? buckets.filter(b =>  b.retired_at)
+              : buckets;
+  const bnum = b => { const m = String(b.name||b.id||"").match(/(\d+)\s*$/); return m ? parseInt(m[1],10) : Infinity; };
+  const filtered = [..._filt].sort((a,b) => bnum(a)-bnum(b) || String(a.name||a.id).localeCompare(String(b.name||b.id)));
 
   const active_count  = buckets.filter(b => !b.retired_at).length;
   const retired_count = buckets.filter(b =>  b.retired_at).length;
@@ -910,6 +912,13 @@ function build_buckets_section() {
             <button class="btn ${bucket_filter==="all"?"btn-dark":"btn-ghost"} btn-sm" data-bucket-filter="all" style="${bucket_filter==="all"?"color:#fff":""}">All</button>
           </div>
           ${filtered.length > 0 ? `<a href="${print_url}" target="_blank" class="btn btn-amber btn-sm" style="margin-left:auto;text-decoration:none">🖨️ Print All Visible</a>` : ""}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#fcfbf9;border-bottom:1px solid #f0eee9;font-size:13px">
+          <span style="color:#666;font-weight:600">🖨️ Print range:</span>
+          <input id="range-prefix" type="text" placeholder="name has… (e.g. White)" style="font-size:12px;padding:5px 8px;width:140px" />
+          <span style="color:#666">#</span><input id="range-from" type="number" min="1" placeholder="from" style="font-size:12px;padding:5px 8px;width:60px" />
+          <span style="color:#666">–</span><input id="range-to" type="number" min="1" placeholder="to" style="font-size:12px;padding:5px 8px;width:60px" />
+          <button class="btn btn-amber btn-sm" id="print-range-btn">Print these</button>
         </div>
         ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#999;font-style:italic">No buckets in this view.</div>' : buckets_html}
       </div>
@@ -1750,6 +1759,19 @@ function attach_listeners() {
   // ── Buckets
   app.querySelector("#bucket-count")?.addEventListener("input", e => { state.ui.bucket_count = e.target.value; });
   app.querySelector("#bucket-prefix")?.addEventListener("input", e => { state.ui.bucket_prefix = e.target.value; });
+  app.querySelector("#print-range-btn")?.addEventListener("click", () => {
+    const pre = (document.getElementById("range-prefix")?.value||"").trim().toLowerCase();
+    const fromV = document.getElementById("range-from")?.value, toV = document.getElementById("range-to")?.value;
+    const from = (fromV===""||fromV==null) ? null : parseInt(fromV,10);
+    const to   = (toV===""||toV==null) ? null : parseInt(toV,10);
+    const num = b => { const m = String(b.name||b.id||"").match(/(\d+)\s*$/); return m ? parseInt(m[1],10) : null; };
+    let list = state.buckets.filter(b => !b.retired_at);
+    if (pre) list = list.filter(b => String(b.name||"").toLowerCase().includes(pre));
+    if (from!=null || to!=null) list = list.filter(b => { const n = num(b); return n!=null && (from==null||n>=from) && (to==null||n<=to); });
+    list = list.map(b => ({ b, n: num(b) })).sort((a,b) => (a.n??1e9)-(b.n??1e9)).map(x => x.b);
+    if (!list.length) { state.ui.bucket_err = "No active buckets match that range."; render(); return; }
+    window.open(`print-qr.html?ids=${list.map(b => encodeURIComponent(b.id)).join(",")}`, "_blank");
+  });
   app.querySelector("#generate-buckets-btn")?.addEventListener("click", () => {
     const n = document.getElementById("bucket-count")?.value;
     const p = document.getElementById("bucket-prefix")?.value;
