@@ -223,6 +223,39 @@ async function send_to_samples(container_id) {
   await load_data();
   render();
 }
+// Admin: empty a container. Writes off the loose remaining coffee (the part not in buckets
+// and not already dispatched) and marks the container empty. Does NOT delete roast history,
+// touch filled buckets, or alter real dispatches — so it's safe to reuse the container after.
+async function empty_container(container_id) {
+  const c = state.containers.find(x => x.id === container_id);
+  if (!c) return;
+  const remaining = c.remaining || 0;
+  const held = state.buckets.filter(b => b.status === "filled" && b.container_id === container_id).length;
+  let msg = `Empty container ${container_id}?`;
+  if (remaining > 0) msg += `\n\n${remaining.toFixed(2)}kg of ${c.coffee || "coffee"} still loose in it will be written off and the container marked empty.`;
+  else msg += `\n\nIt will be marked empty.`;
+  if (held > 0) msg += `\n\n${held} filled bucket(s) from this container are NOT affected — they stay as stock.`;
+  if (!confirm(msg)) return;
+
+  if (remaining > 0) {
+    const dispatch_id = gen_id("DSP");
+    const fill_id = c.fill_id || null;
+    // Internal write-off: hidden from Deliveries, confirmed immediately. Records that the
+    // loose coffee left the container, keeping the remaining math correct without deleting anything.
+    await supabaseClient.from("dispatches").insert({
+      id: dispatch_id, container_id, fill_id, date: today(),
+      shop: "Emptied", total_kg: remaining, confirmed_at: new Date().toISOString(),
+    });
+    await supabaseClient.from("dispatch_lines").insert({
+      id: `${dispatch_id}-L1`, dispatch_id, type: "bulk",
+      kg: remaining, bags: 0, bag_size: "Emptied",
+      container_id, fill_id,
+    });
+  }
+  await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", container_id);
+  await load_data();
+  render();
+}
 async function revert_dispatch(dispatch_id) {
   const d = state.dispatches.find(x => x.id === dispatch_id);
   if (!d) return;
@@ -888,6 +921,10 @@ function build_containers_tab() {
       ? `<button class="btn btn-amber btn-sm" data-samples="${esc(c.id)}" title="Empty container into 30g sample bags">🎁 Send to Samples</button>`
       : "";
 
+    const empty_button = state.user_role === "admin" && (mode === "active" || mode === "waiting")
+      ? `<button class="btn btn-ghost btn-sm" data-empty-container="${esc(c.id)}" title="Write off loose coffee and mark the container empty — filled buckets are not affected" style="color:#dc2626;border-color:#f3c4c4">🗑️ Empty</button>`
+      : "";
+
     // Fill Buckets button — only meaningful when container has coffee and ≥5kg available
     const fill_buckets_button = (mode === "active" || mode === "waiting") && remaining >= 5
       ? `<button class="btn btn-green btn-sm" data-fill-buckets="${esc(c.id)}" title="Fill empty 5kg buckets from this container">🪣 Fill Buckets</button>`
@@ -904,6 +941,7 @@ function build_containers_tab() {
           <div class="flex-wrap gap-6">
             ${fill_buckets_button}
             ${samples_button}
+            ${empty_button}
             ${action_button}
           </div>
         </div>
@@ -1106,7 +1144,7 @@ function build_deliveries_tab() {
   const card = (d, confirmed) => { const {c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,confirmed); };
 
   // Internal sinks (Samples / Staff) stay out of Deliveries.
-  const visible = state.dispatches.filter(d => d.shop !== "Samples" && d.shop !== "Staff" && kind_of(d) !== "staff");
+  const visible = state.dispatches.filter(d => d.shop !== "Samples" && d.shop !== "Staff" && d.shop !== "Emptied" && kind_of(d) !== "staff");
   if (visible.length===0) return `<h2>Deliveries</h2><div class="card empty"><div class="icon">🚚</div>No dispatches yet.</div>`;
 
   const wholesale_d = visible.filter(d => kind_of(d) === "wholesale").sort(by_date_desc);
@@ -1805,6 +1843,9 @@ function attach_listeners() {
   }));
   app.querySelectorAll("[data-samples]").forEach(btn => btn.addEventListener("click", () => {
     send_to_samples(btn.dataset.samples);
+  }));
+  app.querySelectorAll("[data-empty-container]").forEach(btn => btn.addEventListener("click", () => {
+    empty_container(btn.dataset.emptyContainer);
   }));
 
   // New dispatch flow — start packing without picking a container upfront
