@@ -1101,14 +1101,52 @@ function build_manual_order_entry() {
 
 function build_deliveries_tab() {
   const get_ref=d=>{ const c=state.containers.find(x=>x.id===d.container_id); return {c, fill: c ? { coffee: c.coffee, date: c.roast_sessions?.[0]?.date||"", fill_number: 1 } : null}; };
-  // "Send to Samples" writes an internal Samples dispatch purely to empty the container — it's not a real delivery, so keep it out of this list.
-  const visible = state.dispatches.filter(d => d.shop !== "Samples");
+  const kind_of = d => (state.shop_mappings.find(m => m.master_name === d.shop)?.kind) || "shop";
+  const by_date_desc = (a,b) => (b.date||"").localeCompare(a.date||"") || (b.id||"").localeCompare(a.id||"");
+  const card = (d, confirmed) => { const {c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,confirmed); };
+
+  // Internal sinks (Samples / Staff) stay out of Deliveries.
+  const visible = state.dispatches.filter(d => d.shop !== "Samples" && d.shop !== "Staff" && kind_of(d) !== "staff");
   if (visible.length===0) return `<h2>Deliveries</h2><div class="card empty"><div class="icon">🚚</div>No dispatches yet.</div>`;
-  const in_transit = visible.filter(d => !d.confirmed_at);
-  const delivered  = visible.filter(d => d.confirmed_at);
+
+  const wholesale_d = visible.filter(d => kind_of(d) === "wholesale").sort(by_date_desc);
+  const online_d    = visible.filter(d => kind_of(d) === "online").sort(by_date_desc);
+
+  // SHOPS use the acceptance lifecycle: a dispatch sits under its shop name until the shop
+  // scans to accept it. Once accepted it drops off this page (history lives in reports).
+  const pending_shop = visible.filter(d => kind_of(d) === "shop" && !d.confirmed_at);
+  const by_shop = {};
+  pending_shop.forEach(d => { (by_shop[d.shop] = by_shop[d.shop] || []).push(d); });
+  const shop_names = Object.keys(by_shop).sort();
+
+  const gap = "margin-top:26px";
+  const empty_block = (icon, msg) => `<div class="card empty" style="padding:18px"><div class="icon">${icon}</div>${msg}</div>`;
+
+  const shops_html = shop_names.length
+    ? shop_names.map(name => {
+        const ds = by_shop[name].sort(by_date_desc);
+        return `<div style="margin-bottom:16px">
+          <div style="font-weight:700;font-size:14px;color:#1a1a1a;padding:6px 0;border-bottom:1px solid #e8e6e1;margin-bottom:10px">${esc(name)} <span style="color:#d97706;font-weight:600">· ${ds.length} awaiting</span></div>
+          ${ds.map(d => card(d, false)).join("")}
+        </div>`;
+      }).join("")
+    : empty_block("✓", "Nothing awaiting shop acceptance.");
+
+  const wholesale_html = wholesale_d.length
+    ? wholesale_d.map(d => card(d, !!d.confirmed_at)).join("")
+    : empty_block("📦", "No wholesale dispatches.");
+
+  const online_html = online_d.length
+    ? online_d.map(d => card(d, !!d.confirmed_at)).join("")
+    : empty_block("🌐", "No online dispatches.");
+
   return `<h2>Deliveries</h2>
-    ${in_transit.length>0?`<h3 style="color:#d97706;margin-top:0">⏳ In Transit (${in_transit.length})</h3>${in_transit.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,false); }).join("")}`:""}
-    ${delivered.length>0?`<h3 style="color:#16a34a;margin-top:${in_transit.length?24:0}px">✓ Delivered (${delivered.length})</h3>${delivered.map(d=>{ const{c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,true); }).join("")}`:""}`;
+    <h3 style="color:#d97706;margin-top:0">🏪 Shops — awaiting acceptance${pending_shop.length?` (${pending_shop.length})`:""}</h3>
+    ${shops_html}
+    <h3 style="color:#1a1a1a;${gap}">📦 Wholesale${wholesale_d.length?` (${wholesale_d.length})`:""}</h3>
+    ${wholesale_html}
+    <h3 style="color:#2563eb;${gap}">🌐 Online${online_d.length?` (${online_d.length})`:""}</h3>
+    ${online_html}`;
 }
 
 function build_order_delivery_card(order, dispatches, get_ref) {
@@ -1139,12 +1177,22 @@ function build_order_delivery_card(order, dispatches, get_ref) {
 
 function build_dispatch_card(d, c, fill, confirmed, show_scan=true) {
   const b_line=d.lines.find(l=>l.type==="bulk"), r_lines=d.lines.filter(l=>l.type==="retail");
-  const line_coffee=l=>(state.containers.find(x=>x.id===l.container_id)?.coffee)||fill?.coffee||"—";
+  const line_coffee=l=>{
+    const fp = l.fp_code && state.fp_codes.find(f=>f.fp_code===l.fp_code);
+    if (fp && fp.coffee_name) return fp.coffee_name;
+    const lc = state.containers.find(x=>x.id===l.container_id);
+    if (lc && lc.coffee) return lc.coffee;
+    const bk = l.fill_id && state.buckets.find(b=>b.fill_id===l.fill_id && b.coffee);
+    if (bk) return bk.coffee;
+    return fill?.coffee || "—";
+  };
+  const card_coffees=[...new Set(d.lines.map(line_coffee).filter(x=>x&&x!=="—"))];
+  const header_coffee=card_coffees.length?card_coffees.join(", "):(fill?.coffee||"—");
   return `
     <div class="card" style="border-left:4px solid ${confirmed?"#16a34a":"#d97706"};margin-bottom:12px">
       <div class="flex-between flex-wrap mb-10"><span style="font-weight:700;font-size:15px">${esc(d.shop)}</span>${confirmed?`<span class="tag" style="background:#e7f5ec;color:#16a34a">✓ Delivered</span>`:`<span class="tag" style="background:#fff3e0;color:#d97706">⏳ In Transit</span>`}</div>
       <div class="grid-2 mb-10" style="font-size:13px">
-        ${info_row("Coffee",fill?.coffee)}${info_row("Container",d.fill_id||d.container_id)}
+        ${info_row("Coffee",header_coffee)}${info_row("Container",d.fill_id||d.container_id)}
         ${info_row("Roast Date",fill?.date)}${info_row("Dispatch Date",d.date)}
         ${info_row("Total",`${d.total_kg}kg`)}${confirmed?info_row("Confirmed",new Date(d.confirmed_at).toLocaleString()):""}
       </div>
@@ -1721,8 +1769,17 @@ function build_packing_page(container, fill) {
 
 function build_shop_confirm_page(container, fill, dispatch) {
   const b_line=dispatch.lines.find(l=>l.type==="bulk"), r_lines=dispatch.lines.filter(l=>l.type==="retail");
-  const line_coffee=l=>(state.containers.find(x=>x.id===l.container_id)?.coffee)||fill?.coffee||"—";
-  return `<div class="overlay"><div class="modal"><div style="text-align:center;margin-bottom:24px"><div style="font-size:40px">☕</div><h2 style="margin:8px 0 2px">Your Coffee is Here</h2><p style="color:#666;font-size:14px;margin:0">Delivery for <strong>${esc(dispatch.shop)}</strong></p></div><div style="background:#f4f2ed;border-radius:12px;padding:18px;margin-bottom:16px"><div style="font-weight:700;font-size:16px;margin-bottom:12px">${esc(fill?.coffee??"—")}</div><div class="grid-2 mb-12">${info_row("Container",container.id)} ${info_row("Roast Date",fill?.date)}${info_row("Dispatch Date",dispatch.date)} ${info_row("Total",`${dispatch.total_kg}kg`)}</div><div style="background:#fff;border-radius:8px;padding:12px"><div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:600">WHAT'S IN THIS DELIVERY</div>${b_line?`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>⚖️ ${esc(line_coffee(b_line))} · Bulk</span><span style="font-weight:600">${b_line.kg}kg</span></div>`:""}${r_lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>${l.bag_size==="Bar 5kg"?"🪣":l.bag_size==="30g sample"?"🎁":"🛍️"} ${esc(line_coffee(l))} · ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label||l.bag_size}</span><span style="font-weight:600">${l.bags} ${l.bag_size==="Bar 5kg"?"":"bags "}(${l.kg}kg)</span></div>`).join("")}</div></div><button class="btn btn-green" style="width:100%;padding:18px;font-size:18px;border-radius:12px" id="confirm-delivery">✓ Confirm Receipt</button><button class="btn btn-muted btn-full mt-10" id="close-scan">Back</button></div></div>`;
+  const line_coffee=l=>{
+    const fp = l.fp_code && state.fp_codes.find(f=>f.fp_code===l.fp_code);
+    if (fp && fp.coffee_name) return fp.coffee_name;
+    const lc = state.containers.find(x=>x.id===l.container_id);
+    if (lc && lc.coffee) return lc.coffee;
+    const bk = l.fill_id && state.buckets.find(b=>b.fill_id===l.fill_id && b.coffee);
+    if (bk) return bk.coffee;
+    return fill?.coffee || "—";
+  };
+  const header_coffee=(()=>{ const cs=[...new Set(dispatch.lines.map(line_coffee).filter(x=>x&&x!=="—"))]; return cs.length?cs.join(", "):(fill?.coffee||"—"); })();
+  return `<div class="overlay"><div class="modal"><div style="text-align:center;margin-bottom:24px"><div style="font-size:40px">☕</div><h2 style="margin:8px 0 2px">Your Coffee is Here</h2><p style="color:#666;font-size:14px;margin:0">Delivery for <strong>${esc(dispatch.shop)}</strong></p></div><div style="background:#f4f2ed;border-radius:12px;padding:18px;margin-bottom:16px"><div style="font-weight:700;font-size:16px;margin-bottom:12px">${esc(header_coffee)}</div><div class="grid-2 mb-12">${info_row("Container",container.id)} ${info_row("Roast Date",fill?.date)}${info_row("Dispatch Date",dispatch.date)} ${info_row("Total",`${dispatch.total_kg}kg`)}</div><div style="background:#fff;border-radius:8px;padding:12px"><div style="font-size:12px;color:#666;margin-bottom:8px;font-weight:600">WHAT'S IN THIS DELIVERY</div>${b_line?`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>⚖️ ${esc(line_coffee(b_line))} · Bulk</span><span style="font-weight:600">${b_line.kg}kg</span></div>`:""}${r_lines.map(l=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px"><span>${l.bag_size==="Bar 5kg"?"🪣":l.bag_size==="30g sample"?"🎁":"🛍️"} ${esc(line_coffee(l))} · ${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label||l.bag_size}</span><span style="font-weight:600">${l.bags} ${l.bag_size==="Bar 5kg"?"":"bags "}(${l.kg}kg)</span></div>`).join("")}</div></div><button class="btn btn-green" style="width:100%;padding:18px;font-size:18px;border-radius:12px" id="confirm-delivery">✓ Confirm Receipt</button><button class="btn btn-muted btn-full mt-10" id="close-scan">Back</button></div></div>`;
 }
 
 function attach_listeners() {
