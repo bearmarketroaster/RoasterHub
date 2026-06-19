@@ -936,12 +936,13 @@ function build_rooms_view() {
     const pct = c.total_roasted > 0 ? Math.min(100, Math.round((remaining/c.total_roasted)*100)) : 0;
     const low = remaining < 10;
     const accent = room === "active" ? "#16a34a" : room === "filling" ? "#2563eb" : "#d97706";
-    const mv = (target,label,cls)=>`<button class="btn ${cls} btn-sm" data-move-room="${esc(c.id)}|${target}">${label}</button>`;
+    const bstyle = "flex:1;min-width:130px;padding:12px 10px;font-size:15px;font-weight:600;border-radius:8px";
+    const mv = (target,label,cls)=>`<button class="btn ${cls}" data-move-room="${esc(c.id)}|${target}" style="${bstyle}">${label}</button>`;
     let buttons = "";
     if (room === "waiting") {
       buttons = mv("filling","🪣 Filling →","btn-ghost") + mv("active","📦 Active →","btn-dark");
     } else if (room === "filling") {
-      buttons = (remaining >= 5 ? `<button class="btn btn-green btn-sm" data-fill-buckets="${esc(c.id)}">🪣 Fill bucket</button>` : "")
+      buttons = (remaining >= 5 ? `<button class="btn btn-green" data-fill-buckets="${esc(c.id)}" style="${bstyle}">🪣 Fill bucket</button>` : "")
               + mv("active","📦 Active →","btn-dark") + mv("waiting","← Store","btn-ghost");
     } else {
       buttons = mv("filling","← 🪣 Filling","btn-ghost") + mv("waiting","← Store","btn-ghost");
@@ -954,9 +955,8 @@ function build_rooms_view() {
           <div style="flex:1;height:8px;background:#eee;border-radius:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${low?"#dc2626":"#16a34a"}"></div></div>
           <span style="font-size:13px;font-weight:700;color:${low?"#dc2626":"#16a34a"}">${remaining.toFixed(1)}kg</span>
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${buttons}
-          <button class="btn btn-ghost btn-sm" data-empty-container="${esc(c.id)}" style="color:#dc2626;border-color:#f3c4c4">✓ Empty</button>
         </div>
       </div>`;
   };
@@ -973,11 +973,15 @@ function build_rooms_view() {
   return `
     <div class="flex-between mb-16"><h2 style="margin:0">Containers</h2><div class="flex gap-8">${new_dispatch_btn_html()}</div></div>
     ${container_view_toggle()}
-    <p style="color:#666;font-size:13px;margin:-4px 0 14px">Drag a drum between rooms, or use the buttons. <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. <strong>✓ Empty</strong> when a drum is physically empty.</p>
+    <p style="color:#666;font-size:13px;margin:-4px 0 14px">Drag a drum between rooms, or use the buttons. <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. To clear a drum, drag it to the red <strong>Empty</strong> strip at the bottom.</p>
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
       ${room("🏠 Inactive", "Store room · filled, waiting", inactive, "waiting", "#d97706")}
       ${room("🪣 Filling", "Fill 5kg buckets here", filling, "filling", "#2563eb")}
       ${room("📦 Active", "Packing room · pack from these", active, "active", "#16a34a")}
+    </div>
+    <div data-room-drop="empty" style="margin-top:14px;background:#faf9f7;border:2px dashed #dc2626;border-radius:14px;padding:22px;min-height:90px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;transition:background .1s,box-shadow .1s">
+      <div style="font-weight:800;font-size:18px;color:#dc2626">🗑️ Empty</div>
+      <div style="font-size:13px;color:#888;margin-top:2px">Drag a spent drum here to clear it — you'll get a confirm first</div>
     </div>`;
 }
 
@@ -1951,8 +1955,9 @@ function attach_listeners() {
     cardEl.addEventListener("dragend", () => { cardEl.style.opacity = ""; clear_room_hl(); });
   });
   app.querySelectorAll("[data-room-drop]").forEach(zone => {
-    zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; clear_room_hl(); zone.style.boxShadow = "inset 0 0 0 4px #2563eb"; zone.style.background = "#eaf2ff"; });
-    zone.addEventListener("drop", e => { e.preventDefault(); clear_room_hl(); const id = e.dataTransfer.getData("text/plain"); if (id) move_to_room(id, zone.dataset.roomDrop); });
+    const danger = zone.dataset.roomDrop === "empty";
+    zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; clear_room_hl(); zone.style.boxShadow = `inset 0 0 0 4px ${danger?"#dc2626":"#2563eb"}`; zone.style.background = danger ? "#fdeaea" : "#eaf2ff"; });
+    zone.addEventListener("drop", e => { e.preventDefault(); clear_room_hl(); const id = e.dataTransfer.getData("text/plain"); if (!id) return; if (zone.dataset.roomDrop === "empty") empty_container(id); else move_to_room(id, zone.dataset.roomDrop); });
   });
   app.querySelectorAll("[data-samples]").forEach(btn => btn.addEventListener("click", () => {
     send_to_samples(btn.dataset.samples);
