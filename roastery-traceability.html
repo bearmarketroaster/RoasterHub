@@ -193,6 +193,17 @@ function gen_id(prefix) {
 
 // Set a container's status
 async function set_container_status(container_id, new_status) {
+  // One-container-per-coffee rule for Active: enforced here so EVERY path (rooms drag,
+  // rooms buttons, detailed-view button) is covered, not just the board.
+  if (new_status === "active") {
+    const c = state.containers.find(x => x.id === container_id);
+    const clash = c && state.containers.find(x => x.id !== container_id && x.status === "active" && x.remaining > 0 && x.coffee && c.coffee && x.coffee === c.coffee);
+    if (clash) {
+      alert(`${c.coffee} is already active in ${clash.id}.\n\nFinish or empty that drum before activating another of the same coffee — packing always pulls from the oldest active drum, and two of the same would break that.`);
+      render();
+      return;
+    }
+  }
   // Make sure the container row exists, then update status
   await supabaseClient.from("containers").upsert({ id: container_id, status: new_status, status_changed_at: new Date().toISOString() }, { onConflict: "id" });
   await load_data();
@@ -909,16 +920,8 @@ function container_view_toggle() {
 
 // Move a drum between rooms. Into Active enforces one-container-per-coffee so FIFO stays intact.
 async function move_to_room(container_id, target) {
-  // target is the status itself: "waiting" (Store) | "filling" | "active". Only Active is one-per-coffee.
-  if (target === "active") {
-    const c = state.containers.find(x => x.id === container_id);
-    const clash = c && state.containers.find(x => x.id !== container_id && x.status === "active" && x.remaining > 0 && x.coffee && c.coffee && x.coffee === c.coffee);
-    if (clash) {
-      alert(`${c.coffee} is already active in ${clash.id}.\n\nFinish or empty that drum before activating another of the same coffee — packing always pulls from the oldest active drum, and two of the same would break that.`);
-      render();
-      return;
-    }
-  }
+  // target is the status itself: "waiting" (Store) | "filling" | "active".
+  // The one-per-coffee rule for "active" is enforced inside set_container_status.
   await set_container_status(container_id, target);
 }
 
@@ -959,12 +962,12 @@ function build_rooms_view() {
   };
 
   const room = (title, subtitle, list, dropTarget, accent) => `
-    <div data-room-drop="${dropTarget}" style="flex:1;min-width:240px;background:#faf9f7;border:2px dashed ${accent};border-radius:14px;padding:16px;min-height:320px">
+    <div data-room-drop="${dropTarget}" style="flex:1;min-width:240px;background:#faf9f7;border:2px dashed ${accent};border-radius:14px;padding:16px;min-height:60vh;transition:background .1s,box-shadow .1s">
       <div style="text-align:center;margin-bottom:14px">
         <div style="font-weight:800;font-size:18px;color:${accent}">${title}${list.length?` (${list.length})`:""}</div>
         <div style="font-size:12px;color:#888">${subtitle}</div>
       </div>
-      ${list.length ? list.map(c => card(c, dropTarget)).join("") : `<div style="text-align:center;color:#bbb;font-size:13px;padding:30px 0;font-style:italic">Empty</div>`}
+      ${list.length ? list.map(c => card(c, dropTarget)).join("") : `<div style="text-align:center;color:#bbb;font-size:14px;padding:40px 0;font-style:italic">Drop a drum here</div>`}
     </div>`;
 
   return `
@@ -1942,13 +1945,14 @@ function attach_listeners() {
     const [id, target] = btn.dataset.moveRoom.split("|");
     move_to_room(id, target);
   }));
-  app.querySelectorAll("[data-room-card]").forEach(cardEl => cardEl.addEventListener("dragstart", e => {
-    e.dataTransfer.setData("text/plain", cardEl.dataset.roomCard);
-    e.dataTransfer.effectAllowed = "move";
-  }));
+  const clear_room_hl = () => app.querySelectorAll("[data-room-drop]").forEach(z => { z.style.boxShadow=""; z.style.background="#faf9f7"; });
+  app.querySelectorAll("[data-room-card]").forEach(cardEl => {
+    cardEl.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", cardEl.dataset.roomCard); e.dataTransfer.effectAllowed = "move"; cardEl.style.opacity = "0.4"; });
+    cardEl.addEventListener("dragend", () => { cardEl.style.opacity = ""; clear_room_hl(); });
+  });
   app.querySelectorAll("[data-room-drop]").forEach(zone => {
-    zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
-    zone.addEventListener("drop", e => { e.preventDefault(); const id = e.dataTransfer.getData("text/plain"); if (id) move_to_room(id, zone.dataset.roomDrop); });
+    zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; clear_room_hl(); zone.style.boxShadow = "inset 0 0 0 4px #2563eb"; zone.style.background = "#eaf2ff"; });
+    zone.addEventListener("drop", e => { e.preventDefault(); clear_room_hl(); const id = e.dataTransfer.getData("text/plain"); if (id) move_to_room(id, zone.dataset.roomDrop); });
   });
   app.querySelectorAll("[data-samples]").forEach(btn => btn.addEventListener("click", () => {
     send_to_samples(btn.dataset.samples);
