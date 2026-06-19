@@ -123,6 +123,7 @@ const state = {
     expanded_qr: null,
     expanded_deliveries: {},
     coffee_filter: "all",
+    container_view: (function(){ try { return localStorage.getItem("rh_container_view") || "rooms"; } catch(_) { return "rooms"; } })(),
     fill_bucket_container: null,  // Container ID currently being filled with buckets
     bucket_return_open: false,
     bucket_return_condition: "clean",
@@ -897,10 +898,101 @@ function stop_return_scanner() {
   _return_html5_qr.stop().then(() => _return_html5_qr.clear()).catch(()=>{}).finally(() => { _return_html5_qr = null; });
 }
 
+// ----- Two-room board (packer-friendly): Inactive (store room) | Active (packing room) -----
+function set_container_view(v){ state.ui.container_view = v; try { localStorage.setItem("rh_container_view", v); } catch(_){} render(); }
+
+function container_view_toggle() {
+  const v = state.ui.container_view;
+  const b = (val, label) => `<button class="btn btn-sm ${v===val?"btn-dark":"btn-ghost"}" data-container-view="${val}">${label}</button>`;
+  return `<div class="flex gap-8" style="margin-bottom:14px">${b("rooms","🏠 Rooms")}${b("detailed","☰ Detailed")}</div>`;
+}
+
+// Move a drum between rooms. Into Active enforces one-container-per-coffee so FIFO stays intact.
+async function move_to_room(container_id, target) {
+  // target is the status itself: "waiting" (Store) | "filling" | "active". Only Active is one-per-coffee.
+  if (target === "active") {
+    const c = state.containers.find(x => x.id === container_id);
+    const clash = c && state.containers.find(x => x.id !== container_id && x.status === "active" && x.remaining > 0 && x.coffee && c.coffee && x.coffee === c.coffee);
+    if (clash) {
+      alert(`${c.coffee} is already active in ${clash.id}.\n\nFinish or empty that drum before activating another of the same coffee — packing always pulls from the oldest active drum, and two of the same would break that.`);
+      render();
+      return;
+    }
+  }
+  await set_container_status(container_id, target);
+}
+
+function build_rooms_view() {
+  const bycoffee = (a,b)=>(a.coffee||"").localeCompare(b.coffee||"");
+  const inactive = state.containers.filter(c => c.status === "waiting" && c.remaining > 0).sort(bycoffee);
+  const filling  = state.containers.filter(c => c.status === "filling" && c.remaining > 0).sort(bycoffee);
+  const active   = state.containers.filter(c => c.status === "active"  && c.remaining > 0).sort(bycoffee);
+
+  const card = (c, room) => {
+    const remaining = c.remaining || 0;
+    const pct = c.total_roasted > 0 ? Math.min(100, Math.round((remaining/c.total_roasted)*100)) : 0;
+    const low = remaining < 10;
+    const accent = room === "active" ? "#16a34a" : room === "filling" ? "#2563eb" : "#d97706";
+    const mv = (target,label,cls)=>`<button class="btn ${cls} btn-sm" data-move-room="${esc(c.id)}|${target}">${label}</button>`;
+    let buttons = "";
+    if (room === "waiting") {
+      buttons = mv("filling","🪣 Filling →","btn-ghost") + mv("active","📦 Active →","btn-dark");
+    } else if (room === "filling") {
+      buttons = (remaining >= 5 ? `<button class="btn btn-green btn-sm" data-fill-buckets="${esc(c.id)}">🪣 Fill bucket</button>` : "")
+              + mv("active","📦 Active →","btn-dark") + mv("waiting","← Store","btn-ghost");
+    } else {
+      buttons = mv("filling","← 🪣 Filling","btn-ghost") + mv("waiting","← Store","btn-ghost");
+    }
+    return `<div class="room-card" draggable="true" data-room-card="${esc(c.id)}"
+        style="background:#fff;border:2px solid ${accent};border-radius:10px;padding:12px 14px;margin-bottom:12px;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
+        <div style="font-weight:700;font-size:17px;color:#1a1a1a">${esc(c.id)}</div>
+        <div style="font-size:16px;color:#333;margin:2px 0 8px">${esc(c.coffee || "—")}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="flex:1;height:8px;background:#eee;border-radius:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${low?"#dc2626":"#16a34a"}"></div></div>
+          <span style="font-size:13px;font-weight:700;color:${low?"#dc2626":"#16a34a"}">${remaining.toFixed(1)}kg</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${buttons}
+          <button class="btn btn-ghost btn-sm" data-empty-container="${esc(c.id)}" style="color:#dc2626;border-color:#f3c4c4">✓ Empty</button>
+        </div>
+      </div>`;
+  };
+
+  const room = (title, subtitle, list, dropTarget, accent) => `
+    <div data-room-drop="${dropTarget}" style="flex:1;min-width:240px;background:#faf9f7;border:2px dashed ${accent};border-radius:14px;padding:16px;min-height:320px">
+      <div style="text-align:center;margin-bottom:14px">
+        <div style="font-weight:800;font-size:18px;color:${accent}">${title}${list.length?` (${list.length})`:""}</div>
+        <div style="font-size:12px;color:#888">${subtitle}</div>
+      </div>
+      ${list.length ? list.map(c => card(c, dropTarget)).join("") : `<div style="text-align:center;color:#bbb;font-size:13px;padding:30px 0;font-style:italic">Empty</div>`}
+    </div>`;
+
+  return `
+    <div class="flex-between mb-16"><h2 style="margin:0">Containers</h2><div class="flex gap-8">${new_dispatch_btn_html()}</div></div>
+    ${container_view_toggle()}
+    <p style="color:#666;font-size:13px;margin:-4px 0 14px">Drag a drum between rooms, or use the buttons. <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. <strong>✓ Empty</strong> when a drum is physically empty.</p>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
+      ${room("🏠 Inactive", "Store room · filled, waiting", inactive, "waiting", "#d97706")}
+      ${room("🪣 Filling", "Fill 5kg buckets here", filling, "filling", "#2563eb")}
+      ${room("📦 Active", "Packing room · pack from these", active, "active", "#16a34a")}
+    </div>`;
+}
+
+// Shared New Dispatch button (used by both views)
+function new_dispatch_btn_html() {
+  const active = state.containers.filter(c => c.status === "active" && c.remaining > 0);
+  const any_filled_bucket = state.buckets.some(b => !b.retired_at && b.status === "filled");
+  const can = active.length > 0 || any_filled_bucket;
+  return can
+    ? `<button class="btn btn-dark" id="new-dispatch-btn" style="padding:14px 22px;font-size:16px">+ ${tr("New Dispatch","Нове відправлення")}</button>`
+    : `<button class="btn btn-grey" disabled title="Move a container to Active or fill a bucket first" style="padding:14px 22px;font-size:16px">+ ${tr("New Dispatch","Нове відправлення")}</button>`;
+}
+
 function build_containers_tab() {
+  if (state.ui.container_view === "rooms") return build_rooms_view();
   // Group containers by status
   const active  = state.containers.filter(c => c.status === "active"  && c.remaining > 0);
-  const waiting = state.containers.filter(c => c.status === "waiting" && c.remaining > 0);
+  const waiting = state.containers.filter(c => (c.status === "waiting" || c.status === "filling") && c.remaining > 0);
   const empty   = state.containers.filter(c => c.status === "empty" || c.remaining <= 0);
 
   const render_container_card = (c, mode) => {
@@ -1070,6 +1162,8 @@ function build_containers_tab() {
         ${new_dispatch_btn}
       </div>
     </div>
+
+    ${container_view_toggle()}
 
     ${(buckets_filled + buckets_empty + buckets_out) > 0 ? `
       <details style="background:#fff7ed;border-radius:10px;margin-bottom:14px;border:1px solid #fde4c2">
@@ -1841,6 +1935,21 @@ function attach_listeners() {
     const [container_id, new_status] = btn.dataset.setStatus.split("|");
     set_container_status(container_id, new_status);
   }));
+  app.querySelectorAll("[data-container-view]").forEach(btn => btn.addEventListener("click", () => {
+    set_container_view(btn.dataset.containerView);
+  }));
+  app.querySelectorAll("[data-move-room]").forEach(btn => btn.addEventListener("click", () => {
+    const [id, target] = btn.dataset.moveRoom.split("|");
+    move_to_room(id, target);
+  }));
+  app.querySelectorAll("[data-room-card]").forEach(cardEl => cardEl.addEventListener("dragstart", e => {
+    e.dataTransfer.setData("text/plain", cardEl.dataset.roomCard);
+    e.dataTransfer.effectAllowed = "move";
+  }));
+  app.querySelectorAll("[data-room-drop]").forEach(zone => {
+    zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
+    zone.addEventListener("drop", e => { e.preventDefault(); const id = e.dataTransfer.getData("text/plain"); if (id) move_to_room(id, zone.dataset.roomDrop); });
+  });
   app.querySelectorAll("[data-samples]").forEach(btn => btn.addEventListener("click", () => {
     send_to_samples(btn.dataset.samples);
   }));
