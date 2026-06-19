@@ -1792,7 +1792,7 @@ function build_packing_page(container, fill) {
     // Otherwise → error (nothing to dispatch).
     const active_containers = state.containers.filter(c => c.status === "active" && c.remaining > 0);
     const filled_buckets_available = state.buckets.filter(b => !b.retired_at && b.status === "filled");
-    const sample_conts = state.containers.filter(c => c.coffee && c.remaining > 0).sort((a,b)=>(a.coffee||"").localeCompare(b.coffee||""));
+    const sample_conts = state.containers.filter(c => c.status === "active" && c.coffee && c.remaining > 0).sort((a,b)=>(a.coffee||"").localeCompare(b.coffee||""));
     let summary;
     if (active_containers.length > 0) {
       summary = `<div style="background:#f4f2ed;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
@@ -2168,6 +2168,7 @@ function attach_listeners() {
     if (!cid) { flash_scan("Pick a coffee to sample", "error"); return; }
     const cont = state.containers.find(c => c.id === cid);
     if (!cont) { flash_scan("Container not found", "error"); return; }
+    if (cont.status !== "active") { flash_scan(`${cont.coffee||cid} isn't active — samples can only come from active drums`, "error"); return; }
     const queued = packing_state.samples.filter(s => s.container_id === cid).reduce((a,s)=>a+s.count*0.03, 0);
     if (count*0.03 + queued > cont.remaining + 1e-9) { flash_scan(`Only ${(cont.remaining-queued).toFixed(2)}kg left in ${cont.coffee}`, "error"); return; }
     const existing = packing_state.samples.find(s => s.container_id === cid);
