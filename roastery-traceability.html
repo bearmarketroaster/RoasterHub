@@ -948,7 +948,7 @@ function build_rooms_view() {
       buttons = mv("filling","← 🪣 Filling","btn-ghost") + mv("waiting","← Store","btn-ghost");
     }
     return `<div class="room-card" draggable="true" data-room-card="${esc(c.id)}"
-        style="background:#fff;border:2px solid ${accent};border-radius:10px;padding:12px 14px;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,0.08);flex:1 1 220px;max-width:340px">
+        style="background:#fff;border:2px solid ${accent};border-radius:10px;padding:12px 14px;margin-bottom:12px;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
         <div style="font-weight:700;font-size:17px;color:#1a1a1a">${esc(c.id)}</div>
         <div style="font-size:16px;color:#333;margin:2px 0 8px">${esc(c.coffee || "—")}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
@@ -961,27 +961,24 @@ function build_rooms_view() {
       </div>`;
   };
 
-  const band = (title, subtitle, list, dropTarget, accent) => `
-    <div data-room-drop="${dropTarget}" style="background:#faf9f7;border:2px dashed ${accent};border-radius:14px;padding:14px 16px;margin-bottom:14px;min-height:110px;transition:background .1s,box-shadow .1s">
-      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-        <span style="font-weight:800;font-size:17px;color:${accent}">${title}${list.length?` (${list.length})`:""}</span>
-        <span style="font-size:12px;color:#888">${subtitle}</span>
+  const col = (title, subtitle, list, dropTarget, accent, bg, placeholder) => `
+    <div data-room-drop="${dropTarget}" style="flex:1;min-width:200px;background:${bg};border:2px dashed ${accent};border-radius:14px;padding:14px;min-height:56vh;transition:background .1s,box-shadow .1s">
+      <div style="text-align:center;margin-bottom:12px">
+        <div style="font-weight:800;font-size:16px;color:${accent}">${title}${list.length?` (${list.length})`:""}</div>
+        <div style="font-size:11px;color:#888">${subtitle}</div>
       </div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
-        ${list.length ? list.map(c => card(c, dropTarget)).join("") : `<div style="color:#bbb;font-size:14px;font-style:italic;padding:12px 4px">Drop a drum here</div>`}
-      </div>
+      ${list.length ? list.map(c => card(c, dropTarget)).join("") : `<div style="text-align:center;color:#bbb;font-size:13px;padding:28px 6px;font-style:italic">${placeholder}</div>`}
     </div>`;
 
   return `
     <div class="flex-between mb-16"><h2 style="margin:0">Containers</h2><div class="flex gap-8">${new_dispatch_btn_html()}</div></div>
     ${container_view_toggle()}
-    <p style="color:#666;font-size:13px;margin:-4px 0 14px">Drag a drum between rooms, or use the buttons. <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. To clear a drum, drag it to the red <strong>Empty</strong> strip at the bottom.</p>
-    ${band("🏠 Inactive", "Store room · filled, waiting", inactive, "waiting", "#d97706")}
-    ${band("🪣 Filling", "Fill 5kg buckets here", filling, "filling", "#2563eb")}
-    ${band("📦 Active", "Packing room · pack from these", active, "active", "#16a34a")}
-    <div data-room-drop="empty" style="background:#faf9f7;border:2px dashed #dc2626;border-radius:14px;padding:18px;min-height:74px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;transition:background .1s,box-shadow .1s">
-      <div style="font-weight:800;font-size:18px;color:#dc2626">🗑️ Empty</div>
-      <div style="font-size:13px;color:#888;margin-top:2px">Drag a spent drum here to clear it — you'll get a confirm first</div>
+    <p style="color:#666;font-size:13px;margin:-4px 0 14px">Drag a drum between rooms, or use the buttons. <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. To clear a drum, drag it to the red <strong>Empty</strong> column.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
+      ${col("🏠 Inactive", "Store · waiting", inactive, "waiting", "#d97706", "#faf9f7", "Drop a drum here")}
+      ${col("🪣 Filling", "Fill 5kg buckets", filling, "filling", "#2563eb", "#faf9f7", "Drop a drum here")}
+      ${col("📦 Active", "Pack from these", active, "active", "#16a34a", "#faf9f7", "Drop a drum here")}
+      ${col("🗑️ Empty", "Drag a spent drum here", [], "empty", "#dc2626", "#fdf5f5", "Drop a spent drum here — you'll get a confirm")}
     </div>`;
 }
 
