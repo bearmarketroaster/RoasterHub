@@ -650,6 +650,32 @@ function update_fill_panel() {
   if (confirmBtn) confirmBtn.disabled = fill_state.filled.length === 0;
 }
 
+// Rank bucket suggestions so the exact match always surfaces above the result cap.
+// exact name/id (or exact trailing number) first, then prefix, then substring; ties by trailing number.
+function rank_bucket_matches(pool, q, exclude_ids, limit) {
+  q = (q || "").trim().toLowerCase();
+  if (!q) return [];
+  const ex = exclude_ids || new Set();
+  const qnum = (q.match(/(\d+)\s*$/) || [])[1];
+  const scored = [];
+  for (const b of pool) {
+    if (ex.has && ex.has(b.id)) continue;
+    const name = (b.name || "").toLowerCase();
+    const id = (b.id || "").toLowerCase();
+    const coffee = (b.coffee || "").toLowerCase();
+    if (!`${id} ${name} ${coffee}`.includes(q)) continue;
+    let rank;
+    if (name === q || id === q) rank = 0;
+    else if (name.startsWith(q) || id.startsWith(q)) rank = 1;
+    else rank = 2;
+    const bnum = (name.match(/(\d+)\s*$/) || [])[1];
+    if (qnum && bnum && qnum === bnum) rank = 0; // typed number matches the bucket's number exactly = the one they want
+    scored.push({ b, rank, num: bnum ? parseInt(bnum, 10) : Infinity });
+  }
+  scored.sort((x, y) => x.rank - y.rank || x.num - y.num || (x.b.name || "").localeCompare(y.b.name || ""));
+  return scored.slice(0, limit || 8).map(s => s.b);
+}
+
 function build_fill_buckets_overlay() {
   const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
   if (!container) {
@@ -1883,11 +1909,10 @@ function attach_listeners() {
     const sug = document.getElementById("fill-suggestions");
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
-    const matches = state.buckets.filter(b => {
-      if (b.retired_at || b.status !== "empty") return false;
-      const hay = `${b.id} ${b.name||""}`.toLowerCase();
-      return hay.includes(q);
-    }).slice(0, 8);
+    const matches = rank_bucket_matches(
+      state.buckets.filter(b => !b.retired_at && b.status === "empty"),
+      q, new Set(fill_state.filled.map(x => x.id))
+    );
     if (matches.length === 0) {
       sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No empty buckets match</div>`;
     } else {
@@ -1980,11 +2005,10 @@ function attach_listeners() {
     const sug = document.getElementById("return-suggestions");
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
-    const matches = state.buckets.filter(b => {
-      if (b.retired_at || b.status === "empty") return false;
-      const hay = `${b.id} ${b.name||""} ${b.coffee||""}`.toLowerCase();
-      return hay.includes(q);
-    }).slice(0, 8);
+    const matches = rank_bucket_matches(
+      state.buckets.filter(b => !b.retired_at && b.status !== "empty"),
+      q, new Set(return_state.returned.map(x => x.id))
+    );
     if (matches.length === 0) {
       sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No matching buckets out</div>`;
     } else {
@@ -2112,11 +2136,10 @@ function attach_listeners() {
       const hay = `${f.fp_code} ${f.coffee_name} ${f.bag_size}`.toLowerCase();
       return hay.includes(q);
     });
-    const bucket_matches = state.buckets.filter(b => {
-      if (b.status !== "filled" || b.retired_at) return false;
-      const hay = `${b.id} ${b.name||""} ${b.coffee||""}`.toLowerCase();
-      return hay.includes(q);
-    });
+    const bucket_matches = rank_bucket_matches(
+      state.buckets.filter(b => b.status === "filled" && !b.retired_at),
+      q, new Set(packing_state.scanned_buckets.map(x => x.id))
+    );
     const total = fp_matches.length + bucket_matches.length;
     if (total === 0) {
       sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No matches</div>`;

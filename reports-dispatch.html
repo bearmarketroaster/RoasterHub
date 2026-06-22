@@ -95,7 +95,7 @@ async function load_data() {
   state.containers = Object.values(container_map);
 
   const { data: dispatches } = await supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date", { ascending: false });
-  state.dispatches = (dispatches||[]).map(d => ({ ...d, lines: d.dispatch_lines||[] }));
+  state.dispatches = (dispatches||[]).filter(d => d.shop !== "Emptied").map(d => ({ ...d, lines: d.dispatch_lines||[] }));
 
   const { data: shop_mappings } = await supabaseClient.from("shop_mappings").select("master_name, kind");
   state.shop_kind_map = {};
