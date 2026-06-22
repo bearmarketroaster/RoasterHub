@@ -109,7 +109,7 @@ supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
   init();
 });
 
-const TABS = ["Containers","Deliveries"];
+const TABS = ["Containers","Deliveries","Buckets"];
 const RETAIL_SIZES = [{ val:"100g", label:"100g" },{ val:"200g", label:"200g" },{ val:"500g", label:"500g" },{ val:"1kg", label:"1kg" },{ val:"Bar 5kg", label:"Bar" }];
 
 const state = {
@@ -126,6 +126,7 @@ const state = {
     container_view: (function(){ try { return localStorage.getItem("rh_container_view") || "rooms"; } catch(_) { return "rooms"; } })(),
     fill_bucket_container: null,  // Container ID currently being filled with buckets
     bucket_return_open: false,
+    empty_choice: null,  // Container ID pending the empty-via-samples-or-writeoff choice
     bucket_return_condition: "clean",
   },
 };
@@ -211,12 +212,12 @@ async function set_container_status(container_id, new_status) {
 }
 
 // Send remaining contents of a container to samples (30g bags)
-async function send_to_samples(container_id) {
+async function send_to_samples(container_id, skip_confirm) {
   const c = state.containers.find(x => x.id === container_id);
   if (!c || c.remaining <= 0) return;
   const remaining = c.remaining;
   const bags = Math.floor(remaining * 1000 / 30);
-  if (!confirm(`Empty ${container_id}? ${remaining.toFixed(2)}kg of ${c.coffee} will be logged as ${bags} × 30g sample bags.`)) return;
+  if (!skip_confirm && !confirm(`Empty ${container_id}? ${remaining.toFixed(2)}kg of ${c.coffee} will be logged as ${bags} × 30g sample bags.`)) return;
 
   const dispatch_id = gen_id("DSP");
   const fill_id = c.fill_id || null;
@@ -238,7 +239,7 @@ async function send_to_samples(container_id) {
 // Admin: empty a container. Writes off the loose remaining coffee (the part not in buckets
 // and not already dispatched) and marks the container empty. Does NOT delete roast history,
 // touch filled buckets, or alter real dispatches — so it's safe to reuse the container after.
-async function empty_container(container_id) {
+async function empty_container(container_id, skip_confirm) {
   const c = state.containers.find(x => x.id === container_id);
   if (!c) return;
   const remaining = c.remaining || 0;
@@ -247,7 +248,7 @@ async function empty_container(container_id) {
   if (remaining > 0) msg += `\n\n${remaining.toFixed(2)}kg of ${c.coffee || "coffee"} still loose in it will be written off and the container marked empty.`;
   else msg += `\n\nIt will be marked empty.`;
   if (held > 0) msg += `\n\n${held} filled bucket(s) from this container are NOT affected — they stay as stock.`;
-  if (!confirm(msg)) return;
+  if (!skip_confirm && !confirm(msg)) return;
 
   if (remaining > 0) {
     const dispatch_id = gen_id("DSP");
@@ -507,12 +508,13 @@ function build_app() {
   if (state.scan_id) return build_scan_overlay();
   if (state.ui.fill_bucket_container) return build_fill_buckets_overlay();
   if (state.ui.bucket_return_open) return build_bucket_return_overlay();
+  if (state.ui.empty_choice) return build_empty_choice_overlay();
   const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Mrkt</div></div></div><div style="display:flex;align-items:center;gap:10px"><button id="lang-toggle" style="background:none;border:1px solid #888;color:#1a1a1a;border-radius:6px;padding:5px 12px;font-size:14px;font-weight:700;cursor:pointer">${LANG==="uk"?"УКР ▾":"EN ▾"}</button><button class="btn-logout" id="logout-btn">Log Out</button></div></div>`;
   if (state.loading) return header+`<div class="loading">Loading…</div>`;
   const badges={Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
   return header+`
     <div class="tabs">${TABS.map((t,i)=>`<button class="tab-btn${state.tab===i?" active":""}" data-tab="${i}">${esc(t)}${badges[t]>0?`<span class="tag" style="background:#dc2626;color:#fff;margin-left:6px">${badges[t]}</span>`:""}</button>`).join("")}</div>
-    <div class="content">${[build_containers_tab,build_deliveries_tab][state.tab]()}</div>`;
+    <div class="content">${[build_containers_tab,build_deliveries_tab,build_buckets_tab][state.tab]()}</div>`;
 }
 
 function build_scan_overlay() {
@@ -976,8 +978,7 @@ function build_rooms_view() {
 
   return `
     <div class="flex-between mb-16"><h2 style="margin:0">Containers</h2><div class="flex gap-8">${new_dispatch_btn_html()}</div></div>
-    ${container_view_toggle()}
-    <p style="color:#666;font-size:13px;margin:-4px 0 14px">Drag a drum between rooms, or use the buttons. <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. To clear a drum, drag it to the red <strong>Empty</strong> column.</p>
+    <p style="color:#666;font-size:13px;margin:0 0 14px">Drag a drum between rooms, or use the buttons. <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. To clear a drum, drag it to the red <strong>Empty</strong> column.</p>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
       ${col("🪣 Filling", "Fill 5kg buckets", filling, "filling", "#2563eb", "#faf9f7", "Drop a drum here")}
       ${col("🏠 Inactive", "Store · waiting", inactive, "waiting", "#d97706", "#faf9f7", "Drop a drum here")}
@@ -996,229 +997,90 @@ function new_dispatch_btn_html() {
     : `<button class="btn btn-grey" disabled title="Move a container to Active or fill a bucket first" style="padding:14px 22px;font-size:16px">+ ${tr("New Dispatch","Нове відправлення")}</button>`;
 }
 
-function build_containers_tab() {
-  if (state.ui.container_view === "rooms") return build_rooms_view();
-  // Group containers by status
-  const active  = state.containers.filter(c => c.status === "active"  && c.remaining > 0);
-  const waiting = state.containers.filter(c => (c.status === "waiting" || c.status === "filling") && c.remaining > 0);
-  const empty   = state.containers.filter(c => c.status === "empty" || c.remaining <= 0);
+function build_empty_choice_overlay() {
+  const c = state.containers.find(x => x.id === state.ui.empty_choice);
+  if (!c) { state.ui.empty_choice = null; return build_rooms_view(); }
+  const remaining = c.remaining || 0;
+  const bags = Math.floor(remaining * 1000 / 30);
+  return `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1000">
+    <div style="background:#fff;border-radius:14px;padding:24px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3)">
+      <h2 style="margin:0 0 6px">Empty ${esc(c.id)}</h2>
+      <p style="font-size:14px;color:#444;margin:0 0 18px"><strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} is still loose in this drum. What should happen to it?</p>
+      <button class="btn btn-amber" id="empty-as-samples" style="width:100%;padding:14px;font-size:15px;margin-bottom:10px">🎁 Bag as ~${bags} × 30g samples</button>
+      <button class="btn" id="empty-writeoff" style="width:100%;padding:14px;font-size:15px;margin-bottom:10px;background:#dc2626;color:#fff">🗑️ Write it off</button>
+      <button class="btn btn-ghost" id="empty-cancel" style="width:100%;padding:12px;font-size:14px">Cancel</button>
+    </div>
+  </div>`;
+}
 
-  const render_container_card = (c, mode) => {
-    const in_transit = state.dispatches.find(d => d.container_id===c.id && !d.confirmed_at);
-    const remaining = c.remaining || 0;
-    const bar_color = remaining < 10 ? "#dc2626" : "#16a34a";
-    const pct = c.total_roasted > 0 ? Math.min(100, Math.round((remaining / c.total_roasted) * 100)) : 0;
-    const latest_session = c.roast_sessions[0];
-
-    let action_button = "";
-    if (mode === "active") {
-      action_button = `<button class="btn btn-ghost btn-sm" data-set-status="${esc(c.id)}|waiting">↩ Move to Waiting</button>`;
-    } else if (mode === "waiting") {
-      action_button = `<button class="btn btn-dark btn-sm" data-set-status="${esc(c.id)}|active">→ Move to Active</button>`;
-    }
-
-    const samples_button = mode === "active" && remaining > 0 && remaining < 5
-      ? `<button class="btn btn-amber btn-sm" data-samples="${esc(c.id)}" title="Empty container into 30g sample bags">🎁 Send to Samples</button>`
-      : "";
-
-    const empty_button = state.user_role === "admin" && (mode === "active" || mode === "waiting")
-      ? `<button class="btn btn-ghost btn-sm" data-empty-container="${esc(c.id)}" title="Write off loose coffee and mark the container empty — filled buckets are not affected" style="color:#dc2626;border-color:#f3c4c4">🗑️ Empty</button>`
-      : "";
-
-    // Fill Buckets button — only meaningful when container has coffee and ≥5kg available
-    const fill_buckets_button = (mode === "active" || mode === "waiting") && remaining >= 5
-      ? `<button class="btn btn-green btn-sm" data-fill-buckets="${esc(c.id)}" title="Fill empty 5kg buckets from this container">🪣 Fill Buckets</button>`
-      : "";
-
-    return `
-      <div class="card" style="border-left:4px solid ${mode==="active"?"#16a34a":mode==="waiting"?"#d97706":"#ccc"};margin-bottom:10px;${mode==="empty"?"opacity:0.7":""}">
-        <div class="flex-between flex-wrap">
-          <div class="flex-wrap gap-6">
-            <span style="font-weight:700;font-size:16px">${esc(c.id)}</span>
-            ${c.fill_id ? `<span class="mono" style="background:#f0eee9;color:#666;padding:2px 8px;border-radius:4px;font-size:11px">${esc(c.fill_id)}</span>` : ""}
-            ${in_transit ? `<span class="tag" style="background:#fff3e0;color:#d97706;border-radius:4px">⏳ Has Pending Dispatch</span>` : ""}
-          </div>
-          <div class="flex-wrap gap-6">
-            ${fill_buckets_button}
-            ${samples_button}
-            ${empty_button}
-            ${action_button}
-          </div>
-        </div>
-        ${c.coffee ? `<div style="margin-top:10px;font-weight:600;font-size:15px">${esc(c.coffee)}</div>` : ""}
-        <div style="font-size:13px;color:#666;margin-top:2px">${c.coffee ? `Last roast: ${latest_session?.date || "—"} · ` : ""}Total roasted: ${c.total_roasted.toFixed(1)}kg</div>
-        ${mode !== "empty" ? `
-          <div style="margin-top:10px">
-            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
-              <span>Remaining: <strong>${remaining.toFixed(1)}kg</strong></span>
-              <span style="color:${bar_color}">${pct}%</span>
-            </div>
-            <div class="stock-track"><div class="stock-fill" style="background:${bar_color};width:${pct}%"></div></div>
-          </div>` : ""}
-      </div>`;
-  };
-
-  // Dispatch is possible if there's something to dispatch:
-  //   - An active container (for retail bag/FP scans), OR
-  //   - At least one filled bucket (carries its own provenance — works without an active container)
-  const any_filled_bucket = state.buckets.some(b => !b.retired_at && b.status === "filled");
-  const can_dispatch = active.length > 0 || any_filled_bucket;
-  const dispatch_disabled_reason = !can_dispatch
-    ? "Move a container to Active or fill a bucket first"
-    : "";
-  const new_dispatch_btn = can_dispatch
-    ? `<button class="btn btn-dark" id="new-dispatch-btn" style="padding:14px 22px;font-size:16px">+ ${tr("New Dispatch","Нове відправлення")}</button>`
-    : `<button class="btn btn-grey" disabled title="${esc(dispatch_disabled_reason)}" style="padding:14px 22px;font-size:16px">+ ${tr("New Dispatch","Нове відправлення")}</button>`;
-
-  // Bucket fleet — full lists
+function build_buckets_tab() {
   const all_buckets = state.buckets.filter(b => !b.retired_at);
   const filled_buckets = all_buckets.filter(b => b.status === "filled").sort((a,b) => (a.coffee||"").localeCompare(b.coffee||""));
   const empty_buckets  = all_buckets.filter(b => b.status === "empty");
   const dispatched_buckets = all_buckets.filter(b => b.status === "dispatched");
 
-  // For dispatched buckets, derive whether they're "in transit" (dispatch not confirmed)
-  // or "at shop" (dispatch confirmed) by looking up the dispatch they belong to.
-  // We use the dispatch_buckets join — but we already have it via state.dispatches?
-  // Simpler: dispatched buckets' dispatch_id can be found via the dispatch_buckets table,
-  // which isn't currently loaded in state. Let's load it.
-  // Walk through state.dispatches and their dispatch_buckets (loaded in load_data with a join below).
   const bucket_to_dispatch = state._bucket_to_dispatch || {};
   const in_transit_buckets = [], at_shop_buckets = [];
   dispatched_buckets.forEach(b => {
     const d = bucket_to_dispatch[b.id];
-    if (d && d.confirmed_at) at_shop_buckets.push({ ...b, _shop: d.shop, _confirmed_at: d.confirmed_at });
-    else in_transit_buckets.push({ ...b, _shop: d?.shop });
+    if (d && d.confirmed_at) at_shop_buckets.push({ ...b, _shop: d.shop });
+    else in_transit_buckets.push({ ...b, _shop: d ? d.shop : null });
   });
 
   const buckets_filled  = filled_buckets.length;
   const buckets_empty   = empty_buckets.length;
   const buckets_transit = in_transit_buckets.length;
   const buckets_atshop  = at_shop_buckets.length;
-  const buckets_out     = dispatched_buckets.length;  // total dispatched, for the Returns button
+  const buckets_out     = dispatched_buckets.length;
 
-  // Group filled buckets by coffee for the breakdown view
   const filled_by_coffee = {};
-  filled_buckets.forEach(b => {
-    const k = b.coffee || "(unknown)";
-    if (!filled_by_coffee[k]) filled_by_coffee[k] = [];
-    filled_by_coffee[k].push(b);
-  });
+  filled_buckets.forEach(b => { const k = b.coffee || "(unknown)"; (filled_by_coffee[k] = filled_by_coffee[k] || []).push(b); });
 
-  // Build a row for each bucket showing name (if any), id, source container, optionally shop
   const fmt_bucket_row = (b) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#fff;border-radius:6px;margin-bottom:4px;font-size:12px">
-    <div style="min-width:0;flex:1"><strong>${esc(b.name || b.id)}</strong>${b.name ? ` <span class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</span>` : ""}${b._shop ? ` <span class="hint" style="font-size:11px"> → ${esc(b._shop)}</span>` : ""}</div>
+    <div style="min-width:0;flex:1"><strong>${esc(b.name || b.id)}</strong>${b.name ? ` <span class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</span>` : ""}${b._shop ? ` <span class="hint" style="font-size:11px"> &rarr; ${esc(b._shop)}</span>` : ""}</div>
     <div class="hint" style="font-size:11px;font-family:monospace">${esc(b.container_id || "?")}</div>
   </div>`;
 
   const filled_html = Object.entries(filled_by_coffee).map(([coffee, buckets]) => `
     <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#1a1a1a;margin-bottom:4px">${esc(coffee)} <span class="hint" style="font-weight:400">(${buckets.length} × 5kg = ${(buckets.length*5).toFixed(0)}kg)</span></div>
+      <div style="font-weight:700;font-size:13px;color:#1a1a1a;margin-bottom:4px">${esc(coffee)} <span class="hint" style="font-weight:400">(${buckets.length} &times; 5kg = ${(buckets.length*5).toFixed(0)}kg)</span></div>
       ${buckets.map(fmt_bucket_row).join("")}
     </div>`).join("");
-
   const in_transit_html = in_transit_buckets.length === 0 ? "" : `
     <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#d97706;margin-bottom:4px">⏳ In transit <span class="hint" style="font-weight:400;color:#666">(${in_transit_buckets.length}) — packed, awaiting delivery confirmation</span></div>
+      <div style="font-weight:700;font-size:13px;color:#d97706;margin-bottom:4px">&#9203; In transit <span class="hint" style="font-weight:400;color:#666">(${in_transit_buckets.length}) &mdash; packed, awaiting delivery confirmation</span></div>
       ${in_transit_buckets.map(fmt_bucket_row).join("")}
     </div>`;
-
   const at_shop_html = at_shop_buckets.length === 0 ? "" : `
     <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#16a34a;margin-bottom:4px">✓ At shops <span class="hint" style="font-weight:400;color:#666">(${at_shop_buckets.length}) — confirmed delivered</span></div>
+      <div style="font-weight:700;font-size:13px;color:#16a34a;margin-bottom:4px">&#10003; At shops <span class="hint" style="font-weight:400;color:#666">(${at_shop_buckets.length}) &mdash; confirmed delivered</span></div>
       ${at_shop_buckets.map(fmt_bucket_row).join("")}
     </div>`;
 
-  const empty_html = empty_buckets.length === 0 ? "" : `
-    <div style="margin-bottom:10px">
-      <div style="font-weight:700;font-size:13px;color:#1a1a1a;margin-bottom:4px">Empty at roastery <span class="hint" style="font-weight:400">(${empty_buckets.length})</span></div>
-      <div class="hint" style="font-size:12px">Ready to fill from any active container.</div>
+  const stat = (n, label, color) => `<div style="flex:1;min-width:90px;text-align:center;background:#fff;border:1px solid #eee;border-radius:10px;padding:12px 8px">
+      <div style="font-size:26px;font-weight:800;color:${color}">${n}</div>
+      <div style="font-size:12px;color:#666">${label}</div>
     </div>`;
-
-  // ── Coffee filter + grouped waiting list, so you can find a coffee fast ──
-  const all_pack = [...active, ...waiting];
-  const coffee_counts = {};
-  all_pack.forEach(c => { const k = c.coffee || "(no coffee)"; coffee_counts[k] = (coffee_counts[k]||0)+1; });
-  const coffee_keys = Object.keys(coffee_counts).sort();
-  const cfilter = state.ui.coffee_filter || "all";
-  const cmatch = c => cfilter === "all" || (c.coffee || "(no coffee)") === cfilter;
-  const fa = active.filter(cmatch);
-  const fw = waiting.filter(cmatch);
-  const chip_style = sel => `padding:7px 14px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid ${sel?"#1a1a1a":"#e8e6e1"};background:${sel?"#1a1a1a":"#fff"};color:${sel?"#fff":"#1a1a1a"}`;
-  const chips_html = coffee_keys.length > 1 ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
-      <button data-coffee-filter="all" style="${chip_style(cfilter==="all")}">All (${all_pack.length})</button>
-      ${coffee_keys.map(k => `<button data-coffee-filter="${esc(k)}" style="${chip_style(cfilter===k)}">${esc(k)} (${coffee_counts[k]})</button>`).join("")}
-    </div>` : "";
-  const wbc = {};
-  fw.forEach(c => { const k = c.coffee || "(no coffee)"; (wbc[k] = wbc[k] || []).push(c); });
-  const waiting_grouped = Object.keys(wbc).sort().map(coffee => {
-    const list = wbc[coffee];
-    const total = list.reduce((s,c)=>s+(c.remaining||0),0);
-    return `<div style="margin-bottom:14px">
-      <div style="font-weight:700;font-size:14px;color:#1a1a1a;margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid #eee;padding-bottom:5px">
-        <span>☕ ${esc(coffee)}</span>
-        <span class="hint" style="font-weight:400;font-size:12px">${list.length} container${list.length>1?"s":""} · ${total.toFixed(0)}kg available</span>
-      </div>
-      ${list.map(c => render_container_card(c, "waiting")).join("")}
-    </div>`;
-  }).join("");
 
   return `
     <div class="flex-between mb-16">
-      <h2 style="margin:0">Containers</h2>
-      <div class="flex gap-8">
-        <button class="btn btn-ghost btn-sm" id="bucket-returns-btn" style="padding:8px 14px;font-size:13px">↩️ Bucket Returns${buckets_out > 0 ? ` (${buckets_out} out)` : ""}</button>
-        ${new_dispatch_btn}
-      </div>
+      <h2 style="margin:0">Buckets</h2>
+      <button class="btn btn-dark" id="bucket-returns-btn" style="padding:12px 18px;font-size:15px">&#8617;&#65039; Return buckets${buckets_out > 0 ? ` (${buckets_out} out)` : ""}</button>
     </div>
-
-    ${container_view_toggle()}
-
-    ${(buckets_filled + buckets_empty + buckets_out) > 0 ? `
-      <details style="background:#fff7ed;border-radius:10px;margin-bottom:14px;border:1px solid #fde4c2">
-        <summary style="padding:12px 14px;cursor:pointer;font-size:13px;color:#1a1a1a;list-style:none;font-weight:600">
-          🪣 Bucket Fleet · <span style="font-weight:400">${buckets_filled} filled · ${buckets_empty} empty · ${buckets_transit} in transit · ${buckets_atshop} at shops</span>
-          <span style="float:right;color:#666">▾</span>
-        </summary>
-        <div style="padding:0 14px 14px;border-top:1px solid #f0eee9;background:#fafaf8">
-          ${buckets_filled > 0 ? `<div style="font-size:11px;color:#666;font-weight:700;letter-spacing:1px;margin:10px 0 6px">FILLED — READY TO PACK</div>${filled_html}` : `<p class="hint" style="font-size:12px;margin:10px 0">No filled buckets — fill from an active container with the 🪣 button.</p>`}
-          ${in_transit_html}
-          ${at_shop_html}
-          ${empty_html}
-        </div>
-      </details>` : ""}
-
-    ${chips_html}
-    <div style="margin-bottom:18px">
-      <div style="font-weight:700;color:#16a34a;margin-bottom:8px;display:flex;align-items:center;gap:6px">
-        <span>✅ ACTIVE FOR PACKING</span>
-        <span class="hint" style="font-weight:400;font-size:12px">(${cfilter==="all"?active.length:fa.length})</span>
-      </div>
-      ${fa.length === 0
-        ? `<div class="card empty" style="padding:20px;font-size:13px">${cfilter==="all"?"No active containers. Move a container from Waiting to start packing.":"No active containers for this coffee."}</div>`
-        : fa.map(c => render_container_card(c, "active")).join("")}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
+      ${stat(buckets_filled, "Filled", "#16a34a")}
+      ${stat(buckets_empty, "Empty", "#666")}
+      ${stat(buckets_transit, "In transit", "#d97706")}
+      ${stat(buckets_atshop, "At shops", "#2563eb")}
     </div>
+    ${buckets_filled > 0 ? `<div style="font-size:11px;color:#666;font-weight:700;letter-spacing:1px;margin:0 0 8px">FILLED &mdash; READY TO PACK</div>${filled_html}` : `<p class="hint" style="font-size:13px">No filled buckets &mdash; fill from a drum in the Filling room.</p>`}
+    ${in_transit_html}
+    ${at_shop_html}
+    ${buckets_empty > 0 ? `<div style="font-size:13px;color:#666;margin-top:10px">${buckets_empty} empty bucket${buckets_empty>1?"s":""} at the roastery, ready to fill.</div>` : ""}`;
+}
 
-    ${waiting.length > 0 ? `
-    <div style="margin-bottom:18px">
-      <div style="font-weight:700;color:#666;margin-bottom:8px;display:flex;align-items:center;gap:6px">
-        <span>⏳ WAITING</span>
-        <span class="hint" style="font-weight:400;font-size:12px">(${cfilter==="all"?waiting.length:fw.length}) · ready to activate when you start packing from them</span>
-      </div>
-      ${fw.length ? waiting_grouped : `<div class="hint" style="font-size:13px;padding:8px 0">No waiting containers for this coffee.</div>`}
-    </div>` : ""}
-
-    ${empty.length > 0 ? `
-    <details style="margin-top:16px">
-      <summary style="font-size:13px;color:#999;cursor:pointer;font-weight:600">⭕ EMPTY (${empty.length}) · ready for next roast</summary>
-      <div style="margin-top:10px">
-        ${empty.map(c => `<div class="card" style="border-left:4px solid #ccc;opacity:0.6;padding:10px 14px;margin-bottom:6px">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-weight:600">${esc(c.id)}</span>
-            <span class="hint" style="font-size:12px">${c.coffee ? `last: ${esc(c.coffee)}` : "never used"}</span>
-          </div>
-        </div>`).join("")}
-      </div>
-    </details>` : ""}`;
+function build_containers_tab() {
+  return build_rooms_view();
 }
 
 
@@ -1958,7 +1820,7 @@ function attach_listeners() {
   app.querySelectorAll("[data-room-drop]").forEach(zone => {
     const danger = zone.dataset.roomDrop === "empty";
     zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; clear_room_hl(); zone.style.boxShadow = `inset 0 0 0 4px ${danger?"#dc2626":"#2563eb"}`; zone.style.background = danger ? "#fdeaea" : "#eaf2ff"; });
-    zone.addEventListener("drop", e => { e.preventDefault(); clear_room_hl(); const id = e.dataTransfer.getData("text/plain"); if (!id) return; if (zone.dataset.roomDrop === "empty") empty_container(id); else move_to_room(id, zone.dataset.roomDrop); });
+    zone.addEventListener("drop", e => { e.preventDefault(); clear_room_hl(); const id = e.dataTransfer.getData("text/plain"); if (!id) return; if (zone.dataset.roomDrop === "empty") { const c = state.containers.find(x => x.id === id); if (c && (c.remaining || 0) > 0.01) { state.ui.empty_choice = id; render(); } else empty_container(id, true); } else move_to_room(id, zone.dataset.roomDrop); });
   });
   app.querySelectorAll("[data-samples]").forEach(btn => btn.addEventListener("click", () => {
     send_to_samples(btn.dataset.samples);
@@ -1966,6 +1828,9 @@ function attach_listeners() {
   app.querySelectorAll("[data-empty-container]").forEach(btn => btn.addEventListener("click", () => {
     empty_container(btn.dataset.emptyContainer);
   }));
+  app.querySelector("#empty-as-samples")?.addEventListener("click", () => { const id = state.ui.empty_choice; state.ui.empty_choice = null; send_to_samples(id, true); });
+  app.querySelector("#empty-writeoff")?.addEventListener("click", () => { const id = state.ui.empty_choice; state.ui.empty_choice = null; empty_container(id, true); });
+  app.querySelector("#empty-cancel")?.addEventListener("click", () => { state.ui.empty_choice = null; render(); });
 
   // New dispatch flow — start packing without picking a container upfront
   app.querySelector("#new-dispatch-btn")?.addEventListener("click", () => {
