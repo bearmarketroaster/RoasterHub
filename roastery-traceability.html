@@ -1005,9 +1005,9 @@ function build_empty_choice_overlay() {
   return `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1000">
     <div style="background:#fff;border-radius:14px;padding:24px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3)">
       <h2 style="margin:0 0 6px">Empty ${esc(c.id)}</h2>
-      <p style="font-size:14px;color:#444;margin:0 0 18px"><strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} is still loose in this drum. What should happen to it?</p>
+      <p style="font-size:14px;color:#444;margin:0 0 18px">There's about <strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} left loose in this drum. Bag it as samples, or just empty the drum.</p>
       <button class="btn btn-amber" id="empty-as-samples" style="width:100%;padding:14px;font-size:15px;margin-bottom:10px">🎁 Bag as ~${bags} × 30g samples</button>
-      <button class="btn" id="empty-writeoff" style="width:100%;padding:14px;font-size:15px;margin-bottom:10px;background:#dc2626;color:#fff">🗑️ Write it off</button>
+      <button class="btn" id="empty-writeoff" style="width:100%;padding:14px;font-size:15px;margin-bottom:10px;background:#f0eee9;color:#1a1a1a;border:1px solid #e0ddd6">✓ Just empty the drum</button>
       <button class="btn btn-ghost" id="empty-cancel" style="width:100%;padding:12px;font-size:14px">Cancel</button>
     </div>
   </div>`;
