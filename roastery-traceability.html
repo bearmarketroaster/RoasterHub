@@ -1254,6 +1254,8 @@ const packing_state = {
   scan_mode: "scanner", // "scanner" (HID/manual) | "camera" — per-session
   samples: [],          // [{ container_id, fill_id, coffee, count }] hand-packed 30g sample bags
   sample_err: "",
+  batch: null,          // { container_id, fill_id, coffee, kg } batch-brew bulk, SHOPS ONLY, one per dispatch
+  batch_err: "",
 };
 
 function reset_packing_state() {
@@ -1266,6 +1268,8 @@ function reset_packing_state() {
   packing_state.scan_mode = "scanner";
   packing_state.samples = [];
   packing_state.sample_err = "";
+  packing_state.batch = null;
+  packing_state.batch_err = "";
 }
 
 // Compute totals from scanned items + buckets
@@ -1280,6 +1284,7 @@ function packing_total_kg() {
   }
   total += packing_state.scanned_buckets.length * 5;
   total += packing_state.samples.reduce((s, x) => s + x.count * 0.03, 0);
+  total += packing_state.batch ? packing_state.batch.kg : 0;
   return total;
 }
 
@@ -1294,6 +1299,12 @@ function packing_count_for(code) {
 let _last_scan = { value: null, at: 0 };
 const SCAN_DEBOUNCE_MS = 500;
 
+// Kind of the shop currently being packed for (shop | wholesale | online | staff | ...). Drives what's allowed:
+// buckets go everywhere EXCEPT online; batch brew is shops only.
+function packing_shop_kind() {
+  return state.shop_mappings.find(m => m.master_name === packing_state.shop)?.kind || "shop";
+}
+
 function process_scan(raw_value) {
   const value = (raw_value || "").trim().toUpperCase();
   if (!value) return;
@@ -1304,6 +1315,10 @@ function process_scan(raw_value) {
 
   // Bucket QR?
   if (value.startsWith("BKT-")) {
+    if (packing_shop_kind() === "online") {
+      flash_scan(`Buckets can't be sent to online orders`, "error");
+      return;
+    }
     if (packing_state.scanned_buckets.find(b => b.id === value)) {
       flash_scan(`${value} already scanned`, "error");
       return;
@@ -1641,6 +1656,11 @@ function build_packing_page(container, fill) {
         <span style="font-weight:600;white-space:nowrap">× ${s.count} (${(s.count*0.03).toFixed(2)}kg)</span>
       </div>`).join("") : "";
 
+    const batch_summary = ps.batch ? `<div style="display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:6px;padding-top:6px;border-top:1px solid #eee">
+        <span>☕ ${esc(ps.batch.coffee)} · batch brew <span style="background:#1a1a1a;color:#fff;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;font-family:monospace;margin-left:4px">${esc(ps.batch.container_id)}</span></span>
+        <span style="font-weight:600;white-space:nowrap">${ps.batch.kg}kg</span>
+      </div>` : "";
+
     return `<div class="overlay"><div class="modal">
       ${pack_step_bar("review")}
       <div style="text-align:center;margin-bottom:20px">
@@ -1658,6 +1678,7 @@ function build_packing_page(container, fill) {
           ${item_rows.length ? item_rows.join("") : '<p class="hint" style="font-size:13px;color:#666">No bags scanned</p>'}
           ${bucket_rows}
           ${sample_summary}
+          ${batch_summary}
         </div>
         ${container_summary}
       </div>
@@ -1669,7 +1690,8 @@ function build_packing_page(container, fill) {
   }
 
   if (ps.step === "scan") {
-    const has_items = Object.values(ps.scanned_items).some(e => (e.lines||[]).length > 0) || ps.scanned_buckets.length > 0;
+    const shop_kind = packing_shop_kind();
+    const has_items = Object.values(ps.scanned_items).some(e => (e.lines||[]).length > 0) || ps.scanned_buckets.length > 0 || !!ps.batch;
 
     const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${ps.scanner_msg ? `background:${ps.scanner_msg_type==="success"?"#16a34a":ps.scanner_msg_type==="error"?"#dc2626":"#1a1a1a"}` : "display:none"}`;
     const flash = `<div id="scan-flash" style="${flash_style}">${esc(ps.scanner_msg||"")}</div>`;
@@ -1687,7 +1709,7 @@ function build_packing_page(container, fill) {
           <div style="font-weight:600;margin-bottom:4px">Available (FIFO):</div>
           ${active_containers.sort((a,b) => (a.latest_roast_date||"").localeCompare(b.latest_roast_date||"")).map(c => `<div>📦 ${esc(c.id)} · ${esc(c.coffee||"?")} · ${c.remaining.toFixed(1)}kg</div>`).join("")}
         </div>`;
-    } else if (filled_buckets_available.length > 0) {
+    } else if (filled_buckets_available.length > 0 && shop_kind !== "online") {
       summary = `<div style="background:#fff7ed;border:1px solid #d97706;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:14px">
           ℹ️ No active containers — FP bag scans won't work. You can still scan filled buckets (${filled_buckets_available.length} available).
         </div>`;
@@ -1744,6 +1766,28 @@ function build_packing_page(container, fill) {
           <button class="btn btn-amber btn-sm" id="sample-add">+ ${tr("Add","Додати")}</button>
         </div>
       </div>
+
+      ${shop_kind === "shop" ? `
+      <div style="background:#eef6ff;border:1px solid #cfe3fb;border-radius:10px;padding:12px;margin-bottom:14px">
+        <div style="font-size:12px;color:#1e40af;margin-bottom:8px;font-weight:700">☕ ${tr("ADD BATCH BREW (bulk)","ДОДАТИ BATCH BREW")}</div>
+        ${ps.batch ? `
+          <div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:6px;padding:8px 10px;font-size:13px">
+            <span><strong>${esc(ps.batch.coffee)}</strong> · ${ps.batch.kg}kg <span class="hint" style="font-size:11px;font-family:monospace">${esc(ps.batch.container_id)}</span></span>
+            <button class="btn btn-ghost btn-sm" id="batch-remove" style="color:#dc2626;padding:2px 8px">✕</button>
+          </div>` : `
+          <div style="display:flex;gap:6px;align-items:center">
+            <select id="batch-container" style="flex:1;font-size:14px;padding:9px">
+              <option value="">— ${tr("Coffee for batch","Кава для batch")} —</option>
+              ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${c.remaining.toFixed(1)}kg)</option>`).join("")}
+            </select>
+            <select id="batch-kg" style="width:72px;font-size:14px;padding:9px;text-align:center">
+              <option value="1">1kg</option>
+              <option value="2">2kg</option>
+              <option value="3">3kg</option>
+            </select>
+            <button class="btn btn-sm" id="batch-add" style="background:#2563eb;color:#fff">+ ${tr("Add","Додати")}</button>
+          </div>`}
+      </div>` : ""}
 
       ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
 
@@ -2068,6 +2112,23 @@ function attach_listeners() {
     update_sample_list();
     update_scan_panel();
   });
+  app.querySelector("#batch-add")?.addEventListener("click", () => {
+    const cid = app.querySelector("#batch-container")?.value;
+    const kg = Math.max(1, Math.min(3, Math.floor(Number(app.querySelector("#batch-kg")?.value) || 0)));
+    if (!cid) { flash_scan("Pick a coffee for batch brew", "error"); return; }
+    const cont = state.containers.find(c => c.id === cid);
+    if (!cont) { flash_scan("Container not found", "error"); return; }
+    if (cont.status !== "active") { flash_scan(`${cont.coffee||cid} isn't active — batch brew comes from active drums`, "error"); return; }
+    const queued = packing_state.samples.filter(s => s.container_id === cid).reduce((a,s)=>a+s.count*0.03, 0);
+    if (kg + queued > cont.remaining + 1e-9) { flash_scan(`Only ${(cont.remaining-queued).toFixed(1)}kg left in ${cont.coffee}`, "error"); return; }
+    packing_state.batch = { container_id: cid, fill_id: cont.fill_id, coffee: cont.coffee, kg };
+    flash_scan(`+ ${kg}kg ${cont.coffee} batch brew`, "success");
+    render();
+  });
+  app.querySelector("#batch-remove")?.addEventListener("click", () => {
+    packing_state.batch = null;
+    render();
+  });
   // Shop step: pick a shop or type custom
   app.querySelectorAll("[data-pick-shop]").forEach(btn => btn.addEventListener("click", () => {
     packing_state.shop = btn.dataset.pickShop;
@@ -2136,7 +2197,7 @@ function attach_listeners() {
       const hay = `${f.fp_code} ${f.coffee_name} ${f.bag_size}`.toLowerCase();
       return hay.includes(q);
     });
-    const bucket_matches = rank_bucket_matches(
+    const bucket_matches = packing_shop_kind() === "online" ? [] : rank_bucket_matches(
       state.buckets.filter(b => b.status === "filled" && !b.retired_at),
       q, new Set(packing_state.scanned_buckets.map(x => x.id))
     );
@@ -2249,6 +2310,13 @@ function attach_listeners() {
         container_id: s.container_id, fill_id: s.fill_id, fp_code: null,
       });
     });
+    // Batch brew — one bulk line pulling from the chosen active drum (shops only, one per dispatch).
+    if (packing_state.batch) {
+      lines.push({
+        type: "bulk", kg: packing_state.batch.kg, bags: 0, bag_size: "Batch brew",
+        container_id: packing_state.batch.container_id, fill_id: packing_state.batch.fill_id, fp_code: null,
+      });
+    }
     const total_kg = packing_total_kg();
     // Pick a primary container_id for the dispatch row — use the first FP code's first line's container,
     // or fall back to the first bucket's container
@@ -2263,6 +2331,10 @@ function attach_listeners() {
     if (!primary_container_id && packing_state.scanned_buckets.length > 0) {
       primary_container_id = packing_state.scanned_buckets[0].container_id;
       primary_fill_id = packing_state.scanned_buckets[0].fill_id;
+    }
+    if (!primary_container_id && packing_state.batch) {
+      primary_container_id = packing_state.batch.container_id;
+      primary_fill_id = packing_state.batch.fill_id;
     }
     const dispatch_id = await save_dispatch_v2(primary_container_id, primary_fill_id, packing_state.shop, lines, total_kg);
     if (dispatch_id && packing_state.scanned_buckets.length > 0) {
