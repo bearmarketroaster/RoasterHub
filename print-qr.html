@@ -330,6 +330,7 @@
       size_mm: 38,
       coffee_filter: "all",
       prefix_filter: "all",
+      picker_touched: false,
       buckets: [],
       containers: [],
       fp_codes: [],
@@ -372,6 +373,7 @@
         state.selected_ids = new Set();
         state.coffee_filter = "all";
         state.prefix_filter = "all";
+        state.picker_touched = true;
         render_picker(); render_grid();
       });
       const sizeInput = document.getElementById("size-input");
@@ -504,7 +506,7 @@
       if (state.type === "fp" && state.coffee_filter !== "all") items = items.filter(i => i.coffee_name === state.coffee_filter);
       if (state.type === "bucket" && state.prefix_filter !== "all") items = items.filter(i => bucket_prefix(i.name) === state.prefix_filter);
       const no_filter_active = !(state.type === "fp" && state.coffee_filter !== "all") && !(state.type === "bucket" && state.prefix_filter !== "all");
-      if (init_ids && init_ids.length && state.type === init_type && no_filter_active) {
+      if (init_ids && init_ids.length && state.type === init_type && no_filter_active && !state.picker_touched) {
         items = items.filter(i => init_ids.includes(i.id));
       }
 
@@ -519,10 +521,12 @@
 
       el.querySelector("#coffee-filter")?.addEventListener("change", e => {
         state.coffee_filter = e.target.value;
+        state.picker_touched = true;
         render_picker(); render_grid();
       });
       el.querySelector("#prefix-filter")?.addEventListener("change", e => {
         state.prefix_filter = e.target.value;
+        state.picker_touched = true;
         render_picker(); render_grid();
       });
     }
