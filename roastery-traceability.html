@@ -393,14 +393,12 @@ async function load_data() {
       status: status_map[s.container_id]?.status || "waiting",
       status_changed_at: status_map[s.container_id]?.status_changed_at || null,
     };
-    container_map[s.container_id].roast_sessions.push(s);
-    container_map[s.container_id].total_roasted += Number(s.roasted_weight)||0;
-    if (!container_map[s.container_id]._latest_set) {
-      container_map[s.container_id].coffee = s.coffee;
-      container_map[s.container_id].fill_id = s.fill_id;
-      container_map[s.container_id].latest_roast_date = s.date;
-      container_map[s.container_id]._latest_set = true;
-    }
+    const cm = container_map[s.container_id];
+    cm.roast_sessions.push(s);
+    // Sessions come back newest-first, so the container's coffee/fill_id (set at creation above) is the
+    // CURRENT fill. Only sessions belonging to that current fill count toward the drum's roasted total —
+    // when a drum is emptied and refilled, the previous fill's roast no longer inflates the new capacity.
+    if (s.fill_id === cm.fill_id) cm.total_roasted += Number(s.roasted_weight)||0;
   });
   // Also include container rows that exist but have no roast sessions (e.g. empty after sample-out)
   (container_rows || []).forEach(c => {
@@ -432,7 +430,8 @@ async function load_data() {
     (d.lines||[]).forEach(l => {
       if (!l.container_id) return;
       const c = state.containers.find(c => c.id === l.container_id);
-      if (c) c.packed_kg = (c.packed_kg||0) + (Number(l.kg)||0);
+      // Only dispatches from the drum's CURRENT fill count against it; prior fills are history.
+      if (c && c.fill_id && l.fill_id === c.fill_id) c.packed_kg = (c.packed_kg||0) + (Number(l.kg)||0);
     });
   });
 
@@ -441,7 +440,8 @@ async function load_data() {
   state.buckets.forEach(b => {
     if (b.status !== "filled" || !b.container_id) return;
     const c = state.containers.find(c => c.id === b.container_id);
-    if (c) c.held_in_buckets = (c.held_in_buckets || 0) + 5;
+    // Only buckets filled from the drum's CURRENT fill are held against it.
+    if (c && c.fill_id && b.fill_id === c.fill_id) c.held_in_buckets = (c.held_in_buckets || 0) + 5;
   });
 
   // Compute remaining per container = roasted − dispatched − held in unshipped buckets
