@@ -329,6 +329,7 @@
       type: init_type,
       size_mm: 38,
       coffee_filter: "all",
+      prefix_filter: "all",
       buckets: [],
       containers: [],
       fp_codes: [],
@@ -370,6 +371,7 @@
         state.type = e.target.value;
         state.selected_ids = new Set();
         state.coffee_filter = "all";
+        state.prefix_filter = "all";
         render_picker(); render_grid();
       });
       const sizeInput = document.getElementById("size-input");
@@ -463,7 +465,7 @@
       const el = document.getElementById("picker");
       const type_label = state.type === "bucket" ? "buckets" : state.type === "container" ? "containers" : state.type === "shop" ? "shops" : "FP codes";
       const all_items = state.type === "bucket"
-        ? state.buckets.map(b => ({ id: b.id, label: b.id }))
+        ? state.buckets.map(b => ({ id: b.id, label: b.id, name: b.name }))
         : state.type === "container"
         ? state.containers.map(c => ({ id: c.id, label: c.id }))
         : state.type === "shop"
@@ -486,20 +488,41 @@
         }
       }
 
-      const items = state.type === "fp" && state.coffee_filter !== "all"
-        ? all_items.filter(i => i.coffee_name === state.coffee_filter)
-        : all_items;
+      let prefix_filter_html = "";
+      if (state.type === "bucket") {
+        const prefixes = [...new Set(state.buckets.map(b => bucket_prefix(b.name)).filter(Boolean))].sort();
+        if (prefixes.length > 1) {
+          prefix_filter_html = `
+            <select id="prefix-filter" style="font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid #e8e6e1;background:#fff;color:#1a1a1a;min-width:200px">
+              <option value="all" ${state.prefix_filter==="all"?"selected":""}>All bucket types</option>
+              ${prefixes.map(p => `<option value="${p.replace(/"/g,'&quot;')}" ${state.prefix_filter===p?"selected":""}>${p}</option>`).join("")}
+            </select>`;
+        }
+      }
+
+      let items = all_items;
+      if (state.type === "fp" && state.coffee_filter !== "all") items = items.filter(i => i.coffee_name === state.coffee_filter);
+      if (state.type === "bucket" && state.prefix_filter !== "all") items = items.filter(i => bucket_prefix(i.name) === state.prefix_filter);
+      const no_filter_active = !(state.type === "fp" && state.coffee_filter !== "all") && !(state.type === "bucket" && state.prefix_filter !== "all");
+      if (init_ids && init_ids.length && state.type === init_type && no_filter_active) {
+        items = items.filter(i => init_ids.includes(i.id));
+      }
 
       state.selected_ids = new Set(items.map(i => i.id));
 
       el.innerHTML = `
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
           ${coffee_filter_html}
+          ${prefix_filter_html}
           <span style="font-size:12px;color:#666">${items.length} ${type_label.slice(0, -1)}${items.length!==1?"s":""} shown</span>
         </div>`;
 
       el.querySelector("#coffee-filter")?.addEventListener("change", e => {
         state.coffee_filter = e.target.value;
+        render_picker(); render_grid();
+      });
+      el.querySelector("#prefix-filter")?.addEventListener("change", e => {
+        state.prefix_filter = e.target.value;
         render_picker(); render_grid();
       });
     }
@@ -739,6 +762,7 @@
       pdf.save(`${state.type}-${safe_id}.pdf`);
     }
 
+    function bucket_prefix(name) { return String(name || "").replace(/\s*\d+\s*$/, "").trim(); }
     function esc(s)      { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
     function esc_attr(s) { return String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;"); }
   </script>
