@@ -1150,12 +1150,36 @@ function build_deliveries_tab() {
   const gap = "margin-top:26px";
   const empty_block = (icon, msg) => `<div class="card empty" style="padding:18px"><div class="icon">${icon}</div>${msg}</div>`;
 
+  const admin = state.user_role === "admin";
+  const shop_dispatch_row = d => {
+    const { fill } = get_ref(d);
+    const b_line = d.lines.find(l=>l.type==="bulk");
+    const r_lines = d.lines.filter(l=>l.type==="retail");
+    const parts = [];
+    if (b_line) parts.push(`${b_line.bag_size==="Batch brew"?"☕":"🪣"} ${esc(resolve_line_coffee(b_line,fill))} · ${b_line.bag_size==="Batch brew"?"batch brew":"Bar"} ${b_line.kg}kg`);
+    r_lines.forEach(l => parts.push(`${l.bag_size==="30g sample"?"🎁":"🛍️"} ${esc(resolve_line_coffee(l,fill))} · ${l.bags}×${RETAIL_SIZES.find(s=>s.val===l.bag_size)?.label||l.bag_size}`));
+    return `<div style="padding:10px 0;border-top:1px solid #f0eee9">
+      <div class="flex-between flex-wrap" style="gap:6px;align-items:center">
+        <span style="font-size:12px;color:#666">${esc(d.date)}${d.fill_id?` · <span class="mono" style="background:#f0eee9;padding:1px 6px;border-radius:3px;font-size:10px">${esc(d.fill_id)}</span>`:""} · <strong style="color:#1a1a1a">${d.total_kg}kg</strong></span>
+        ${admin?`<span class="flex gap-8">
+          <button class="btn btn-green btn-sm" data-mark-delivered="${esc(d.id)}">✓ Delivered</button>
+          <button class="btn btn-ghost btn-sm" data-revert-dispatch="${esc(d.id)}" style="color:#dc2626;border-color:#f3c4c4">↩</button>
+        </span>`:""}
+      </div>
+      <div style="font-size:13px;color:#555;margin-top:5px">${parts.join(" &nbsp; ") || "—"}</div>
+    </div>`;
+  };
   const shops_html = shop_names.length
     ? shop_names.map(name => {
         const ds = by_shop[name].sort(by_date_desc);
-        return `<div style="margin-bottom:16px">
-          <div style="font-weight:700;font-size:14px;color:#1a1a1a;padding:6px 0;border-bottom:1px solid #e8e6e1;margin-bottom:10px">${esc(name)} <span style="color:#d97706;font-weight:600">· ${ds.length} awaiting</span></div>
-          ${ds.map(d => card(d, false)).join("")}
+        const total_kg = ds.reduce((s,d)=>s+(Number(d.total_kg)||0),0);
+        return `<div class="card" style="border-left:4px solid #d97706;margin-bottom:14px">
+          <div class="flex-between flex-wrap" style="align-items:center">
+            <span style="font-weight:700;font-size:16px">${esc(name)}</span>
+            <span class="tag" style="background:#fff3e0;color:#d97706">⏳ ${ds.length} awaiting · ${total_kg.toFixed(1)}kg</span>
+          </div>
+          ${admin && ds.length>1 ? `<button class="btn btn-green btn-sm" data-mark-shop-delivered="${esc(name)}" style="margin-top:8px">✓ Mark all ${ds.length} delivered</button>` : ""}
+          ${ds.map(shop_dispatch_row).join("")}
         </div>`;
       }).join("")
     : empty_block("✓", "Nothing awaiting shop acceptance.");
@@ -1201,6 +1225,16 @@ function build_order_delivery_card(order, dispatches, get_ref) {
       </div>
       ${expanded?`<div style="margin-top:10px;display:grid;gap:8px">${breakdown_html}</div>`:""}
     </div>`;
+}
+
+function resolve_line_coffee(l, fill) {
+  const fp = l.fp_code && state.fp_codes.find(f=>f.fp_code===l.fp_code);
+  if (fp && fp.coffee_name) return fp.coffee_name;
+  const lc = state.containers.find(x=>x.id===l.container_id);
+  if (lc && lc.coffee) return lc.coffee;
+  const bk = l.fill_id && state.buckets.find(b=>b.fill_id===l.fill_id && b.coffee);
+  if (bk) return bk.coffee;
+  return (fill && fill.coffee) || "—";
 }
 
 function build_dispatch_card(d, c, fill, confirmed, show_scan=true) {
@@ -2386,6 +2420,17 @@ function attach_listeners() {
     render();
   }));
   app.querySelectorAll("[data-revert-dispatch]").forEach(btn => btn.addEventListener("click", () => revert_dispatch(btn.dataset.revertDispatch)));
+  app.querySelectorAll("[data-mark-shop-delivered]").forEach(btn => btn.addEventListener("click", async () => {
+    const shop = btn.dataset.markShopDelivered;
+    const kind_of = d => (state.shop_mappings.find(m => m.master_name === d.shop)?.kind) || "shop";
+    const ids = state.dispatches.filter(d => d.shop === shop && !d.confirmed_at && kind_of(d) === "shop").map(d => d.id);
+    if (!ids.length) return;
+    if (!confirm(`Mark all ${ids.length} ${shop} dispatch(es) as delivered? Use this only if the shop QR can't be scanned.`)) return;
+    btn.disabled = true; btn.textContent = "Saving…";
+    await supabaseClient.from("dispatches").update({ confirmed_at: new Date().toISOString() }).in("id", ids);
+    await load_data();
+    render();
+  }));
 }
 </script>
 </body>
