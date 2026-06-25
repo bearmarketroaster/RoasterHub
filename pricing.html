@@ -152,7 +152,7 @@ async function load() {
     state.cfg = {
       roast_loss_pct:      Number(settings.roast_loss_pct),
       roasting_fee_per_kg: Number(settings.roasting_fee_per_kg),
-      roastery_margin_pct: Number(settings.roastery_margin_pct),
+      roastery_margin_pct: Math.min(18, Number(settings.roastery_margin_pct)),
       target_low_pct:      Number(settings.target_low_pct),
       target_high_pct:     Number(settings.target_high_pct),
     };
@@ -382,7 +382,7 @@ function render() {
         <div class="cfg-grid">
           ${cfg_num("roast_loss_pct",      "Roast loss",      c.roast_loss_pct,      "%")}
           ${cfg_num("roasting_fee_per_kg", "Roasting fee",    c.roasting_fee_per_kg, "€/kg")}
-          ${cfg_num("roastery_margin_pct", "Roastery margin", c.roastery_margin_pct, "%")}
+          ${cfg_num("roastery_margin_pct", "Roastery markup (max 18%)", c.roastery_margin_pct, "%", 18)}
           ${cfg_num("target_low_pct",      "Target band low", c.target_low_pct,      "%")}
           ${cfg_num("target_high_pct",     "Target band high",c.target_high_pct,     "%")}
         </div>
@@ -414,12 +414,12 @@ function render() {
   attach();
 }
 
-function cfg_num(key, label, val, suffix) {
+function cfg_num(key, label, val, suffix, max) {
   return `
     <div class="cfg-field">
       <label>${label}</label>
       <div class="suffix">
-        <input type="number" step="any" data-cfg="${key}" value="${val}" />
+        <input type="number" step="any" ${max!=null?`max="${max}"`:""} data-cfg="${key}" value="${val}" />
         <span>${suffix}</span>
       </div>
     </div>`;
@@ -634,7 +634,9 @@ function attach() {
   // block so the input keeps focus while typing.
   document.querySelectorAll("[data-cfg]").forEach(inp => {
     inp.addEventListener("input", () => {
-      state.cfg[inp.dataset.cfg] = Number(inp.value) || 0;
+      let v = Number(inp.value) || 0;
+      if (inp.dataset.cfg === "roastery_margin_pct" && v > 18) { v = 18; inp.value = 18; }
+      state.cfg[inp.dataset.cfg] = v;
       mark_dirty();
       render_results();
     });
