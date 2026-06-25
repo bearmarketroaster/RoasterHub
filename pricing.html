@@ -70,6 +70,7 @@
     .bulk-lbl { font-size: 13px; font-weight: 600; color: #1a1a1a; }
     .bulk-hint { font-size: 11px; color: #999; font-style: italic; }
     .bulk-row .sugg-chip { margin-top: 0; }
+    .bulk-fixed { font-size: 15px; font-weight: 700; color: #1a1a1a; }
     .money-range { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; color: #666; }
     .money-range input { margin-left: 6px; padding: 5px 8px; font-size: 13px; }
     .money-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -109,9 +110,10 @@ const SIZES = [
 ];
 
 const DEFAULTS = {
-  roast_loss_pct: 15, roasting_fee_per_kg: 2.50, roastery_margin_pct: 15,
+  roast_loss_pct: 15, roasting_fee_per_kg: 2.50, roastery_margin_pct: 18,
   target_low_pct: 75, target_high_pct: 84,
 };
+const ROASTERY_MARKUP_PCT = 18;   // Roastery → shop is fixed at +18% on COGS (not user-editable).
 
 const state = {
   loaded: false,
@@ -241,14 +243,13 @@ function compute(coffeeId, kg, bagLabel) {
   if (!g) return null;
   const loss   = state.cfg.roast_loss_pct / 100;
   const fee     = state.cfg.roasting_fee_per_kg;
-  const rmargin = state.cfg.roastery_margin_pct / 100;
   const low      = state.cfg.target_low_pct / 100;
   const high     = state.cfg.target_high_pct / 100;
   const packaging = Number(state.pkg[bagLabel]) || 0;
 
   const roasted_cost_per_kg = g.price / (1 - loss) + fee;   // blended € per roasted kg
   const cogs       = roasted_cost_per_kg * kg + packaging;  // roastery cost for this bag
-  const wholesale  = cogs / (1 - rmargin);                  // what the shop pays
+  const wholesale  = cogs * (1 + ROASTERY_MARKUP_PCT / 100); // fixed roastery→shop markup
 
   // Combined margin = (retail - COGS) / retail = target  ->  retail = COGS / (1 - target)
   const retail_low  = cogs / (1 - low);   // price at the band floor (75%)
@@ -283,20 +284,25 @@ function value_line(l, channel) {
   if (bs === "30g sample" || bs === "Emptied") return null;     // samples & write-offs aren't sales
   const cid = line_coffee_id(l);
   if (cid == null) return { unpriced: true };
-  const fin = state.final[cid] || {};
   const rcpk = roasted_cpk(cid);
+  const mk = 1 + ROASTERY_MARKUP_PCT / 100;
   const is_bulk = l.type === "bulk" || bs === "Batch brew" || bs === "Bar 5kg";
   if (is_bulk) {
-    const price_kg = fin["Bulk kg"]?.wholesale;                 // buckets/batch → shops at €/kg
-    if (price_kg == null) return { unpriced: true };
+    if (rcpk == null) return { unpriced: true };               // need green to derive the bulk rate
     const kg = Number(l.kg) || 0;
-    return { revenue: price_kg * kg, cogs: rcpk != null ? rcpk * kg : 0, cid };
+    return { revenue: rcpk * mk * kg, cogs: rcpk * kg, cid };   // bulk → shops at roasted cost +18%
   }
-  const e = fin[bs];
-  const price = channel === "online" ? e?.retail : e?.wholesale;
-  if (price == null) return { unpriced: true };
   const bags = Number(l.bags) || 0;
-  const cogs = rcpk != null ? (rcpk * (BAG_KG[bs] || 0) + (Number(state.pkg[bs]) || 0)) * bags : 0;
+  const bag_cogs = rcpk != null ? rcpk * (BAG_KG[bs] || 0) + (Number(state.pkg[bs]) || 0) : null;
+  let price;
+  if (channel === "online") {
+    price = (state.final[cid] || {})[bs]?.retail;              // online sells at the saved label price
+    if (price == null) return { unpriced: true };
+  } else {
+    if (bag_cogs == null) return { unpriced: true };           // shop → fixed wholesale = bag COGS +18%
+    price = bag_cogs * mk;
+  }
+  const cogs = bag_cogs != null ? bag_cogs * bags : 0;
   return { revenue: price * bags, cogs, cid };
 }
 
@@ -382,7 +388,6 @@ function render() {
         <div class="cfg-grid">
           ${cfg_num("roast_loss_pct",      "Roast loss",      c.roast_loss_pct,      "%")}
           ${cfg_num("roasting_fee_per_kg", "Roasting fee",    c.roasting_fee_per_kg, "€/kg")}
-          ${cfg_num("roastery_margin_pct", "Roastery markup (max 18%)", c.roastery_margin_pct, "%", 18)}
           ${cfg_num("target_low_pct",      "Target band low", c.target_low_pct,      "%")}
           ${cfg_num("target_high_pct",     "Target band high",c.target_high_pct,     "%")}
         </div>
@@ -397,10 +402,9 @@ function render() {
           ${state.err ? `<span class="save-err">${esc(state.err)}</span>` : ""}
         </div>
         <div class="note">
-          Wholesale (to shop) = COGS ÷ (1 − roastery margin). Suggested retail solves the
-          combined margin (retail − roastery COGS) ÷ retail to your target band. Prices are
-          suggestions — round to a clean number per coffee as you see fit. Live preview reflects
-          unsaved edits above.
+          Roastery → shop (wholesale) is <strong>fixed at COGS + 18%</strong> — you don't set it.
+          You only choose the shop's retail (label) price; the suggested band solves the combined
+          margin (retail − roastery COGS) ÷ retail to your target. Live preview reflects unsaved edits above.
         </div>
       </div>
 
@@ -470,19 +474,13 @@ function render_results() {
     const saved = state.final[coffee.id] || {};
     const rows = SIZES.map(s => {
       const r = compute(coffee.id, s.kg, s.label);
-      const sugg_ws = round_to(r.wholesale, 0.1);
       const sugg_rt = round_to((r.retail_low + r.retail_high) / 2, 0.5);
-      const ws_val = saved[s.label]?.wholesale != null ? saved[s.label].wholesale : "";
-      const rt_val = saved[s.label]?.retail    != null ? saved[s.label].retail    : "";
+      const rt_val = saved[s.label]?.retail != null ? saved[s.label].retail : "";
       return `
         <tr>
           <td class="size">${esc(s.label)}</td>
           <td class="num">${eur(r.cogs)}</td>
-          <td class="num your-price">
-            <div class="your-wrap"><span class="eur-pre">€</span>
-              <input type="number" step="0.01" min="0" class="final-input" data-final="${coffee.id}|${esc(s.label)}|wholesale" value="${ws_val}" placeholder="${sugg_ws.toFixed(2)}" /></div>
-            <button type="button" class="sugg-chip" data-fill="${coffee.id}|${esc(s.label)}|wholesale|${sugg_ws.toFixed(2)}">use €${sugg_ws.toFixed(2)}</button>
-          </td>
+          <td class="num"><strong>${eur(r.wholesale)}</strong><div class="retail-sub">fixed +18%</div></td>
           <td class="num your-price">
             <div class="your-wrap"><span class="eur-pre">€</span>
               <input type="number" step="0.01" min="0" class="final-input" data-final="${coffee.id}|${esc(s.label)}|retail" value="${rt_val}" placeholder="${sugg_rt.toFixed(2)}" /></div>
@@ -510,14 +508,11 @@ function render_results() {
         </table>
         ${(() => {
           const br = compute(coffee.id, 1, "1kg");
-          const bulk_sugg = br ? round_to(br.roasted_cost_per_kg / (1 - state.cfg.roastery_margin_pct/100), 0.1) : 0;
-          const bulk_val = saved["Bulk kg"]?.wholesale != null ? saved["Bulk kg"].wholesale : "";
+          const bulk_kg = br ? br.roasted_cost_per_kg * (1 + ROASTERY_MARKUP_PCT/100) : 0;
           return `<div class="bulk-row">
             <span class="bulk-lbl">Bulk €/kg (5kg buckets → shops)</span>
-            <div class="your-wrap"><span class="eur-pre">€</span>
-              <input type="number" step="0.01" min="0" class="final-input" data-final="${coffee.id}|Bulk kg|wholesale" value="${bulk_val}" placeholder="${bulk_sugg.toFixed(2)}" /></div>
-            <button type="button" class="sugg-chip" data-fill="${coffee.id}|Bulk kg|wholesale|${bulk_sugg.toFixed(2)}">use €${bulk_sugg.toFixed(2)}</button>
-            <span class="bulk-hint">leave blank if not sold in bulk</span>
+            <span class="bulk-fixed">€${bulk_kg.toFixed(2)}/kg</span>
+            <span class="bulk-hint">fixed +18% on roasted cost · only billed when buckets are dispatched</span>
           </div>`;
         })()}
         <div class="coffee-actions">
@@ -599,13 +594,10 @@ async function save_coffee(id) {
   const now = new Date().toISOString();
   const saved = state.final[id] || {};
   const rows = [], cleared = [];
-  const PRICE_KEYS = [...SIZES.map(s => s.label), "Bulk kg"];
-  PRICE_KEYS.forEach(label => {
-    const e = saved[label] || {};
-    const ws = e.wholesale != null && !isNaN(e.wholesale) ? Number(e.wholesale) : null;
-    const rt = e.retail    != null && !isNaN(e.retail)    ? Number(e.retail)    : null;
-    if (ws == null && rt == null) { if (label in saved) cleared.push(label); return; }
-    rows.push({ coffee_id: id, bag_size: label, retail: rt, wholesale: ws, updated_at: now });
+  SIZES.forEach(s => {
+    const rt = saved[s.label]?.retail;
+    if (rt == null || isNaN(rt)) { if (s.label in saved) cleared.push(s.label); return; }
+    rows.push({ coffee_id: id, bag_size: s.label, retail: Number(rt), wholesale: null, updated_at: now });
   });
   let err = null;
   if (rows.length) {
@@ -618,7 +610,7 @@ async function save_coffee(id) {
   if (err) { state.err = err.message; render(); return; }
   state.coffee_dirty[id] = false;
   const fin = (state.final[id] = {});
-  rows.forEach(r => { fin[r.bag_size] = { retail: r.retail, wholesale: r.wholesale }; });
+  rows.forEach(r => { fin[r.bag_size] = { retail: r.retail }; });
   render_results();
 }
 
