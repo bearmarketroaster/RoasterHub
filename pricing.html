@@ -48,6 +48,7 @@
     .coffee-green .green-lbl { font-weight: 600; color: #666; }
     .coffee-green .green-input { width: 92px; padding: 5px 8px; font-size: 13px; text-align: right; }
     .coffee-green .green-src { color: #999; font-style: italic; }
+    .coffee-green .param-sep { color: #ccc; margin: 0 4px; }
     .coffee-green b { color: #1a1a1a; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { text-align: left; padding: 9px 8px; background: #f4f2ed; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; border-bottom: 1px solid #e8e6e1; }
@@ -117,18 +118,21 @@ const SIZES = [
 ];
 
 const DEFAULTS = {
-  roast_loss_pct: 15, shipping_per_kg: 0, roasting_fee_per_kg: 0, roastery_margin_pct: 18,
   target_low_pct: 75, target_high_pct: 84,
 };
 const ROASTERY_MARGIN_PCT = 15;   // Roastery → shop is fixed: price = Cost ÷ (1 − 15%). 15% margin ≈ 18% markup.
+const DEFAULT_LOSS_PCT = 15;      // used when a coffee has no/too-few roasts for a reliable average
+const MIN_ROASTS_FOR_AVG = 3;     // need at least this many real roasts before trusting the average
 
 const state = {
   loaded: false,
-  cfg: { ...DEFAULTS },        // working draft of pricing_settings
+  cfg: { ...DEFAULTS },        // working draft of pricing_settings (just the retail target band now)
   pkg: {},                     // working draft of packaging: { "200g": 0.349, ... }
   coffees: [],                 // [{ id, name }]
-  green_delivery: {},          // { coffeeName: { price, date } }  derived from stock deliveries
-  green_override: {},          // { coffeeName: price }            manual entry in this tool
+  green_delivery: {},          // { coffeeId: { price, date } }  derived from stock deliveries
+  green_override: {},          // { coffeeId: price }            manual entry in this tool
+  shipping_override: {},       // { coffeeId: shipping €/kg }     per-coffee, added to green before loss
+  roast_loss_stats: {},        // { coffeeId: { avg, n } }        from actual roast data
   final: {},                   // { coffeeId: { "200g": {retail, wholesale}, ... } } chosen prices
   coffee_dirty: {},            // { coffeeId: true } unsaved per-coffee price edits
   coffee_saving: {},           // { coffeeId: true } in-flight save
@@ -160,10 +164,6 @@ async function load() {
   const { data: settings } = await supabaseClient.from("pricing_settings").select("*").eq("id", 1).maybeSingle();
   if (settings) {
     state.cfg = {
-      roast_loss_pct:      Number(settings.roast_loss_pct),
-      shipping_per_kg:     Number(settings.shipping_per_kg) || 0,
-      roasting_fee_per_kg: Number(settings.roasting_fee_per_kg) || 0,
-      roastery_margin_pct: Math.min(18, Number(settings.roastery_margin_pct)),
       target_low_pct:      Number(settings.target_low_pct),
       target_high_pct:     Number(settings.target_high_pct),
     };
@@ -198,11 +198,16 @@ async function load() {
   });
   state.green_delivery = green;
 
-  // Manual per-coffee green prices entered in this tool (override deliveries).
-  const { data: overrides } = await supabaseClient.from("pricing_green").select("coffee_id, green_price");
-  const ov = {};
-  (overrides || []).forEach(r => { if (r.green_price != null && r.coffee_id != null) ov[r.coffee_id] = Number(r.green_price); });
+  // Per-coffee params entered in this tool: green override + shipping €/kg.
+  const { data: overrides } = await supabaseClient.from("pricing_green").select("coffee_id, green_price, shipping_per_kg");
+  const ov = {}, ship = {};
+  (overrides || []).forEach(r => {
+    if (r.coffee_id == null) return;
+    if (r.green_price != null) ov[r.coffee_id] = Number(r.green_price);
+    if (r.shipping_per_kg != null) ship[r.coffee_id] = Number(r.shipping_per_kg);
+  });
   state.green_override = ov;
+  state.shipping_override = ship;
 
   // Chosen per-coffee, per-size prices (what labels will read).
   const { data: finals } = await supabaseClient.from("pricing_final").select("coffee_id, bag_size, retail, wholesale");
@@ -223,10 +228,21 @@ async function load() {
   state.shop_mappings = maps || [];
   const { data: fps } = await supabaseClient.from("fp_codes").select("fp_code, coffee_name");
   state.fp_codes = fps || [];
-  const { data: rs } = await supabaseClient.from("roast_sessions").select("fill_id, coffee");
-  const fm = {};
-  (rs || []).forEach(r => { if (r.fill_id && r.coffee && !fm[r.fill_id]) fm[r.fill_id] = r.coffee; });
+  const { data: rs } = await supabaseClient.from("roast_sessions").select("fill_id, coffee, coffee_id, roasted_weight, is_test, roast_batches(green_weight)");
+  const fm = {}, lossByC = {};
+  (rs || []).forEach(r => {
+    if (r.fill_id && r.coffee && !fm[r.fill_id]) fm[r.fill_id] = r.coffee;
+    if (r.is_test) return;
+    const green = (r.roast_batches || []).reduce((a, b) => a + (Number(b.green_weight) || 0), 0);
+    const roasted = Number(r.roasted_weight) || 0;
+    if (green > 0 && roasted > 0 && roasted < green && r.coffee_id != null) {
+      (lossByC[r.coffee_id] = lossByC[r.coffee_id] || []).push((green - roasted) / green * 100);
+    }
+  });
   state.fillmap = fm;
+  const stats = {};
+  Object.entries(lossByC).forEach(([cid, arr]) => { stats[cid] = { avg: arr.reduce((a, b) => a + b, 0) / arr.length, n: arr.length }; });
+  state.roast_loss_stats = stats;
   if (!state.money_from) {
     const now = new Date();
     state.money_from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -245,19 +261,26 @@ function green_for(coffeeId) {
   return null;
 }
 
+// Per-coffee roast loss: average of real roasts rounded UP to a whole %, with a buffer.
+// Falls back to the default when there aren't enough roasts yet.
+function roast_loss_for(coffeeId) {
+  const r = state.roast_loss_stats[coffeeId];
+  if (!r || r.n < MIN_ROASTS_FOR_AVG) return { pct: DEFAULT_LOSS_PCT, source: "default", n: r ? r.n : 0, avg: r ? r.avg : null };
+  return { pct: Math.ceil(r.avg), source: "avg", n: r.n, avg: r.avg };
+}
+
 // ── Pricing maths ───────────────────────────────────────────────────────────
 // Returns null if no green price for this coffee.
 function compute(coffeeId, kg, bagLabel) {
   const g = green_for(coffeeId);
   if (!g) return null;
-  const loss   = state.cfg.roast_loss_pct / 100;
-  const shipping = Number(state.cfg.shipping_per_kg) || 0;   // added to green BEFORE loss (optional)
-  const fee      = Number(state.cfg.roasting_fee_per_kg) || 0; // added AFTER loss (optional)
+  const loss   = roast_loss_for(coffeeId).pct / 100;          // per-coffee, from roast data
+  const shipping = Number(state.shipping_override[coffeeId]) || 0; // per-coffee, added to green first
   const low      = state.cfg.target_low_pct / 100;
   const high     = state.cfg.target_high_pct / 100;
   const packaging = Number(state.pkg[bagLabel]) || 0;
 
-  const roasted_cost_per_kg = round2((g.price + shipping) / (1 - loss) + fee);   // (green + shipping) ÷ 0.85 (+ fee)
+  const roasted_cost_per_kg = round2((g.price + shipping) / (1 - loss));   // (green + shipping) ÷ (1 − loss)
   const cogs       = round2(roasted_cost_per_kg * kg + packaging);  // Cost, rounded to 2dp before margin
   const wholesale  = cogs / (1 - ROASTERY_MARGIN_PCT / 100); // roastery→shop: Cost ÷ 0.85 (15% margin ≈ 18% markup)
 
@@ -270,16 +293,18 @@ function compute(coffeeId, kg, bagLabel) {
 
 // ── Calculation drilldown (sanity check) ─────────────────────────────────────
 function build_drilldown(coffee, g) {
-  const c = state.cfg;
   const green = g.price;
-  const shipping = Number(c.shipping_per_kg) || 0;
-  const fee = Number(c.roasting_fee_per_kg) || 0;
-  const lossPct = c.roast_loss_pct;
+  const shipping = Number(state.shipping_override[coffee.id]) || 0;
+  const lossInfo = roast_loss_for(coffee.id);
+  const lossPct = lossInfo.pct;
   const pre = green + shipping;
   const afterLoss = pre / (1 - lossPct / 100);
-  const roasted = round2(afterLoss + fee);
+  const roasted = round2(afterLoss);
   const m = ROASTERY_MARGIN_PCT;
   const d4 = x => (Number(x) || 0).toFixed(4);
+  const loss_note = lossInfo.source === "avg"
+    ? `avg of ${lossInfo.n} roasts = ${lossInfo.avg.toFixed(2)}%, rounded up to ${lossPct}%`
+    : `default ${lossPct}% (${lossInfo.n ? `only ${lossInfo.n} roast${lossInfo.n>1?"s":""} so far, need ${MIN_ROASTS_FOR_AVG}` : "no roast data yet"})`;
 
   const size_lines = SIZES.map(s => {
     const base = roasted * s.kg;
@@ -294,8 +319,7 @@ function build_drilldown(coffee, g) {
     <div class="drilldown">
       <div class="dl-head">Roasted cost / kg</div>
       <div class="dl-row">Green ${eur(green)}${shipping ? ` + shipping ${eur(shipping)}` : ""} = ${d4(pre)}</div>
-      <div class="dl-row">÷ (1 − ${lossPct}% loss) = ${d4(afterLoss)}</div>
-      ${fee ? `<div class="dl-row">+ roasting fee ${eur(fee)} = ${d4(afterLoss + fee)}</div>` : ""}
+      <div class="dl-row">÷ (1 − ${lossPct}% loss) = ${d4(afterLoss)} &nbsp;<span style="color:#999">${loss_note}</span></div>
       <div class="dl-row">= <b>${eur(roasted)} / kg</b> (rounded to 2dp)</div>
       <div class="dl-head" style="margin-top:10px">Per size &nbsp;<span style="font-weight:400;color:#999">Cost = roasted × size + packaging (rounded); Shop = Cost ÷ ${(1 - m/100).toFixed(2)} (${m}% margin)</span></div>
       ${size_lines}
@@ -309,7 +333,7 @@ const BAG_KG = {}; SIZES.forEach(s => BAG_KG[s.label] = s.kg);
 function roasted_cpk(coffeeId) {
   const g = green_for(coffeeId);
   if (!g) return null;
-  return round2((g.price + (Number(state.cfg.shipping_per_kg) || 0)) / (1 - state.cfg.roast_loss_pct / 100) + (Number(state.cfg.roasting_fee_per_kg) || 0));
+  return round2((g.price + (Number(state.shipping_override[coffeeId]) || 0)) / (1 - roast_loss_for(coffeeId).pct / 100));
 }
 function coffee_id_for_name(name) {
   const c = name && state.coffees.find(c => c.name === name);
@@ -432,9 +456,6 @@ function render() {
       <div class="card">
         <div class="section-title">Pricing Inputs</div>
         <div class="cfg-grid">
-          ${cfg_num("roast_loss_pct",      "Roast loss",      c.roast_loss_pct,      "%")}
-          ${cfg_num("shipping_per_kg",     "Shipping (added to green)", c.shipping_per_kg, "€/kg", null, true)}
-          ${cfg_num("roasting_fee_per_kg", "Roasting fee",    c.roasting_fee_per_kg, "€/kg", null, true)}
           ${cfg_num("target_low_pct",      "Target band low", c.target_low_pct,      "%")}
           ${cfg_num("target_high_pct",     "Target band high",c.target_high_pct,     "%")}
         </div>
@@ -449,10 +470,11 @@ function render() {
           ${state.err ? `<span class="save-err">${esc(state.err)}</span>` : ""}
         </div>
         <div class="note">
-          Cost per kg = (green + shipping) ÷ (1 − roast loss) + roasting fee. Shipping and fee are
-          optional — leave them blank to exclude. Roastery → shop is <strong>Cost ÷ 0.85</strong>
-          (15% margin ≈ 18% markup); gross profit = Roastery → shop − Cost. You only set the shop's
-          retail (label) price.
+          Cost per kg = (green + shipping) ÷ (1 − roast loss). <strong>Shipping is per-coffee</strong> (set it on
+          each coffee), and <strong>roast loss is per-coffee</strong> — the average of that coffee's real roasts,
+          rounded up to a whole % for a buffer (defaults to ${DEFAULT_LOSS_PCT}% until there are ${MIN_ROASTS_FOR_AVG} roasts).
+          Roastery → shop = Cost ÷ 0.85 (15% margin ≈ 18% markup); gross profit = Roastery → shop − Cost.
+          The band/packaging below set the retail (label) suggestion.
         </div>
       </div>
 
@@ -507,6 +529,12 @@ function render_results() {
     else if (g && g.source === "manual") src_hint = "manual entry";
     else src_hint = "enter a price to see suggestions";
 
+    const ship_val = state.shipping_override[coffee.id] != null ? state.shipping_override[coffee.id] : "";
+    const loss = roast_loss_for(coffee.id);
+    const loss_hint = loss.source === "avg"
+      ? `avg of ${loss.n} roast${loss.n>1?"s":""} (${loss.avg.toFixed(1)}%), rounded up`
+      : `default${loss.n ? ` — only ${loss.n} roast${loss.n>1?"s":""} so far` : " — no roast data yet"}`;
+
     const head = `
       <div class="coffee-head">
         <div class="coffee-name">${esc(coffee.name)}</div>
@@ -515,6 +543,13 @@ function render_results() {
           <input type="number" step="0.01" min="0" class="green-input" data-green="${coffee.id}"
                  value="${input_val}" placeholder="0.00" />
           <span class="green-src">${src_hint}</span>
+          <span class="param-sep">·</span>
+          <span class="green-lbl">Shipping €/kg</span>
+          <input type="number" step="0.01" min="0" class="green-input" data-ship="${coffee.id}"
+                 value="${ship_val}" placeholder="0.00" />
+          <span class="param-sep">·</span>
+          <span class="green-lbl">Roast loss</span> <b>${loss.pct}%</b>
+          <span class="green-src">${loss_hint}</span>
         </div>
       </div>`;
 
@@ -584,16 +619,27 @@ async function save_green(coffeeId, raw) {
   const id = Number(coffeeId);
   const name = state.coffees.find(c => c.id === id)?.name || null;
   const val = String(raw).trim();
-  if (val === "" || isNaN(Number(val))) {
-    delete state.green_override[id];
-    await supabaseClient.from("pricing_green").delete().eq("coffee_id", id);
-  } else {
-    state.green_override[id] = Number(val);
-    await supabaseClient.from("pricing_green").upsert(
-      { coffee_id: id, coffee: name, green_price: Number(val), updated_at: new Date().toISOString() },
-      { onConflict: "coffee_id" }
-    );
-  }
+  const price = (val === "" || isNaN(Number(val))) ? null : Number(val);
+  if (price == null) delete state.green_override[id]; else state.green_override[id] = price;
+  // Upsert (don't delete the row) so a per-coffee shipping value is preserved when green is cleared.
+  await supabaseClient.from("pricing_green").upsert(
+    { coffee_id: id, coffee: name, green_price: price, updated_at: new Date().toISOString() },
+    { onConflict: "coffee_id" }
+  );
+  render_results();
+}
+
+// Persist a per-coffee shipping €/kg (added to green before roast loss). Blank clears it.
+async function save_shipping(coffeeId, raw) {
+  const id = Number(coffeeId);
+  const name = state.coffees.find(c => c.id === id)?.name || null;
+  const val = String(raw).trim();
+  const ship = (val === "" || isNaN(Number(val))) ? null : Number(val);
+  if (ship == null) delete state.shipping_override[id]; else state.shipping_override[id] = ship;
+  await supabaseClient.from("pricing_green").upsert(
+    { coffee_id: id, coffee: name, shipping_per_kg: ship, updated_at: new Date().toISOString() },
+    { onConflict: "coffee_id" }
+  );
   render_results();
 }
 
@@ -601,6 +647,9 @@ function attach_green() {
   document.querySelectorAll("[data-green]").forEach(inp => {
     // 'change' fires on blur/enter — focus has already left, so re-render is safe.
     inp.addEventListener("change", () => save_green(inp.dataset.green, inp.value));
+  });
+  document.querySelectorAll("[data-ship]").forEach(inp => {
+    inp.addEventListener("change", () => save_shipping(inp.dataset.ship, inp.value));
   });
 }
 
@@ -729,10 +778,6 @@ async function save() {
 
   const { error: e1 } = await supabaseClient.from("pricing_settings").upsert({
     id: 1,
-    roast_loss_pct:      state.cfg.roast_loss_pct,
-    shipping_per_kg:     Number(state.cfg.shipping_per_kg) || 0,
-    roasting_fee_per_kg: Number(state.cfg.roasting_fee_per_kg) || 0,
-    roastery_margin_pct: state.cfg.roastery_margin_pct,
     target_low_pct:      state.cfg.target_low_pct,
     target_high_pct:     state.cfg.target_high_pct,
     updated_at: now,
