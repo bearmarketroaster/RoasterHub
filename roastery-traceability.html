@@ -593,7 +593,7 @@ function process_fill_scan(raw_value) {
   }
   // Check there's enough left in the container for another 5kg bucket
   const already_session_kg = fill_state.filled.length * 5;
-  if ((container.remaining - already_session_kg) < 5) {
+  if (Math.round((container.remaining - already_session_kg) * 1000) / 1000 < 5) {
     flash_fill_scan(`Not enough left in ${container.id} (${(container.remaining - already_session_kg).toFixed(1)}kg)`, "error");
     return;
   }
@@ -1438,7 +1438,7 @@ function process_scan(raw_value) {
         if (l.container_id === c.id) all_session_kg_from_c += l.count * other_bag_kg;
       });
     }
-    if (c.remaining - all_session_kg_from_c >= bag_kg) {
+    if (Math.round((c.remaining - all_session_kg_from_c) * 1000) / 1000 >= bag_kg) {
       chosen = c;
       break;
     }

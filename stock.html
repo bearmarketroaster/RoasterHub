@@ -304,7 +304,7 @@ async function save_staff_takeaway() {
   if (container.coffee !== s.coffee) { s.err = "Container doesn't match the selected coffee."; render(); return; }
   const bag_kg = BAG_SIZE_KG[s.bag_size] || 0;
   if (!bag_kg) { s.err = "Invalid bag size."; render(); return; }
-  if (container.remaining < bag_kg) { s.err = `Container only has ${container.remaining.toFixed(1)}kg remaining — not enough for a ${s.bag_size} bag.`; render(); return; }
+  if (Math.round(container.remaining * 1000) / 1000 < bag_kg) { s.err = `Container only has ${container.remaining.toFixed(1)}kg remaining — not enough for a ${s.bag_size} bag.`; render(); return; }
 
   s.saving = true; render();
 
