@@ -100,6 +100,7 @@ function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g
 function eur(n) { return "€" + (Number(n)||0).toFixed(2); }
 function pct(n) { return (Number(n)||0).toFixed(0) + "%"; }
 function round_to(n, step) { return Math.round((Number(n)||0)/step)*step; }
+function round2(n) { return Math.round((Number(n)||0) * 100) / 100; }
 
 // Canonical RETAIL bag sizes + their weight in kg. (5kg bar is internal; 100g is rare/none currently.)
 const SIZES = [
@@ -112,7 +113,7 @@ const DEFAULTS = {
   roast_loss_pct: 15, roasting_fee_per_kg: 2.50, roastery_margin_pct: 18,
   target_low_pct: 75, target_high_pct: 84,
 };
-const ROASTERY_MARKUP_PCT = 18;   // Roastery → shop is fixed at +18% on COGS (not user-editable).
+const ROASTERY_MARGIN_PCT = 15;   // Roastery → shop is fixed: price = Cost ÷ (1 − 15%). 15% margin ≈ 18% markup.
 
 const state = {
   loaded: false,
@@ -246,9 +247,9 @@ function compute(coffeeId, kg, bagLabel) {
   const high     = state.cfg.target_high_pct / 100;
   const packaging = Number(state.pkg[bagLabel]) || 0;
 
-  const roasted_cost_per_kg = g.price / (1 - loss) + fee;   // blended € per roasted kg
-  const cogs       = roasted_cost_per_kg * kg + packaging;  // roastery cost for this bag
-  const wholesale  = cogs * (1 + ROASTERY_MARKUP_PCT / 100); // fixed roastery→shop markup
+  const roasted_cost_per_kg = round2(g.price / (1 - loss) + fee);   // €/kg, rounded like the sheet
+  const cogs       = round2(roasted_cost_per_kg * kg + packaging);  // Cost, rounded to 2dp before margin
+  const wholesale  = cogs / (1 - ROASTERY_MARGIN_PCT / 100); // roastery→shop: Cost ÷ 0.85 (15% margin ≈ 18% markup)
 
   // Combined margin = (retail - COGS) / retail = target  ->  retail = COGS / (1 - target)
   const retail_low  = cogs / (1 - low);   // price at the band floor (75%)
@@ -263,7 +264,7 @@ const BAG_KG = {}; SIZES.forEach(s => BAG_KG[s.label] = s.kg);
 function roasted_cpk(coffeeId) {
   const g = green_for(coffeeId);
   if (!g) return null;
-  return g.price / (1 - state.cfg.roast_loss_pct / 100) + state.cfg.roasting_fee_per_kg;
+  return round2(g.price / (1 - state.cfg.roast_loss_pct / 100) + state.cfg.roasting_fee_per_kg);
 }
 function coffee_id_for_name(name) {
   const c = name && state.coffees.find(c => c.name === name);
@@ -284,24 +285,25 @@ function value_line(l, channel) {
   const cid = line_coffee_id(l);
   if (cid == null) return { unpriced: true };
   const rcpk = roasted_cpk(cid);
-  const mk = 1 + ROASTERY_MARKUP_PCT / 100;
+  const mk = 1 / (1 - ROASTERY_MARGIN_PCT / 100);   // roastery→shop multiplier = ÷0.85
   const is_bulk = l.type === "bulk" || bs === "Batch brew" || bs === "Bar 5kg";
   if (is_bulk) {
     if (rcpk == null) return { unpriced: true };               // need green to derive the bulk rate
     const kg = Number(l.kg) || 0;
-    return { revenue: rcpk * mk * kg, cogs: rcpk * kg, cid };   // bulk → shops at roasted cost +18%
+    const cost = round2(rcpk * kg);
+    return { revenue: cost * mk, cogs: cost, cid };            // bulk → shops at Cost ÷ 0.85
   }
   const bags = Number(l.bags) || 0;
-  const bag_cogs = rcpk != null ? rcpk * (BAG_KG[bs] || 0) + (Number(state.pkg[bs]) || 0) : null;
+  const bag_cost = rcpk != null ? round2(rcpk * (BAG_KG[bs] || 0) + (Number(state.pkg[bs]) || 0)) : null;
   let price;
   if (channel === "online") {
     price = (state.final[cid] || {})[bs]?.retail;              // online sells at the saved label price
     if (price == null) return { unpriced: true };
   } else {
-    if (bag_cogs == null) return { unpriced: true };           // shop → fixed wholesale = bag COGS +18%
-    price = bag_cogs * mk;
+    if (bag_cost == null) return { unpriced: true };           // shop → fixed wholesale = Cost ÷ 0.85
+    price = bag_cost * mk;
   }
-  const cogs = bag_cogs != null ? bag_cogs * bags : 0;
+  const cogs = bag_cost != null ? bag_cost * bags : 0;
   return { revenue: price * bags, cogs, cid };
 }
 
@@ -401,9 +403,9 @@ function render() {
           ${state.err ? `<span class="save-err">${esc(state.err)}</span>` : ""}
         </div>
         <div class="note">
-          Roastery → shop (wholesale) is <strong>fixed at COGS + 18%</strong> — you don't set it.
-          You only choose the shop's retail (label) price; the suggested band solves the combined
-          margin (retail − roastery COGS) ÷ retail to your target. Live preview reflects unsaved edits above.
+          Roastery → shop is <strong>Cost ÷ 0.85</strong> (15% margin, ≈18% markup) — fixed, you don't set it.
+          Gross profit = Roastery → shop − Cost. You only choose the shop's retail (label) price;
+          its suggested band solves the combined margin (retail − Cost) ÷ retail to your target.
         </div>
       </div>
 
@@ -479,7 +481,8 @@ function render_results() {
         <tr>
           <td class="size">${esc(s.label)}</td>
           <td class="num">${eur(r.cogs)}</td>
-          <td class="num"><strong>${eur(r.wholesale)}</strong><div class="retail-sub">fixed +18%</div></td>
+          <td class="num"><strong>${eur(r.wholesale)}</strong></td>
+          <td class="num">${eur(r.wholesale - r.cogs)}</td>
           <td class="num your-price">
             <div class="your-wrap"><span class="eur-pre">€</span>
               <input type="number" step="0.01" min="0" class="final-input" data-final="${coffee.id}|${esc(s.label)}|retail" value="${rt_val}" placeholder="${sugg_rt.toFixed(2)}" /></div>
@@ -498,8 +501,9 @@ function render_results() {
           <thead>
             <tr>
               <th>Size</th>
-              <th class="num">Roastery COGS</th>
+              <th class="num">Cost</th>
               <th class="num">Roastery → Shop</th>
+              <th class="num">Gross profit</th>
               <th class="num">Shop → Customer (label)</th>
             </tr>
           </thead>
@@ -507,11 +511,11 @@ function render_results() {
         </table>
         ${(() => {
           const br = compute(coffee.id, 1, "1kg");
-          const bulk_kg = br ? br.roasted_cost_per_kg * (1 + ROASTERY_MARKUP_PCT/100) : 0;
+          const bulk_kg = br ? br.roasted_cost_per_kg / (1 - ROASTERY_MARGIN_PCT/100) : 0;
           return `<div class="bulk-row">
             <span class="bulk-lbl">Bulk €/kg (5kg buckets → shops)</span>
             <span class="bulk-fixed">€${bulk_kg.toFixed(2)}/kg</span>
-            <span class="bulk-hint">fixed +18% on roasted cost · only billed when buckets are dispatched</span>
+            <span class="bulk-hint">roasted cost ÷ 0.85 · only billed when buckets are dispatched</span>
           </div>`;
         })()}
         <div class="coffee-actions">
