@@ -56,6 +56,16 @@
     td.size { font-weight: 600; }
     .retail { font-weight: 700; color: #1a1a1a; white-space: nowrap; }
     .retail-sub { font-size: 11px; color: #999; }
+    .your-price { white-space: nowrap; }
+    .your-wrap { display: inline-flex; align-items: center; gap: 3px; }
+    .your-wrap .eur-pre { color: #666; font-size: 13px; }
+    .final-input { width: 78px; padding: 6px 8px; font-size: 14px; text-align: right; border: 1px solid #d8d4cc; border-radius: 6px; }
+    .final-input:focus { outline: none; border-color: #1a1a1a; }
+    .sugg-chip { display: block; margin-top: 4px; background: #f0eee9; border: 1px solid #e0ddd6; color: #555; border-radius: 5px; padding: 2px 7px; font-size: 11px; cursor: pointer; }
+    .sugg-chip:hover { background: #e8e6e1; }
+    .coffee-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0eee9; }
+    .coffee-status { font-size: 12px; color: #999; }
+    .coffee-status.dirty { color: #d97706; font-weight: 600; }
     .no-green { color: #d97706; font-style: italic; font-size: 13px; }
     .empty { color: #999; font-style: italic; padding: 20px 0; text-align: center; }
     @media (max-width: 600px) {
@@ -73,6 +83,7 @@ const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.
 function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function eur(n) { return "€" + (Number(n)||0).toFixed(2); }
 function pct(n) { return (Number(n)||0).toFixed(0) + "%"; }
+function round_to(n, step) { return Math.round((Number(n)||0)/step)*step; }
 
 // Canonical bag sizes (matches BAG_SIZES in settings.html) + their weight in kg.
 const SIZES = [
@@ -95,6 +106,9 @@ const state = {
   coffees: [],                 // [{ id, name }]
   green_delivery: {},          // { coffeeName: { price, date } }  derived from stock deliveries
   green_override: {},          // { coffeeName: price }            manual entry in this tool
+  final: {},                   // { coffeeId: { "200g": {retail, wholesale}, ... } } chosen prices
+  coffee_dirty: {},            // { coffeeId: true } unsaved per-coffee price edits
+  coffee_saving: {},           // { coffeeId: true } in-flight save
   dirty: false,
   saving: false,
   flash_until: 0,
@@ -158,6 +172,18 @@ async function load() {
   const ov = {};
   (overrides || []).forEach(r => { if (r.green_price != null && r.coffee_id != null) ov[r.coffee_id] = Number(r.green_price); });
   state.green_override = ov;
+
+  // Chosen per-coffee, per-size prices (what labels will read).
+  const { data: finals } = await supabaseClient.from("pricing_final").select("coffee_id, bag_size, retail, wholesale");
+  const fin = {};
+  (finals || []).forEach(r => {
+    if (r.coffee_id == null) return;
+    (fin[r.coffee_id] = fin[r.coffee_id] || {})[r.bag_size] = {
+      retail:    r.retail    != null ? Number(r.retail)    : null,
+      wholesale: r.wholesale != null ? Number(r.wholesale) : null,
+    };
+  });
+  state.final = fin;
 
   state.loaded = true;
 }
@@ -304,8 +330,12 @@ function render_results() {
 
     if (!g) return `<div class="card">${head}</div>`;
 
+    const saved = state.final[coffee.id] || {};
     const rows = SIZES.map(s => {
       const r = compute(coffee.id, s.kg, s.label);
+      const suggested = round_to((r.retail_low + r.retail_high) / 2, 0.5);
+      const chosen = saved[s.label]?.retail;
+      const cellval = chosen != null ? chosen : "";
       return `
         <tr>
           <td class="size">${esc(s.label)}</td>
@@ -315,9 +345,19 @@ function render_results() {
             <span class="retail">${eur(r.retail_low)} – ${eur(r.retail_high)}</span>
             <div class="retail-sub">${pct(state.cfg.target_low_pct)}–${pct(state.cfg.target_high_pct)} combined</div>
           </td>
+          <td class="num your-price">
+            <div class="your-wrap">
+              <span class="eur-pre">€</span>
+              <input type="number" step="0.01" min="0" class="final-input" data-final="${coffee.id}|${esc(s.label)}"
+                     value="${cellval}" placeholder="${suggested.toFixed(2)}" />
+            </div>
+            <button type="button" class="sugg-chip" data-fill="${coffee.id}|${esc(s.label)}|${suggested.toFixed(2)}">use €${suggested.toFixed(2)}</button>
+          </td>
         </tr>`;
     }).join("");
 
+    const dirty = !!state.coffee_dirty[coffee.id];
+    const saving = !!state.coffee_saving[coffee.id];
     return `
       <div class="card">
         ${head}
@@ -328,14 +368,20 @@ function render_results() {
               <th class="num">Roastery COGS</th>
               <th class="num">Wholesale</th>
               <th class="num">Suggested retail</th>
+              <th class="num">Your retail price</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
+        <div class="coffee-actions">
+          <button class="btn-save" data-save-coffee="${coffee.id}" ${saving?"disabled":""}>${saving?"Saving…":"Save prices"}</button>
+          <span class="coffee-status ${dirty?"dirty":""}">${dirty?"Unsaved changes":""}</span>
+        </div>
       </div>`;
   }).join("");
 
   attach_green();
+  attach_final();
 }
 
 // Persist a per-coffee manual green price (blank clears it → falls back to delivery).
@@ -361,6 +407,69 @@ function attach_green() {
     // 'change' fires on blur/enter — focus has already left, so re-render is safe.
     inp.addEventListener("change", () => save_green(inp.dataset.green, inp.value));
   });
+}
+
+function mark_coffee_dirty(id) {
+  state.coffee_dirty[id] = true;
+  const btn = document.querySelector(`[data-save-coffee="${id}"]`);
+  const status = btn?.parentElement?.querySelector(".coffee-status");
+  if (status) { status.textContent = "Unsaved changes"; status.classList.add("dirty"); }
+}
+
+function attach_final() {
+  // Typing your own price — update draft silently (no re-render, keep focus).
+  document.querySelectorAll(".final-input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const [cid, size] = inp.dataset.final.split("|");
+      const id = Number(cid);
+      const v = inp.value.trim();
+      (state.final[id] = state.final[id] || {})[size] = { retail: v === "" ? null : Number(v) };
+      mark_coffee_dirty(id);
+    });
+  });
+  // One-tap accept the suggested price.
+  document.querySelectorAll(".sugg-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const [cid, size, val] = chip.dataset.fill.split("|");
+      const id = Number(cid);
+      const input = document.querySelector(`.final-input[data-final="${cid}|${size}"]`);
+      if (input) input.value = val;
+      (state.final[id] = state.final[id] || {})[size] = { retail: Number(val) };
+      mark_coffee_dirty(id);
+    });
+  });
+  document.querySelectorAll("[data-save-coffee]").forEach(btn => {
+    btn.addEventListener("click", () => save_coffee(Number(btn.dataset.saveCoffee)));
+  });
+}
+
+// Persist one coffee's chosen prices. Stores your retail + a snapshot of the computed wholesale,
+// so labels (and later orders) can read an actual price per size.
+async function save_coffee(id) {
+  state.coffee_saving[id] = true; render_results();
+  const now = new Date().toISOString();
+  const saved = state.final[id] || {};
+  const rows = [];
+  SIZES.forEach(s => {
+    const retail = saved[s.label]?.retail;
+    if (retail == null || isNaN(retail)) return;   // only save sizes you've actually priced
+    const r = compute(id, s.kg, s.label);
+    rows.push({ coffee_id: id, bag_size: s.label, retail: Number(retail), wholesale: r ? +r.wholesale.toFixed(2) : null, updated_at: now });
+  });
+  let err = null;
+  if (rows.length) {
+    const res = await supabaseClient.from("pricing_final").upsert(rows, { onConflict: "coffee_id,bag_size" });
+    err = res.error;
+  }
+  // Drop sizes you cleared back to blank.
+  const cleared = Object.keys(saved).filter(size => saved[size]?.retail == null);
+  if (!err && cleared.length) await supabaseClient.from("pricing_final").delete().eq("coffee_id", id).in("bag_size", cleared);
+
+  state.coffee_saving[id] = false;
+  if (err) { state.err = err.message; render(); return; }
+  state.coffee_dirty[id] = false;
+  rows.forEach(r => { (state.final[id] = state.final[id] || {})[r.bag_size] = { retail: r.retail, wholesale: r.wholesale }; });
+  render_results();
 }
 
 // ── Listeners ───────────────────────────────────────────────────────────────
