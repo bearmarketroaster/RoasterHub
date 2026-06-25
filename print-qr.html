@@ -330,6 +330,8 @@
       size_mm: 38,
       coffee_filter: "all",
       prefix_filter: "all",
+      added_since: "",       // bucket print: only show buckets created on/after this date
+      print_status: "unprinted", // bucket print: unprinted | printed | all
       picker_touched: false,
       buckets: [],
       containers: [],
@@ -389,7 +391,7 @@
       }));
 
       const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }, { data: fp_label_data }, { data: fp_assignments }] = await Promise.all([
-        supabaseClient.from("buckets").select("id, name, retired_at").order("created_at", { ascending: false }),
+        supabaseClient.from("buckets").select("id, name, retired_at, created_at, label_printed_at").order("created_at", { ascending: false }),
         supabaseClient.from("containers").select("id, name, retired_at").order("id"),
         supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
         supabaseClient.from("shop_mappings").select("master_name, shop_qr_id").order("master_name"),
@@ -467,7 +469,7 @@
       const el = document.getElementById("picker");
       const type_label = state.type === "bucket" ? "buckets" : state.type === "container" ? "containers" : state.type === "shop" ? "shops" : "FP codes";
       const all_items = state.type === "bucket"
-        ? state.buckets.map(b => ({ id: b.id, label: b.id, name: b.name }))
+        ? state.buckets.map(b => ({ id: b.id, label: b.id, name: b.name, created_at: b.created_at, label_printed_at: b.label_printed_at }))
         : state.type === "container"
         ? state.containers.map(c => ({ id: c.id, label: c.id }))
         : state.type === "shop"
@@ -502,10 +504,34 @@
         }
       }
 
+      let date_filter_html = "";
+      if (state.type === "bucket") {
+        const newest = state.buckets.reduce((m, b) => (b.created_at && b.created_at > m ? b.created_at : m), "");
+        date_filter_html = `
+          <label style="font-size:13px;color:#666;display:flex;align-items:center;gap:6px">Added on/after
+            <input type="date" id="added-since" value="${state.added_since || ""}" style="font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid #e8e6e1;background:#fff;color:#1a1a1a" />
+          </label>
+          ${state.added_since ? `<button id="added-clear" style="font-size:12px;background:none;border:none;color:#2563eb;cursor:pointer;text-decoration:underline">clear</button>` : (newest ? `<span style="font-size:12px;color:#999">latest batch: ${esc(newest.slice(0,10))}</span>` : "")}`;
+      }
+
+      let print_status_html = "";
+      if (state.type === "bucket") {
+        const unprinted_n = state.buckets.filter(b => !b.label_printed_at).length;
+        print_status_html = `
+          <select id="print-status" style="font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid #e8e6e1;background:#fff;color:#1a1a1a">
+            <option value="unprinted" ${state.print_status==="unprinted"?"selected":""}>🆕 Unprinted only (${unprinted_n})</option>
+            <option value="printed" ${state.print_status==="printed"?"selected":""}>Already printed</option>
+            <option value="all" ${state.print_status==="all"?"selected":""}>All</option>
+          </select>`;
+      }
+
       let items = all_items;
       if (state.type === "fp" && state.coffee_filter !== "all") items = items.filter(i => i.coffee_name === state.coffee_filter);
       if (state.type === "bucket" && state.prefix_filter !== "all") items = items.filter(i => bucket_prefix(i.name) === state.prefix_filter);
-      const no_filter_active = !(state.type === "fp" && state.coffee_filter !== "all") && !(state.type === "bucket" && state.prefix_filter !== "all");
+      if (state.type === "bucket" && state.added_since) items = items.filter(i => (i.created_at || "") >= state.added_since);
+      if (state.type === "bucket" && state.print_status === "unprinted") items = items.filter(i => !i.label_printed_at);
+      if (state.type === "bucket" && state.print_status === "printed") items = items.filter(i => i.label_printed_at);
+      const no_filter_active = !(state.type === "fp" && state.coffee_filter !== "all") && !(state.type === "bucket" && (state.prefix_filter !== "all" || state.added_since));
       if (init_ids && init_ids.length && state.type === init_type && no_filter_active && !state.picker_touched) {
         items = items.filter(i => init_ids.includes(i.id));
       }
@@ -516,7 +542,10 @@
         <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
           ${coffee_filter_html}
           ${prefix_filter_html}
+          ${print_status_html}
+          ${date_filter_html}
           <span style="font-size:12px;color:#666">${items.length} ${type_label.slice(0, -1)}${items.length!==1?"s":""} shown</span>
+          ${state.type === "bucket" && items.length ? `<button id="mark-printed" style="font-size:13px;font-weight:700;background:#16a34a;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer">✓ Mark ${items.length} as printed</button>` : ""}
         </div>`;
 
       el.querySelector("#coffee-filter")?.addEventListener("change", e => {
@@ -527,6 +556,32 @@
       el.querySelector("#prefix-filter")?.addEventListener("change", e => {
         state.prefix_filter = e.target.value;
         state.picker_touched = true;
+        render_picker(); render_grid();
+      });
+      el.querySelector("#added-since")?.addEventListener("change", e => {
+        state.added_since = e.target.value;
+        state.picker_touched = true;
+        render_picker(); render_grid();
+      });
+      el.querySelector("#added-clear")?.addEventListener("click", () => {
+        state.added_since = "";
+        state.picker_touched = true;
+        render_picker(); render_grid();
+      });
+      el.querySelector("#print-status")?.addEventListener("change", e => {
+        state.print_status = e.target.value;
+        state.picker_touched = true;
+        render_picker(); render_grid();
+      });
+      el.querySelector("#mark-printed")?.addEventListener("click", async (e) => {
+        const ids = [...state.selected_ids];
+        if (!ids.length) return;
+        if (!confirm(`Mark ${ids.length} bucket label${ids.length>1?"s":""} as printed? They'll drop off the unprinted list.`)) return;
+        const btn = e.target; btn.disabled = true; btn.textContent = "Saving…";
+        const now = new Date().toISOString();
+        const { error } = await supabaseClient.from("buckets").update({ label_printed_at: now }).in("id", ids);
+        if (error) { alert("Couldn't mark printed: " + error.message); btn.disabled = false; return; }
+        state.buckets.forEach(b => { if (ids.includes(b.id)) b.label_printed_at = now; });
         render_picker(); render_grid();
       });
     }
