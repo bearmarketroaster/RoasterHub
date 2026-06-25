@@ -110,7 +110,7 @@ const SIZES = [
 ];
 
 const DEFAULTS = {
-  roast_loss_pct: 15, roasting_fee_per_kg: 2.50, roastery_margin_pct: 18,
+  roast_loss_pct: 15, shipping_per_kg: 0, roasting_fee_per_kg: 0, roastery_margin_pct: 18,
   target_low_pct: 75, target_high_pct: 84,
 };
 const ROASTERY_MARGIN_PCT = 15;   // Roastery → shop is fixed: price = Cost ÷ (1 − 15%). 15% margin ≈ 18% markup.
@@ -153,7 +153,8 @@ async function load() {
   if (settings) {
     state.cfg = {
       roast_loss_pct:      Number(settings.roast_loss_pct),
-      roasting_fee_per_kg: Number(settings.roasting_fee_per_kg),
+      shipping_per_kg:     Number(settings.shipping_per_kg) || 0,
+      roasting_fee_per_kg: Number(settings.roasting_fee_per_kg) || 0,
       roastery_margin_pct: Math.min(18, Number(settings.roastery_margin_pct)),
       target_low_pct:      Number(settings.target_low_pct),
       target_high_pct:     Number(settings.target_high_pct),
@@ -242,12 +243,13 @@ function compute(coffeeId, kg, bagLabel) {
   const g = green_for(coffeeId);
   if (!g) return null;
   const loss   = state.cfg.roast_loss_pct / 100;
-  const fee     = state.cfg.roasting_fee_per_kg;
+  const shipping = Number(state.cfg.shipping_per_kg) || 0;   // added to green BEFORE loss (optional)
+  const fee      = Number(state.cfg.roasting_fee_per_kg) || 0; // added AFTER loss (optional)
   const low      = state.cfg.target_low_pct / 100;
   const high     = state.cfg.target_high_pct / 100;
   const packaging = Number(state.pkg[bagLabel]) || 0;
 
-  const roasted_cost_per_kg = round2(g.price / (1 - loss) + fee);   // €/kg, rounded like the sheet
+  const roasted_cost_per_kg = round2((g.price + shipping) / (1 - loss) + fee);   // (green + shipping) ÷ 0.85 (+ fee)
   const cogs       = round2(roasted_cost_per_kg * kg + packaging);  // Cost, rounded to 2dp before margin
   const wholesale  = cogs / (1 - ROASTERY_MARGIN_PCT / 100); // roastery→shop: Cost ÷ 0.85 (15% margin ≈ 18% markup)
 
@@ -264,7 +266,7 @@ const BAG_KG = {}; SIZES.forEach(s => BAG_KG[s.label] = s.kg);
 function roasted_cpk(coffeeId) {
   const g = green_for(coffeeId);
   if (!g) return null;
-  return round2(g.price / (1 - state.cfg.roast_loss_pct / 100) + state.cfg.roasting_fee_per_kg);
+  return round2((g.price + (Number(state.cfg.shipping_per_kg) || 0)) / (1 - state.cfg.roast_loss_pct / 100) + (Number(state.cfg.roasting_fee_per_kg) || 0));
 }
 function coffee_id_for_name(name) {
   const c = name && state.coffees.find(c => c.name === name);
@@ -388,7 +390,8 @@ function render() {
         <div class="section-title">Pricing Inputs</div>
         <div class="cfg-grid">
           ${cfg_num("roast_loss_pct",      "Roast loss",      c.roast_loss_pct,      "%")}
-          ${cfg_num("roasting_fee_per_kg", "Roasting fee",    c.roasting_fee_per_kg, "€/kg")}
+          ${cfg_num("shipping_per_kg",     "Shipping (added to green)", c.shipping_per_kg, "€/kg", null, true)}
+          ${cfg_num("roasting_fee_per_kg", "Roasting fee",    c.roasting_fee_per_kg, "€/kg", null, true)}
           ${cfg_num("target_low_pct",      "Target band low", c.target_low_pct,      "%")}
           ${cfg_num("target_high_pct",     "Target band high",c.target_high_pct,     "%")}
         </div>
@@ -403,9 +406,10 @@ function render() {
           ${state.err ? `<span class="save-err">${esc(state.err)}</span>` : ""}
         </div>
         <div class="note">
-          Roastery → shop is <strong>Cost ÷ 0.85</strong> (15% margin, ≈18% markup) — fixed, you don't set it.
-          Gross profit = Roastery → shop − Cost. You only choose the shop's retail (label) price;
-          its suggested band solves the combined margin (retail − Cost) ÷ retail to your target.
+          Cost per kg = (green + shipping) ÷ (1 − roast loss) + roasting fee. Shipping and fee are
+          optional — leave them blank to exclude. Roastery → shop is <strong>Cost ÷ 0.85</strong>
+          (15% margin ≈ 18% markup); gross profit = Roastery → shop − Cost. You only set the shop's
+          retail (label) price.
         </div>
       </div>
 
@@ -419,12 +423,13 @@ function render() {
   attach();
 }
 
-function cfg_num(key, label, val, suffix, max) {
+function cfg_num(key, label, val, suffix, max, optional) {
+  const blank = optional && (!val || Number(val) === 0);
   return `
     <div class="cfg-field">
       <label>${label}</label>
       <div class="suffix">
-        <input type="number" step="any" ${max!=null?`max="${max}"`:""} data-cfg="${key}" value="${val}" />
+        <input type="number" step="any" ${max!=null?`max="${max}"`:""} ${optional?`placeholder="optional"`:""} data-cfg="${key}" value="${blank?"":val}" />
         <span>${suffix}</span>
       </div>
     </div>`;
@@ -673,7 +678,8 @@ async function save() {
   const { error: e1 } = await supabaseClient.from("pricing_settings").upsert({
     id: 1,
     roast_loss_pct:      state.cfg.roast_loss_pct,
-    roasting_fee_per_kg: state.cfg.roasting_fee_per_kg,
+    shipping_per_kg:     Number(state.cfg.shipping_per_kg) || 0,
+    roasting_fee_per_kg: Number(state.cfg.roasting_fee_per_kg) || 0,
     roastery_margin_pct: state.cfg.roastery_margin_pct,
     target_low_pct:      state.cfg.target_low_pct,
     target_high_pct:     state.cfg.target_high_pct,
