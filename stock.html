@@ -329,18 +329,19 @@ async function save_staff_takeaway() {
   });
   if (disp_err) { s.err = "Failed to save: " + disp_err.message; s.saving = false; render(); return; }
 
-  // Create the dispatch_line
-  await supabaseClient.from("dispatch_lines").insert({
+  // Create the dispatch_line (no `coffee` column exists; `type` is required)
+  const { error: line_err } = await supabaseClient.from("dispatch_lines").insert({
     id: gen_id("LINE"),
     dispatch_id,
+    type: "retail",
     container_id: container.id,
     fill_id: container.fill_id,
-    coffee: s.coffee,
     bag_size: s.bag_size,
     bags: 1,
     kg: bag_kg,
     fp_code,
   });
+  if (line_err) { s.err = "Failed to save takeaway line: " + line_err.message; s.saving = false; render(); return; }
 
   // Reset form, reload
   state.ui.staff = { coffee: "", container_id: "", bag_size: "200g", err: "", saving: false };
