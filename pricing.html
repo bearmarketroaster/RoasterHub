@@ -101,9 +101,8 @@ function eur(n) { return "€" + (Number(n)||0).toFixed(2); }
 function pct(n) { return (Number(n)||0).toFixed(0) + "%"; }
 function round_to(n, step) { return Math.round((Number(n)||0)/step)*step; }
 
-// Canonical RETAIL bag sizes + their weight in kg. (The 5kg bar is internal stock, not retail-priced.)
+// Canonical RETAIL bag sizes + their weight in kg. (5kg bar is internal; 100g is rare/none currently.)
 const SIZES = [
-  { label: "100g",    kg: 0.1 },
   { label: "200g",    kg: 0.2 },
   { label: "500g",    kg: 0.5 },
   { label: "1kg",     kg: 1   },
