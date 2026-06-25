@@ -71,6 +71,13 @@
     .bulk-hint { font-size: 11px; color: #999; font-style: italic; }
     .bulk-row .sugg-chip { margin-top: 0; }
     .bulk-fixed { font-size: 15px; font-weight: 700; color: #1a1a1a; }
+    .drill-toggle { margin-left: auto; background: none; border: none; color: #666; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px; }
+    .drill-toggle:hover { color: #1a1a1a; }
+    .drilldown { margin-top: 10px; background: #faf9f7; border: 1px solid #eee; border-radius: 8px; padding: 12px 14px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: #444; }
+    .dl-head { font-weight: 700; color: #1a1a1a; margin-bottom: 4px; font-family: inherit; }
+    .dl-row { padding: 2px 0; line-height: 1.5; }
+    .dl-row b { color: #1a1a1a; }
+    .dl-size { display: inline-block; min-width: 48px; font-weight: 700; color: #1a1a1a; }
     .money-range { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; color: #666; }
     .money-range input { margin-left: 6px; padding: 5px 8px; font-size: 13px; }
     .money-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -125,6 +132,7 @@ const state = {
   final: {},                   // { coffeeId: { "200g": {retail, wholesale}, ... } } chosen prices
   coffee_dirty: {},            // { coffeeId: true } unsaved per-coffee price edits
   coffee_saving: {},           // { coffeeId: true } in-flight save
+  drill: {},                   // { coffeeId: true } show calculation drilldown
   dispatches: [],              // for the revenue/profit view
   shop_mappings: [],
   fp_codes: [],
@@ -258,6 +266,41 @@ function compute(coffeeId, kg, bagLabel) {
   const retail_high = cogs / (1 - high);  // price at the band ceiling (84%)
 
   return { roasted_cost_per_kg, cogs, wholesale, retail_low, retail_high };
+}
+
+// ── Calculation drilldown (sanity check) ─────────────────────────────────────
+function build_drilldown(coffee, g) {
+  const c = state.cfg;
+  const green = g.price;
+  const shipping = Number(c.shipping_per_kg) || 0;
+  const fee = Number(c.roasting_fee_per_kg) || 0;
+  const lossPct = c.roast_loss_pct;
+  const pre = green + shipping;
+  const afterLoss = pre / (1 - lossPct / 100);
+  const roasted = round2(afterLoss + fee);
+  const m = ROASTERY_MARGIN_PCT;
+  const d4 = x => (Number(x) || 0).toFixed(4);
+
+  const size_lines = SIZES.map(s => {
+    const base = roasted * s.kg;
+    const pkg = Number(state.pkg[s.label]) || 0;
+    const cost = round2(base + pkg);
+    const shop = cost / (1 - m / 100);
+    return `<div class="dl-row"><span class="dl-size">${esc(s.label)}</span>${d4(roasted)} × ${s.kg} = ${d4(base)} + ${d4(pkg)} pkg = <b>${eur(cost)}</b> → ÷ ${(1 - m/100).toFixed(2)} = <b>${eur(shop)}</b> · gross ${eur(shop - cost)}</div>`;
+  }).join("");
+  const bulk_kg = roasted / (1 - m / 100);
+
+  return `
+    <div class="drilldown">
+      <div class="dl-head">Roasted cost / kg</div>
+      <div class="dl-row">Green ${eur(green)}${shipping ? ` + shipping ${eur(shipping)}` : ""} = ${d4(pre)}</div>
+      <div class="dl-row">÷ (1 − ${lossPct}% loss) = ${d4(afterLoss)}</div>
+      ${fee ? `<div class="dl-row">+ roasting fee ${eur(fee)} = ${d4(afterLoss + fee)}</div>` : ""}
+      <div class="dl-row">= <b>${eur(roasted)} / kg</b> (rounded to 2dp)</div>
+      <div class="dl-head" style="margin-top:10px">Per size &nbsp;<span style="font-weight:400;color:#999">Cost = roasted × size + packaging (rounded); Shop = Cost ÷ ${(1 - m/100).toFixed(2)} (${m}% margin)</span></div>
+      ${size_lines}
+      <div class="dl-row"><span class="dl-size">Bulk</span>${d4(roasted)} ÷ ${(1 - m/100).toFixed(2)} = <b>${eur(bulk_kg)}</b> / kg · × 5 = <b>${eur(bulk_kg * 5)}</b> / bucket</div>
+    </div>`;
 }
 
 // ── Revenue / profit ────────────────────────────────────────────────────────
@@ -526,7 +569,9 @@ function render_results() {
         <div class="coffee-actions">
           <button class="btn-save" data-save-coffee="${coffee.id}" ${saving?"disabled":""}>${saving?"Saving…":"Save prices"}</button>
           <span class="coffee-status ${dirty?"dirty":""}">${dirty?"Unsaved changes":""}</span>
+          <button type="button" class="drill-toggle" data-drill="${coffee.id}">${state.drill[coffee.id]?"▾ Hide calculation":"▸ Show calculation"}</button>
         </div>
+        ${state.drill[coffee.id] ? build_drilldown(coffee, g) : ""}
       </div>`;
   }).join("");
 
@@ -593,6 +638,13 @@ function attach_final() {
   });
   document.querySelectorAll("[data-save-coffee]").forEach(btn => {
     btn.addEventListener("click", () => save_coffee(Number(btn.dataset.saveCoffee)));
+  });
+  document.querySelectorAll("[data-drill]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.drill);
+      state.drill[id] = !state.drill[id];
+      render_results();
+    });
   });
 }
 
