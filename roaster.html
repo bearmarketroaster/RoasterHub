@@ -56,6 +56,62 @@
     .btn-clear:hover { background: #f4f2ed; }
     .loading { text-align: center; padding: 60px; color: #999; }
     .suggest { color: #d97706; font-weight: 700; }
+
+    /* Hero stat strip */
+    .hero { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; margin-bottom: 18px; }
+    .hero-stat { flex: 1; min-width: 120px; background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .hs-n { font-size: 30px; font-weight: 800; line-height: 1; }
+    .hs-l { font-size: 12px; color: #888; margin-top: 6px; text-transform: uppercase; letter-spacing: .03em; }
+    .hero-win { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; align-self: center; }
+
+    /* Two-panel split */
+    .split { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.4fr); gap: 18px; align-items: start; }
+    @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+    .panel { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .panel-h { font-weight: 800; font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .panel-hint { font-weight: 400; font-size: 11px; color: #aaa; }
+
+    /* Priority coffee cards */
+    .prio-list { display: flex; flex-direction: column; gap: 8px; }
+    .prio { text-align: left; width: 100%; background: #fff; border: 1px solid #eee; border-left: 5px solid var(--c, #ccc); border-radius: 10px; padding: 11px 13px; cursor: pointer; transition: all 0.12s; }
+    .prio:hover { border-color: #ccc; border-left-color: var(--c); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .prio.sel { background: #1a1a1a; border-color: #1a1a1a; border-left-color: var(--c); box-shadow: 0 4px 14px rgba(0,0,0,0.18); }
+    .prio.sel .prio-name, .prio.sel .prio-cover, .prio.sel .prio-cover strong { color: #fff; }
+    .prio.sel .prio-sub { color: #bbb; }
+    .prio-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+    .prio-name { font-weight: 700; font-size: 15px; }
+    .prio-badge { color: #fff; font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 999px; letter-spacing: .04em; }
+    .prio-cover { font-size: 13px; color: #444; }
+    .prio-cover strong { font-size: 18px; }
+    .prio-sub { font-size: 11px; color: #999; margin-top: 2px; }
+    .prio-rec { font-size: 12px; color: #d97706; font-weight: 700; margin-top: 5px; }
+
+    /* Plan summary */
+    .plan-summary { background: #f4f2ed; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+
+    /* Size rooms + drum slots */
+    .room { margin-bottom: 16px; }
+    .room-h { font-size: 13px; font-weight: 800; margin-bottom: 8px; }
+    .room-h span { font-weight: 400; color: #999; font-size: 12px; }
+    .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+    .slot { border-radius: 10px; padding: 10px; text-align: left; font-size: 13px; }
+    .slot.empty { background: #faf9f7; border: 1.5px dashed #d8d4cc; color: #888; cursor: default; }
+    .slot.empty.go { border-color: #16a34a; background: #f0faf3; color: #16a34a; cursor: pointer; }
+    .slot.empty.go:hover { background: #e2f5e9; }
+    .slot.filled { background: #fff; border: 1.5px solid #1a1a1a; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .slot-id { font-family: ui-monospace, Menlo, monospace; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: space-between; }
+    .slot-x { background: none; border: none; color: #dc2626; cursor: pointer; font-size: 13px; padding: 0 2px; }
+    .slot-cap { color: #aaa; font-size: 11px; margin-top: 3px; }
+    .slot-hint { font-size: 12px; font-weight: 700; margin-top: 6px; }
+    .slot-coffee { font-weight: 700; font-size: 14px; margin: 5px 0; }
+    .stepper { display: flex; align-items: center; gap: 6px; }
+    .stepper button { width: 26px; height: 26px; border: 1px solid #e8e6e1; background: #f4f2ed; border-radius: 6px; font-size: 16px; font-weight: 700; line-height: 1; }
+    .stepper button:hover { background: #e8e6e1; }
+    .stepper > span { min-width: 18px; text-align: center; font-weight: 700; }
+    .slot-max { color: #bbb; font-weight: 400; font-size: 12px; }
+    .slot-green { font-size: 11px; color: #16a34a; font-weight: 600; margin-top: 6px; }
+
+    .bucket-bar { margin-top: 6px; padding-top: 14px; border-top: 1px solid #f0eee9; font-size: 13px; color: #666; }
   </style>
 </head>
 <body>
@@ -89,6 +145,7 @@ const state = {
   empty_buckets: [],        // [{ id, name, prefix }]
   coffees: [],              // [name]
   plan: {},                 // containerId -> coffee (interactive morning plan)
+  selected_coffee: null,    // coffee picked for tap-to-assign
 };
 
 (async () => {
@@ -195,7 +252,7 @@ async function load() {
 
 // Build the per-coffee "what to roast" rows, sorted by urgency.
 function roast_rows() {
-  const names = [...new Set([...Object.keys(state.on_hand), ...Object.keys(state.usage)])];
+  const names = [...new Set([...state.coffees, ...Object.keys(state.on_hand), ...Object.keys(state.usage)])].filter(Boolean);
   const rows = names.map(coffee => {
     const on_hand = state.on_hand[coffee] || 0;
     const total = state.usage[coffee] || 0;
@@ -222,130 +279,96 @@ function render() {
 
   const rows = roast_rows();
   const need = rows.filter(r => r.status === "out" || r.status === "low");
-
-  // ---- What to roast table ----
-  const badge = s => s === "out" ? `<span class="badge b-out">OUT</span>`
-    : s === "low" ? `<span class="badge b-low">LOW</span>`
-    : s === "ok" ? `<span class="badge b-ok">OK</span>`
-    : `<span class="badge b-idle">idle</span>`;
-  const cover_txt = r => r.cover === Infinity ? "—" : r.cover === 0 ? "0 days" : `${r.cover.toFixed(1)} days`;
-  const roast_table = rows.length ? `
-    <table>
-      <thead><tr>
-        <th>Coffee</th><th class="num">On hand</th><th class="num">Use / day</th>
-        <th class="num">Cover</th><th></th><th class="num">Roast?</th>
-      </tr></thead>
-      <tbody>
-        ${rows.map(r => `<tr>
-          <td><strong>${esc(r.coffee)}</strong>${r.bucket ? ` <span class="section-sub" style="display:inline">+${kg(r.bucket)} in buckets</span>` : ""}</td>
-          <td class="num">${kg(r.on_hand)}</td>
-          <td class="num">${r.per_day > 0 ? kg(r.per_day) : "—"}</td>
-          <td class="num">${cover_txt(r)}</td>
-          <td>${badge(r.status)}</td>
-          <td class="num">${r.suggest > 0 ? `<span class="suggest">${r.suggest_roasts ? `≈${r.suggest_roasts} batch${r.suggest_roasts != 1 ? "es" : ""} ` : ""}(~${r.suggest}kg)</span>` : "—"}</td>
-        </tr>`).join("")}
-      </tbody>
-    </table>` : `<p class="plan-empty">No roasted stock or usage data yet.</p>`;
-
-  // ---- Plan summary ----
   const plan_ids = Object.keys(state.plan).filter(id => state.plan[id] && state.plan[id].coffee);
-  const total_roasts = plan_ids.reduce((a, id) => a + (Number(state.plan[id].roasts) || 0), 0);
+  const total_batches = plan_ids.reduce((a, id) => a + (Number(state.plan[id].roasts) || 0), 0);
   let plan_green = 0, green_known = plan_ids.length > 0;
-  plan_ids.forEach(id => { const gpr = state.green_per_roast[state.plan[id].coffee]; if (gpr > 0) plan_green += gpr * state.plan[id].roasts; else green_known = false; });
-  const plan_html = plan_ids.length ? `
-    ${plan_ids.map(id => {
-      const d = state.empty_drums.find(x => x.id === id);
-      const p = state.plan[id];
-      const gpb = state.green_per_roast[p.coffee];
-      return `<div class="plan-item">
-        <span><span class="mono"><strong>${esc(id)}</strong></span> <span class="pill">${esc(d ? d.prefix : "")} · max ${d ? d.max : "?"}</span> → <strong>${esc(p.coffee)}</strong> · ${p.roasts} batch${p.roasts != 1 ? "es" : ""}${gpb > 0 ? ` × ${r1(gpb)}kg = <strong>${kg(gpb * p.roasts)}</strong> green` : ""}</span>
-        <button class="x" data-unplan="${esc(id)}" title="Remove">✕</button>
-      </div>`;
-    }).join("")}
-    <div class="section-sub" style="margin-top:8px">${plan_ids.length} drum${plan_ids.length != 1 ? "s" : ""} · <strong>${total_roasts} batch${total_roasts != 1 ? "es" : ""}</strong>${plan_green > 0 ? ` · ≈ <strong>${kg(plan_green)}</strong> green needed${green_known ? "" : " (some coffees unknown)"}` : ""}</div>
-  ` : `<p class="plan-empty">No roasts planned yet — assign coffees to empty drums below.</p>`;
+  plan_ids.forEach(id => { const g = state.green_per_roast[state.plan[id].coffee]; if (g > 0) plan_green += g * state.plan[id].roasts; else green_known = false; });
 
-  // ---- Empty drums by size, interactive ----
+  const SCOL = { out: "#dc2626", low: "#d97706", ok: "#16a34a", idle: "#bbb" };
+  const SLAB = { out: "OUT", low: "LOW", ok: "OK", idle: "—" };
+
+  // ---- Left: priority coffee cards ----
+  const prio_cards = rows.map(r => {
+    const sel = state.selected_coffee === r.coffee;
+    const cover = r.cover === Infinity ? "—" : r.cover === 0 ? "OUT" : `${r.cover.toFixed(1)}d`;
+    return `<button class="prio ${sel ? "sel" : ""}" data-pick="${esc(r.coffee)}" style="--c:${SCOL[r.status]}">
+      <div class="prio-top"><span class="prio-name">${esc(r.coffee)}</span><span class="prio-badge" style="background:${SCOL[r.status]}">${SLAB[r.status]}</span></div>
+      <div class="prio-cover">${cover === "OUT" ? `<strong style="color:#dc2626">OUT OF STOCK</strong>` : cover === "—" ? `<span style="color:#bbb">no demand</span>` : `<strong>${cover}</strong> cover · ${kg(r.on_hand)} on hand`}</div>
+      <div class="prio-sub">${r.per_day > 0 ? kg(r.per_day) + "/day" : "no recent use"}${r.bucket ? ` · +${kg(r.bucket)} in buckets` : ""}</div>
+      ${r.suggest > 0 ? `<div class="prio-rec">↳ roast ${r.suggest_roasts ? `≈${r.suggest_roasts} batch${r.suggest_roasts != 1 ? "es" : ""}` : `~${r.suggest}kg`}</div>` : ""}
+    </button>`;
+  }).join("");
+
+  // ---- Right: drum slots grouped into size rooms ----
   const by_prefix = {};
   state.empty_drums.forEach(d => { (by_prefix[d.prefix] = by_prefix[d.prefix] || []).push(d); });
-  const coffee_opts = sel => `<option value="">— pick coffee —</option>` +
-    state.coffees.map(c => `<option value="${esc(c)}" ${sel === c ? "selected" : ""}>${esc(c)}</option>`).join("");
-  const ordered_prefixes = Object.keys(by_prefix).sort((a, b) => size_rank(a) - size_rank(b));
-  const drums_html = state.empty_drums.length ? ordered_prefixes.map(pfx => `
-    <div class="drum-grp">
-      <h4>${esc(pfx)} <span class="section-sub" style="display:inline">· ${by_prefix[pfx].length} empty · max ${max_roasts(pfx)} batch${max_roasts(pfx)!=1?"es":""} each</span></h4>
-      ${by_prefix[pfx].map(d => {
-        const p = state.plan[d.id];
-        const gpb = p && p.coffee ? state.green_per_roast[p.coffee] : null;
-        return `<div class="drum-row">
-          <span class="drum-id mono">${esc(d.id)}</span>
-          <span class="drum-name">${esc(d.name || "")}</span>
-          <select data-plan-drum="${esc(d.id)}">${coffee_opts(p ? p.coffee : "")}</select>
-          ${p && p.coffee ? `<label class="section-sub" style="display:flex;align-items:center;gap:5px">batches
-            <input type="number" min="1" max="${d.max}" value="${p.roasts}" data-plan-roasts="${esc(d.id)}" style="width:58px;padding:6px 8px;border:1px solid #e8e6e1;border-radius:6px;text-align:center" />
-            <span style="color:#bbb">/ ${d.max}</span></label>
-            ${gpb > 0 ? `<span class="section-sub">× ${r1(gpb)}kg green = <strong>${kg(gpb * p.roasts)}</strong></span>` : `<span class="section-sub" style="color:#d97706">no batch history yet</span>`}` : ""}
-        </div>`;
-      }).join("")}
+  const ordered = Object.keys(by_prefix).sort((a, b) => size_rank(a) - size_rank(b));
+  const assignable = !!state.selected_coffee;
+  const rooms = state.empty_drums.length ? ordered.map(pfx => `
+    <div class="room">
+      <div class="room-h">${esc(pfx)} <span>· ${by_prefix[pfx].length} empty · ${max_roasts(pfx)} batches each</span></div>
+      <div class="slots">
+        ${by_prefix[pfx].map(d => {
+          const p = state.plan[d.id];
+          if (p && p.coffee) {
+            const g = state.green_per_roast[p.coffee];
+            return `<div class="slot filled">
+              <div class="slot-id">${esc(d.id)} <button class="slot-x" data-clear="${esc(d.id)}" title="Remove">✕</button></div>
+              <div class="slot-coffee">${esc(p.coffee)}</div>
+              <div class="stepper">
+                <button data-step="${esc(d.id)}|-1">−</button><span>${p.roasts}</span><button data-step="${esc(d.id)}|1">+</button>
+                <span class="slot-max">/ ${d.max} batches</span>
+              </div>
+              <div class="slot-green">${g > 0 ? `${p.roasts} × ${r1(g)}kg = ${kg(g * p.roasts)} green` : "no batch history yet"}</div>
+            </div>`;
+          }
+          return `<button class="slot empty ${assignable ? "go" : ""}" data-assign="${esc(d.id)}">
+            <div class="slot-id">${esc(d.id)}</div>
+            <div class="slot-cap">holds ${d.max} batches</div>
+            <div class="slot-hint">${assignable ? `+ ${esc(state.selected_coffee)}` : "empty"}</div>
+          </button>`;
+        }).join("")}
+      </div>
     </div>`).join("") : `<p class="plan-empty">No empty drums right now.</p>`;
 
   // ---- Empty buckets ----
-  const bkt_by_prefix = {};
-  state.empty_buckets.forEach(b => { bkt_by_prefix[b.prefix] = (bkt_by_prefix[b.prefix] || 0) + 1; });
-  const bkt_html = state.empty_buckets.length
-    ? `<div>${Object.keys(bkt_by_prefix).sort().map(p => `<span class="pill">${esc(p)}: ${bkt_by_prefix[p]}</span>`).join("")}</div>
-       <div class="section-sub" style="margin-top:6px">${state.empty_buckets.length} empty bucket${state.empty_buckets.length!==1?"s":""} total, ready to fill.</div>`
-    : `<p class="plan-empty">No empty buckets.</p>`;
+  const bkt_by = {};
+  state.empty_buckets.forEach(b => bkt_by[b.prefix] = (bkt_by[b.prefix] || 0) + 1);
+  const bkt_bar = state.empty_buckets.length
+    ? Object.keys(bkt_by).sort().map(p => `<span class="pill">${esc(p)}: ${bkt_by[p]}</span>`).join("")
+    : `<span style="color:#bbb;font-style:italic">none empty</span>`;
 
   app.innerHTML = `
     <div class="header">
       <div class="header-left">
         <button class="header-back" id="back-btn">← Dashboard</button>
-        <div>
-          <div class="header-title">🔥 Roaster</div>
-          <div class="header-sub">Morning roast plan</div>
-        </div>
+        <div><div class="header-title">🔥 Roaster</div><div class="header-sub">Morning roast plan</div></div>
       </div>
       <button class="btn-logout" id="logout-btn">Log out</button>
     </div>
     <div class="content">
 
-      <div class="card">
-        <div class="row-between">
-          <div>
-            <div class="section-title">📋 Today's roast plan</div>
-            <div class="section-sub">Assign coffees to empty drums below — they show up here.</div>
-          </div>
-          ${plan_ids.length ? `<button class="btn-clear" id="clear-plan">Clear plan</button>` : ""}
+      <div class="hero">
+        <div class="hero-stat"><div class="hs-n" style="color:${need.length ? "#d97706" : "#16a34a"}">${need.length}</div><div class="hs-l">need roasting</div></div>
+        <div class="hero-stat"><div class="hs-n">${state.empty_drums.length}</div><div class="hs-l">empty drums</div></div>
+        <div class="hero-stat"><div class="hs-n">${total_batches}</div><div class="hs-l">batches planned</div></div>
+        <div class="hero-stat"><div class="hs-n">${plan_green > 0 ? kg(plan_green) : "—"}</div><div class="hs-l">green needed</div></div>
+        <label class="hero-win">usage <select class="win" id="window-sel">${[7,14,30].map(w => `<option value="${w}" ${state.window_days===w?"selected":""}>${w}d</option>`).join("")}</select></label>
+      </div>
+
+      <div class="split">
+        <div class="panel">
+          <div class="panel-h">☕ What to roast <span class="panel-hint">${assignable ? "now tap a drum →" : "tap a coffee to plan it"}</span></div>
+          <div class="prio-list">${prio_cards || `<p class="plan-empty">No coffees yet.</p>`}</div>
         </div>
-        ${plan_html}
-      </div>
-
-      <div class="card">
-        <div class="row-between">
-          <div>
-            <div class="section-title">☕ What to roast ${need.length ? `<span class="badge b-low">${need.length} need attention</span>` : `<span class="badge b-ok">all good</span>`}</div>
-            <div class="section-sub">Roasted stock vs average daily usage. Cover = how many days of stock you have left.</div>
-          </div>
-          <label class="section-sub" style="display:flex;align-items:center;gap:6px">usage over
-            <select class="win" id="window-sel">
-              ${[7,14,30].map(w => `<option value="${w}" ${state.window_days===w?"selected":""}>${w} days</option>`).join("")}
-            </select>
-          </label>
+        <div class="panel">
+          <div class="panel-h">🛢️ Today's plan ${plan_ids.length ? `<button class="btn-clear" id="clear-plan">Clear</button>` : ""}</div>
+          ${plan_ids.length
+            ? `<div class="plan-summary">${total_batches} batch${total_batches!=1?"es":""}${plan_green>0?` · ≈ ${kg(plan_green)} green${green_known?"":" (some unknown)"}`:""} · ${plan_ids.length} drum${plan_ids.length!=1?"s":""}</div>`
+            : `<div class="plan-summary" style="background:#f0faf3;color:#166534">Pick a coffee on the left, then tap an empty drum below to plan it.</div>`}
+          ${rooms}
+          <div class="bucket-bar">🪣 Empty buckets: ${bkt_bar}</div>
         </div>
-        ${roast_table}
-      </div>
-
-      <div class="card">
-        <div class="section-title">🛢️ Empty drums by size</div>
-        <div class="section-sub">Different sizes hold different batch counts. Pick a coffee and set batches — each batch uses that coffee's usual green weight.</div>
-        ${drums_html}
-      </div>
-
-      <div class="card">
-        <div class="section-title">🪣 Empty buckets</div>
-        <div class="section-sub">Available to fill from the drums you roast.</div>
-        ${bkt_html}
       </div>
 
     </div>`;
@@ -354,23 +377,29 @@ function render() {
   document.getElementById("logout-btn").addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; });
   document.getElementById("window-sel").addEventListener("change", async e => { state.window_days = Number(e.target.value); await load(); render(); });
   document.getElementById("clear-plan")?.addEventListener("click", () => { state.plan = {}; render(); });
-  app.querySelectorAll("[data-plan-drum]").forEach(sel => sel.addEventListener("change", e => {
-    const id = e.target.dataset.planDrum;
-    const d = state.empty_drums.find(x => x.id === id);
-    if (e.target.value) state.plan[id] = { coffee: e.target.value, roasts: (state.plan[id] && state.plan[id].roasts) || (d ? d.max : 1) };
-    else delete state.plan[id];
+
+  app.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
+    const c = b.dataset.pick;
+    state.selected_coffee = state.selected_coffee === c ? null : c;
     render();
   }));
-  app.querySelectorAll("[data-plan-roasts]").forEach(inp => inp.addEventListener("change", e => {
-    const id = e.target.dataset.planRoasts;
+  app.querySelectorAll("[data-assign]").forEach(b => b.addEventListener("click", () => {
+    if (!state.selected_coffee) return;
+    const id = b.dataset.assign;
     const d = state.empty_drums.find(x => x.id === id);
-    if (!state.plan[id]) return;
-    let v = Math.round(Number(e.target.value) || 1);
+    state.plan[id] = { coffee: state.selected_coffee, roasts: d ? d.max : 1 };
+    render();
+  }));
+  app.querySelectorAll("[data-step]").forEach(b => b.addEventListener("click", () => {
+    const [id, delta] = b.dataset.step.split("|");
+    const d = state.empty_drums.find(x => x.id === id);
+    const p = state.plan[id]; if (!p) return;
+    let v = (Number(p.roasts) || 1) + Number(delta);
     v = Math.max(1, Math.min(d ? d.max : v, v));
-    state.plan[id].roasts = v;
+    p.roasts = v;
     render();
   }));
-  app.querySelectorAll("[data-unplan]").forEach(btn => btn.addEventListener("click", () => { delete state.plan[btn.dataset.unplan]; render(); }));
+  app.querySelectorAll("[data-clear]").forEach(b => b.addEventListener("click", () => { delete state.plan[b.dataset.clear]; render(); }));
 }
 </script>
 </body>
