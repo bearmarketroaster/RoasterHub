@@ -135,7 +135,7 @@ function max_roasts(pfx) { return SIZE_ROASTS[pfx] || 1; }
 
 const state = {
   loaded: false,
-  window_days: 14,          // usage averaging window
+  window_days: 28,          // usage averaging window — trailing 28-day concurrent average
   on_hand: {},              // coffee -> roasted kg sitting in drums
   bucket_kg: {},            // coffee -> kg sitting in filled buckets (info only)
   usage: {},                // coffee -> total kg dispatched in window
@@ -353,7 +353,7 @@ function render() {
         <div class="hero-stat"><div class="hs-n">${state.empty_drums.length}</div><div class="hs-l">empty drums</div></div>
         <div class="hero-stat"><div class="hs-n">${total_batches}</div><div class="hs-l">batches planned</div></div>
         <div class="hero-stat"><div class="hs-n">${plan_green > 0 ? kg(plan_green) : "—"}</div><div class="hs-l">green needed</div></div>
-        <label class="hero-win">usage <select class="win" id="window-sel">${[7,14,30].map(w => `<option value="${w}" ${state.window_days===w?"selected":""}>${w}d</option>`).join("")}</select></label>
+        <div class="hero-win">use/day = 28-day avg</div>
       </div>
 
       <div class="split">
@@ -375,7 +375,6 @@ function render() {
 
   document.getElementById("back-btn").addEventListener("click", () => window.location.href = "index.html");
   document.getElementById("logout-btn").addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; });
-  document.getElementById("window-sel").addEventListener("change", async e => { state.window_days = Number(e.target.value); await load(); render(); });
   document.getElementById("clear-plan")?.addEventListener("click", () => { state.plan = {}; render(); });
 
   app.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
