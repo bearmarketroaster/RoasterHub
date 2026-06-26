@@ -95,7 +95,7 @@
       line-height: 1;
       letter-spacing: -0.02em;
       text-transform: uppercase;
-      max-width: 37mm;     /* leaves room for the bigger QR top-right */
+      max-width: 34mm;     /* leaves room for the bigger QR top-right */
       word-break: break-word;
     }
     body.mode-a4_21 .bag-label .bl-roast {
@@ -134,8 +134,8 @@
       position: absolute;
       right: 2.5mm;
       top: 2mm;
-      width: 21mm;
-      height: 21mm;
+      width: 23mm;
+      height: 23mm;
     }
     body.mode-a4_21 .bag-label .bl-qr img,
     body.mode-a4_21 .bag-label .bl-qr canvas {
@@ -660,7 +660,7 @@
       return new Promise((res, rej) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onload = () => res(im); im.onerror = rej; im.src = url; });
     }
     async function composite_qr_dataurl(text, imgUrl) {
-      const SZ = 1000, CENTRE = 0.30, PAD = 0.08, RAD = 0.18;
+      const SZ = 1000, CENTRE = 0.33, PAD = 0.08, RAD = 0.18;
       const holder = document.createElement("div");
       new window.QRCode(holder, { text, width: SZ, height: SZ, colorDark: "#1a1a1a", colorLight: "#ffffff", correctLevel: window.QRCode.CorrectLevel.H });
       const out = document.createElement("canvas"); out.width = SZ; out.height = SZ;
