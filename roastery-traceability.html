@@ -1137,9 +1137,13 @@ function build_deliveries_tab() {
   const visible = state.dispatches.filter(d => d.shop !== "Samples" && d.shop !== "Staff" && d.shop !== "Emptied" && kind_of(d) !== "staff");
   if (visible.length===0) return `<h2>Deliveries</h2><div class="card empty"><div class="icon">🚚</div>No dispatches yet.</div>`;
 
-  const wholesale_d = visible.filter(d => kind_of(d) === "wholesale");
-  const online_d    = visible.filter(d => kind_of(d) === "online");
-  const charity_d   = visible.filter(d => kind_of(d) === "charity");
+  // Auto-confirmed channels (wholesale/online/charity) only show TODAY's dispatches — otherwise the
+  // list grows forever. Shops keep every dispatch until it's accepted (handled below via pending_shop).
+  const _t = new Date();
+  const today = `${_t.getFullYear()}-${String(_t.getMonth()+1).padStart(2,"0")}-${String(_t.getDate()).padStart(2,"0")}`;
+  const wholesale_d = visible.filter(d => kind_of(d) === "wholesale" && d.date === today);
+  const online_d    = visible.filter(d => kind_of(d) === "online"    && d.date === today);
+  const charity_d   = visible.filter(d => kind_of(d) === "charity"   && d.date === today);
 
   // SHOPS use the acceptance lifecycle: a dispatch sits under its shop until accepted, then drops off
   // (history lives in reports). The other channels auto-confirm, so they show as grouped history.
@@ -1195,11 +1199,11 @@ function build_deliveries_tab() {
   return `<h2>Deliveries</h2>
     <h3 style="color:#d97706;margin-top:0">🏪 Shops — awaiting acceptance${pending_shop.length?` (${pending_shop.length})`:""}</h3>
     ${grouped_section(pending_shop, "shop", "#d97706", "✓", "Nothing awaiting shop acceptance.")}
-    <h3 style="color:#1a1a1a;${gap}">📦 Wholesale${wholesale_d.length?` (${wholesale_d.length})`:""}</h3>
+    <h3 style="color:#1a1a1a;${gap}">📦 Wholesale <span style="font-weight:400;color:#999;font-size:13px">· today</span>${wholesale_d.length?` (${wholesale_d.length})`:""}</h3>
     ${grouped_section(wholesale_d, "wh", "#1a1a1a", "📦", "No wholesale dispatches.")}
-    <h3 style="color:#2563eb;${gap}">🌐 Online${online_d.length?` (${online_d.length})`:""}</h3>
+    <h3 style="color:#2563eb;${gap}">🌐 Online <span style="font-weight:400;color:#999;font-size:13px">· today</span>${online_d.length?` (${online_d.length})`:""}</h3>
     ${grouped_section(online_d, "online", "#2563eb", "🌐", "No online dispatches.")}
-    <h3 style="color:#16a34a;${gap}">❤️ Charity${charity_d.length?` (${charity_d.length})`:""}</h3>
+    <h3 style="color:#16a34a;${gap}">❤️ Charity <span style="font-weight:400;color:#999;font-size:13px">· today</span>${charity_d.length?` (${charity_d.length})`:""}</h3>
     ${grouped_section(charity_d, "charity", "#16a34a", "❤️", "No charity dispatches.")}`;
 }
 
