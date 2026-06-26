@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roaster — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    input, select, button, textarea { font-family: inherit; font-size: 14px; }
+    button { cursor: pointer; }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .content { padding: 24px; max-width: 1040px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; margin-bottom: 18px; }
+    .section-title { font-weight: 800; font-size: 16px; margin-bottom: 4px; }
+    .section-sub { font-size: 12px; color: #999; margin-bottom: 14px; }
+    .row-between { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid #f0eee9; font-size: 14px; text-align: left; }
+    th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .badge { display: inline-block; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; }
+    .b-out { background: #fdecec; color: #dc2626; }
+    .b-low { background: #fff3e0; color: #d97706; }
+    .b-ok  { background: #e9f7ef; color: #16a34a; }
+    .b-idle{ background: #f0eee9; color: #999; }
+
+    .pill { display: inline-block; background: #f0eee9; color: #444; border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 600; margin: 0 6px 6px 0; }
+    .mono { font-family: ui-monospace, Menlo, monospace; }
+
+    .plan-empty { color: #999; font-style: italic; font-size: 14px; }
+    .plan-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid #e8e6e1; border-radius: 8px; margin-bottom: 6px; background: #faf9f7; }
+    .plan-item .x { background: none; border: none; color: #dc2626; font-size: 16px; cursor: pointer; }
+
+    .drum-grp { margin-bottom: 14px; }
+    .drum-grp h4 { font-size: 13px; color: #1a1a1a; margin-bottom: 8px; }
+    .drum-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f4f2ed; flex-wrap: wrap; }
+    .drum-id { font-weight: 700; min-width: 70px; }
+    .drum-name { color: #999; font-size: 12px; flex: 1; min-width: 80px; }
+    .drum-row select { max-width: 240px; padding: 7px 9px; border-radius: 6px; border: 1px solid #e8e6e1; background: #fff; }
+
+    select.win { padding: 6px 10px; border-radius: 6px; border: 1px solid #e8e6e1; background: #fff; font-size: 13px; }
+    .btn-clear { background: none; border: 1px solid #e8e6e1; color: #666; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+    .btn-clear:hover { background: #f4f2ed; }
+    .loading { text-align: center; padding: 60px; color: #999; }
+    .suggest { color: #d97706; font-weight: 700; }
+  </style>
+</head>
+<body>
+<div id="app"><div class="loading">Loading…</div></div>
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function kg(n) { return (Math.round((Number(n)||0)*10)/10).toFixed(1) + "kg"; }
+function r1(n) { return Math.round((Number(n)||0)*10)/10; }
+
+// Tuning — flag a coffee LOW when cover drops below this; suggest roasting up to the target.
+const LOW_COVER_DAYS = 7;
+const TARGET_COVER_DAYS = 14;
+
+// Drum capacity by size prefix, in number of roasts (batches). Biggest → smallest.
+const SIZE_ROASTS = { XL: 9, L: 7, M: 5, S: 3, W: 1 };
+const SIZE_ORDER  = ["XL", "L", "M", "S", "W"];
+function size_rank(pfx) { const i = SIZE_ORDER.indexOf(pfx); return i === -1 ? 99 : i; }
+function max_roasts(pfx) { return SIZE_ROASTS[pfx] || 1; }
+
+const state = {
+  loaded: false,
+  window_days: 14,          // usage averaging window
+  on_hand: {},              // coffee -> roasted kg sitting in drums
+  bucket_kg: {},            // coffee -> kg sitting in filled buckets (info only)
+  usage: {},                // coffee -> total kg dispatched in window
+  kg_per_roast: {},         // coffee -> avg roasted kg per roast (from history)
+  green_per_roast: {},      // coffee -> avg green kg per roast (from history)
+  empty_drums: [],          // [{ id, name, prefix }]
+  empty_buckets: [],        // [{ id, name, prefix }]
+  coffees: [],              // [name]
+  plan: {},                 // containerId -> coffee (interactive morning plan)
+};
+
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { window.location.href = "login.html"; return; }
+  await load();
+  render();
+})();
+
+function size_prefix(id) { const m = String(id||"").match(/^([A-Za-z]+)/); return m ? m[1].toUpperCase() : "?"; }
+
+async function load() {
+  const [{ data: containers }, { data: sessions }, { data: disp }, { data: buckets }, { data: coffees }, { data: fp_codes }] = await Promise.all([
+    supabaseClient.from("containers").select("id, name, status, retired_at"),
+    supabaseClient.from("roast_sessions").select("id, container_id, coffee, fill_id, roasted_weight, date, is_test, roast_batches(green_weight)").order("date", { ascending: false }),
+    supabaseClient.from("dispatches").select("id, date, shop, dispatch_lines(*)"),
+    supabaseClient.from("buckets").select("id, name, coffee, fill_id, status, retired_at"),
+    supabaseClient.from("coffees").select("name"),
+    supabaseClient.from("fp_codes").select("fp_code, coffee_name"),
+  ]);
+
+  const conts = (containers || []).filter(c => !c.retired_at);
+  const sess = sessions || [];
+  const fpmap = {}; (fp_codes || []).forEach(f => { if (f.fp_code) fpmap[f.fp_code] = f.coffee_name; });
+  const fillmap = {}; sess.forEach(s => { if (s.fill_id && s.coffee && !fillmap[s.fill_id]) fillmap[s.fill_id] = s.coffee; });
+
+  // Dispatch line kg per fill_id (for container remaining)
+  const packed_by_fill = {};
+  (disp || []).forEach(d => (d.dispatch_lines || []).forEach(l => {
+    if (l.fill_id) packed_by_fill[l.fill_id] = (packed_by_fill[l.fill_id] || 0) + (Number(l.kg) || 0);
+  }));
+  // Filled-bucket kg per fill_id
+  const bucket_by_fill = {};
+  (buckets || []).forEach(b => {
+    if (b.status === "filled" && !b.retired_at && b.fill_id) bucket_by_fill[b.fill_id] = (bucket_by_fill[b.fill_id] || 0) + 5;
+  });
+
+  // Roasted ON HAND per coffee = sum of drum remaining (active + waiting drums), scoped to each drum's CURRENT fill.
+  const on_hand = {}, empty_drums = [];
+  conts.forEach(c => {
+    if (c.status === "empty") { empty_drums.push({ id: c.id, name: c.name, prefix: size_prefix(c.id) }); return; }
+    if (c.status !== "active" && c.status !== "waiting") return;
+    const cs = sess.filter(s => s.container_id === c.id);            // newest-first already
+    if (!cs.length) return;
+    const fill = cs[0].fill_id, coffee = cs[0].coffee;
+    if (!fill || !coffee) return;
+    const total = cs.filter(s => s.fill_id === fill).reduce((a, s) => a + (Number(s.roasted_weight) || 0), 0);
+    const remaining = Math.max(0, total - (packed_by_fill[fill] || 0) - (bucket_by_fill[fill] || 0));
+    on_hand[coffee] = (on_hand[coffee] || 0) + remaining;
+  });
+
+  // Filled-bucket kg per coffee (info only — ready-to-go stock not counted in cover)
+  const bkt = {};
+  (buckets || []).forEach(b => { if (b.status === "filled" && !b.retired_at && b.coffee) bkt[b.coffee] = (bkt[b.coffee] || 0) + 5; });
+
+  // Usage = kg that left stock over the window (sales, samples, staff, batch, buckets) — excludes Emptied write-offs.
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - state.window_days);
+  const cutoff_str = `${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,"0")}-${String(cutoff.getDate()).padStart(2,"0")}`;
+  const usage = {};
+  (disp || []).forEach(d => {
+    if (d.shop === "Emptied" || (d.date || "") < cutoff_str) return;
+    (d.dispatch_lines || []).forEach(l => {
+      if (l.bag_size === "Emptied") return;
+      let coffee = l.fp_code ? fpmap[l.fp_code] : null;
+      if (!coffee && l.fill_id) coffee = fillmap[l.fill_id];
+      if (!coffee) return;
+      usage[coffee] = (usage[coffee] || 0) + (Number(l.kg) || 0);
+    });
+  });
+
+  // Empty buckets
+  const empty_buckets = (buckets || [])
+    .filter(b => b.status === "empty" && !b.retired_at)
+    .map(b => ({ id: b.id, name: b.name, prefix: (String(b.name||"").replace(/\s*\d+\s*$/, "").trim() || "Bucket") }));
+
+  state.on_hand = on_hand;
+  state.bucket_kg = bkt;
+  state.usage = usage;
+
+  // Per-coffee batch size, derived from real roasts: roasted ÷ batches, and green ÷ batches.
+  const roasted_sum = {}, batch_sum = {}, green_sum = {};
+  sess.forEach(s => {
+    if (s.is_test || !s.coffee) return;
+    const nb = (s.roast_batches || []).length;
+    const r = Number(s.roasted_weight) || 0;
+    if (nb === 0 || r <= 0) return;                 // skip seed/snapshot sessions (no batches)
+    roasted_sum[s.coffee] = (roasted_sum[s.coffee] || 0) + r;
+    batch_sum[s.coffee]   = (batch_sum[s.coffee]   || 0) + nb;
+    green_sum[s.coffee]   = (green_sum[s.coffee]   || 0) + (s.roast_batches || []).reduce((a, b) => a + (Number(b.green_weight) || 0), 0);
+  });
+  const kg_per_roast = {}, green_per_roast = {};
+  Object.keys(batch_sum).forEach(c => {
+    if (batch_sum[c] > 0) { kg_per_roast[c] = roasted_sum[c] / batch_sum[c]; green_per_roast[c] = green_sum[c] / batch_sum[c]; }
+  });
+  state.kg_per_roast = kg_per_roast;
+  state.green_per_roast = green_per_roast;
+  state.empty_drums = empty_drums
+    .map(d => ({ ...d, max: max_roasts(d.prefix) }))
+    .sort((a, b) => size_rank(a.prefix) - size_rank(b.prefix) || a.id.localeCompare(b.id));
+  state.empty_buckets = empty_buckets;
+  state.coffees = [...new Set([...(coffees || []).map(c => c.name), ...Object.keys(on_hand), ...Object.keys(usage)])].filter(Boolean).sort();
+  state.loaded = true;
+}
+
+// Build the per-coffee "what to roast" rows, sorted by urgency.
+function roast_rows() {
+  const names = [...new Set([...Object.keys(state.on_hand), ...Object.keys(state.usage)])];
+  const rows = names.map(coffee => {
+    const on_hand = state.on_hand[coffee] || 0;
+    const total = state.usage[coffee] || 0;
+    const per_day = total / state.window_days;
+    let cover, status;
+    if (per_day <= 0) { cover = Infinity; status = "idle"; }
+    else if (on_hand <= 0.05) { cover = 0; status = "out"; }
+    else { cover = on_hand / per_day; status = cover < LOW_COVER_DAYS ? "low" : "ok"; }
+    const suggest = (per_day > 0 && cover < LOW_COVER_DAYS)
+      ? Math.max(0, Math.round((TARGET_COVER_DAYS * per_day - on_hand)))
+      : 0;
+    const kpr = state.kg_per_roast[coffee];
+    const suggest_roasts = (suggest > 0 && kpr > 0) ? Math.ceil(suggest / kpr) : null;
+    return { coffee, on_hand, per_day, cover, status, suggest, suggest_roasts, bucket: state.bucket_kg[coffee] || 0 };
+  });
+  const order = { out: 0, low: 1, ok: 2, idle: 3 };
+  rows.sort((a, b) => (order[a.status] - order[b.status]) || (a.cover - b.cover) || a.coffee.localeCompare(b.coffee));
+  return rows;
+}
+
+function render() {
+  const app = document.getElementById("app");
+  if (!state.loaded) { app.innerHTML = `<div class="loading">Loading…</div>`; return; }
+
+  const rows = roast_rows();
+  const need = rows.filter(r => r.status === "out" || r.status === "low");
+
+  // ---- What to roast table ----
+  const badge = s => s === "out" ? `<span class="badge b-out">OUT</span>`
+    : s === "low" ? `<span class="badge b-low">LOW</span>`
+    : s === "ok" ? `<span class="badge b-ok">OK</span>`
+    : `<span class="badge b-idle">idle</span>`;
+  const cover_txt = r => r.cover === Infinity ? "—" : r.cover === 0 ? "0 days" : `${r.cover.toFixed(1)} days`;
+  const roast_table = rows.length ? `
+    <table>
+      <thead><tr>
+        <th>Coffee</th><th class="num">On hand</th><th class="num">Use / day</th>
+        <th class="num">Cover</th><th></th><th class="num">Roast?</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r => `<tr>
+          <td><strong>${esc(r.coffee)}</strong>${r.bucket ? ` <span class="section-sub" style="display:inline">+${kg(r.bucket)} in buckets</span>` : ""}</td>
+          <td class="num">${kg(r.on_hand)}</td>
+          <td class="num">${r.per_day > 0 ? kg(r.per_day) : "—"}</td>
+          <td class="num">${cover_txt(r)}</td>
+          <td>${badge(r.status)}</td>
+          <td class="num">${r.suggest > 0 ? `<span class="suggest">${r.suggest_roasts ? `≈${r.suggest_roasts} batch${r.suggest_roasts != 1 ? "es" : ""} ` : ""}(~${r.suggest}kg)</span>` : "—"}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>` : `<p class="plan-empty">No roasted stock or usage data yet.</p>`;
+
+  // ---- Plan summary ----
+  const plan_ids = Object.keys(state.plan).filter(id => state.plan[id] && state.plan[id].coffee);
+  const total_roasts = plan_ids.reduce((a, id) => a + (Number(state.plan[id].roasts) || 0), 0);
+  let plan_green = 0, green_known = plan_ids.length > 0;
+  plan_ids.forEach(id => { const gpr = state.green_per_roast[state.plan[id].coffee]; if (gpr > 0) plan_green += gpr * state.plan[id].roasts; else green_known = false; });
+  const plan_html = plan_ids.length ? `
+    ${plan_ids.map(id => {
+      const d = state.empty_drums.find(x => x.id === id);
+      const p = state.plan[id];
+      const gpb = state.green_per_roast[p.coffee];
+      return `<div class="plan-item">
+        <span><span class="mono"><strong>${esc(id)}</strong></span> <span class="pill">${esc(d ? d.prefix : "")} · max ${d ? d.max : "?"}</span> → <strong>${esc(p.coffee)}</strong> · ${p.roasts} batch${p.roasts != 1 ? "es" : ""}${gpb > 0 ? ` × ${r1(gpb)}kg = <strong>${kg(gpb * p.roasts)}</strong> green` : ""}</span>
+        <button class="x" data-unplan="${esc(id)}" title="Remove">✕</button>
+      </div>`;
+    }).join("")}
+    <div class="section-sub" style="margin-top:8px">${plan_ids.length} drum${plan_ids.length != 1 ? "s" : ""} · <strong>${total_roasts} batch${total_roasts != 1 ? "es" : ""}</strong>${plan_green > 0 ? ` · ≈ <strong>${kg(plan_green)}</strong> green needed${green_known ? "" : " (some coffees unknown)"}` : ""}</div>
+  ` : `<p class="plan-empty">No roasts planned yet — assign coffees to empty drums below.</p>`;
+
+  // ---- Empty drums by size, interactive ----
+  const by_prefix = {};
+  state.empty_drums.forEach(d => { (by_prefix[d.prefix] = by_prefix[d.prefix] || []).push(d); });
+  const coffee_opts = sel => `<option value="">— pick coffee —</option>` +
+    state.coffees.map(c => `<option value="${esc(c)}" ${sel === c ? "selected" : ""}>${esc(c)}</option>`).join("");
+  const ordered_prefixes = Object.keys(by_prefix).sort((a, b) => size_rank(a) - size_rank(b));
+  const drums_html = state.empty_drums.length ? ordered_prefixes.map(pfx => `
+    <div class="drum-grp">
+      <h4>${esc(pfx)} <span class="section-sub" style="display:inline">· ${by_prefix[pfx].length} empty · max ${max_roasts(pfx)} batch${max_roasts(pfx)!=1?"es":""} each</span></h4>
+      ${by_prefix[pfx].map(d => {
+        const p = state.plan[d.id];
+        const gpb = p && p.coffee ? state.green_per_roast[p.coffee] : null;
+        return `<div class="drum-row">
+          <span class="drum-id mono">${esc(d.id)}</span>
+          <span class="drum-name">${esc(d.name || "")}</span>
+          <select data-plan-drum="${esc(d.id)}">${coffee_opts(p ? p.coffee : "")}</select>
+          ${p && p.coffee ? `<label class="section-sub" style="display:flex;align-items:center;gap:5px">batches
+            <input type="number" min="1" max="${d.max}" value="${p.roasts}" data-plan-roasts="${esc(d.id)}" style="width:58px;padding:6px 8px;border:1px solid #e8e6e1;border-radius:6px;text-align:center" />
+            <span style="color:#bbb">/ ${d.max}</span></label>
+            ${gpb > 0 ? `<span class="section-sub">× ${r1(gpb)}kg green = <strong>${kg(gpb * p.roasts)}</strong></span>` : `<span class="section-sub" style="color:#d97706">no batch history yet</span>`}` : ""}
+        </div>`;
+      }).join("")}
+    </div>`).join("") : `<p class="plan-empty">No empty drums right now.</p>`;
+
+  // ---- Empty buckets ----
+  const bkt_by_prefix = {};
+  state.empty_buckets.forEach(b => { bkt_by_prefix[b.prefix] = (bkt_by_prefix[b.prefix] || 0) + 1; });
+  const bkt_html = state.empty_buckets.length
+    ? `<div>${Object.keys(bkt_by_prefix).sort().map(p => `<span class="pill">${esc(p)}: ${bkt_by_prefix[p]}</span>`).join("")}</div>
+       <div class="section-sub" style="margin-top:6px">${state.empty_buckets.length} empty bucket${state.empty_buckets.length!==1?"s":""} total, ready to fill.</div>`
+    : `<p class="plan-empty">No empty buckets.</p>`;
+
+  app.innerHTML = `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="back-btn">← Dashboard</button>
+        <div>
+          <div class="header-title">🔥 Roaster</div>
+          <div class="header-sub">Morning roast plan</div>
+        </div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log out</button>
+    </div>
+    <div class="content">
+
+      <div class="card">
+        <div class="row-between">
+          <div>
+            <div class="section-title">📋 Today's roast plan</div>
+            <div class="section-sub">Assign coffees to empty drums below — they show up here.</div>
+          </div>
+          ${plan_ids.length ? `<button class="btn-clear" id="clear-plan">Clear plan</button>` : ""}
+        </div>
+        ${plan_html}
+      </div>
+
+      <div class="card">
+        <div class="row-between">
+          <div>
+            <div class="section-title">☕ What to roast ${need.length ? `<span class="badge b-low">${need.length} need attention</span>` : `<span class="badge b-ok">all good</span>`}</div>
+            <div class="section-sub">Roasted stock vs average daily usage. Cover = how many days of stock you have left.</div>
+          </div>
+          <label class="section-sub" style="display:flex;align-items:center;gap:6px">usage over
+            <select class="win" id="window-sel">
+              ${[7,14,30].map(w => `<option value="${w}" ${state.window_days===w?"selected":""}>${w} days</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        ${roast_table}
+      </div>
+
+      <div class="card">
+        <div class="section-title">🛢️ Empty drums by size</div>
+        <div class="section-sub">Different sizes hold different batch counts. Pick a coffee and set batches — each batch uses that coffee's usual green weight.</div>
+        ${drums_html}
+      </div>
+
+      <div class="card">
+        <div class="section-title">🪣 Empty buckets</div>
+        <div class="section-sub">Available to fill from the drums you roast.</div>
+        ${bkt_html}
+      </div>
+
+    </div>`;
+
+  document.getElementById("back-btn").addEventListener("click", () => window.location.href = "index.html");
+  document.getElementById("logout-btn").addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; });
+  document.getElementById("window-sel").addEventListener("change", async e => { state.window_days = Number(e.target.value); await load(); render(); });
+  document.getElementById("clear-plan")?.addEventListener("click", () => { state.plan = {}; render(); });
+  app.querySelectorAll("[data-plan-drum]").forEach(sel => sel.addEventListener("change", e => {
+    const id = e.target.dataset.planDrum;
+    const d = state.empty_drums.find(x => x.id === id);
+    if (e.target.value) state.plan[id] = { coffee: e.target.value, roasts: (state.plan[id] && state.plan[id].roasts) || (d ? d.max : 1) };
+    else delete state.plan[id];
+    render();
+  }));
+  app.querySelectorAll("[data-plan-roasts]").forEach(inp => inp.addEventListener("change", e => {
+    const id = e.target.dataset.planRoasts;
+    const d = state.empty_drums.find(x => x.id === id);
+    if (!state.plan[id]) return;
+    let v = Math.round(Number(e.target.value) || 1);
+    v = Math.max(1, Math.min(d ? d.max : v, v));
+    state.plan[id].roasts = v;
+    render();
+  }));
+  app.querySelectorAll("[data-unplan]").forEach(btn => btn.addEventListener("click", () => { delete state.plan[btn.dataset.unplan]; render(); }));
+}
+</script>
+</body>
+</html>
