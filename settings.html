@@ -706,17 +706,21 @@ async function save_fp_label_data(fp_code) {
   // Mark saving
   state.ui.label_edit[fp_code] = { ...draft, saving: true, err: "" };
   render();
+  // Merge the draft over whatever is already saved for this version, so any field the user didn't
+  // touch keeps its saved value instead of being nulled. (An explicit clear lives in the draft as "".)
+  const existing_saved = state.fp_label_data[open.id] || {};
+  const m = { ...existing_saved, ...draft };
   const payload = {
     assignment_id: open.id,     // label belongs to the current version
     fp_code,
-    roast_type: draft.roast_type || null,
-    region:     draft.region     || null,
-    process:    draft.process    || null,
-    altitude:   draft.altitude   || null,
-    flavour_1:  draft.flavour_1  || null,
-    flavour_2:  draft.flavour_2  || null,
-    flavour_3:  draft.flavour_3  || null,
-    price:      draft.price      || null,
+    roast_type: m.roast_type || null,
+    region:     m.region     || null,
+    process:    m.process    || null,
+    altitude:   m.altitude   || null,
+    flavour_1:  m.flavour_1  || null,
+    flavour_2:  m.flavour_2  || null,
+    flavour_3:  m.flavour_3  || null,
+    price:      m.price      || null,
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await supabaseClient
@@ -1701,8 +1705,11 @@ function attach_listeners() {
   app.querySelectorAll(".label-input").forEach(inp => inp.addEventListener("input", e => {
     const fp = inp.dataset.fp;
     const field = inp.dataset.field;
-    const existing = state.ui.label_edit[fp] || { ...(label_for_fp(fp) || {}) };
-    state.ui.label_edit[fp] = { ...existing, [field]: e.target.value, dirty: true };
+    // Always layer the saved record underneath: a leftover "saved" flash marker (or any partial
+    // draft) must not drop the fields the user isn't currently editing.
+    const saved = label_for_fp(fp) || {};
+    const existing = state.ui.label_edit[fp] || {};
+    state.ui.label_edit[fp] = { ...saved, ...existing, [field]: e.target.value, dirty: true };
     // Toggle the Save button's appearance without a full re-render
     const card = document.querySelector(`[data-fp-card="${fp.replace(/"/g, '\\"')}"]`);
     const save_btn = card?.querySelector(".label-save-btn");
@@ -1723,7 +1730,8 @@ function attach_listeners() {
     if (!source_fp) return;
     const source = label_for_fp(source_fp);
     if (!source) return;
-    const existing = state.ui.label_edit[target_fp] || { ...(label_for_fp(target_fp) || {}) };
+    const base = label_for_fp(target_fp) || {};
+    const existing = { ...base, ...(state.ui.label_edit[target_fp] || {}) };
     // Copy shared fields, leave price alone
     state.ui.label_edit[target_fp] = {
       ...existing,
