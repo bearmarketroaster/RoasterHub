@@ -196,6 +196,52 @@ function label_for_fp(fp_code) {
   return open ? (state.fp_label_data[open.id] || null) : null;
 }
 
+// ── Origin label image (Supabase Storage: public bucket "label-images") ─────────
+function image_url_for(path) {
+  if (!path) return "";
+  return supabaseClient.storage.from("label-images").getPublicUrl(path).data.publicUrl;
+}
+// Resize to maxDim (longest side) and return a PNG blob — keeps stored images small + crisp.
+function downscale_image(file, maxDim) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        let w = im.width, h = im.height;
+        if (w > h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+        else if (h >= w && h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+        const c = document.createElement("canvas"); c.width = w; c.height = h;
+        c.getContext("2d").drawImage(im, 0, 0, w, h);
+        c.toBlob(b => b ? res(b) : rej(new Error("Could not encode image")), "image/png");
+      };
+      im.onerror = () => rej(new Error("Could not read image"));
+      im.src = r.result;
+    };
+    r.onerror = () => rej(new Error("Could not read file"));
+    r.readAsDataURL(file);
+  });
+}
+async function upload_label_image(fp_code, file) {
+  const open = open_assignment_for(fp_code);
+  if (!open) { alert("No active version for this FP code — assign it first."); return; }
+  const prev = (label_for_fp(fp_code) || {}).image_path || null;
+  state.ui.label_edit[fp_code] = { ...(label_for_fp(fp_code) || {}), ...(state.ui.label_edit[fp_code] || {}), saving: true, err: "" };
+  render();
+  try {
+    const blob = await downscale_image(file, 400);
+    const path = `${fp_code}-${Date.now()}.png`;   // unique name avoids stale-cache on replace
+    const { error: up_err } = await supabaseClient.storage.from("label-images").upload(path, blob, { upsert: true, contentType: "image/png" });
+    if (up_err) throw up_err;
+    state.ui.label_edit[fp_code] = { ...(label_for_fp(fp_code) || {}), ...(state.ui.label_edit[fp_code] || {}), image_path: path, dirty: true };
+    await save_fp_label_data(fp_code);
+    if (prev && prev !== path) supabaseClient.storage.from("label-images").remove([prev]);  // tidy up the replaced file
+  } catch (e) {
+    state.ui.label_edit[fp_code] = { ...(state.ui.label_edit[fp_code] || {}), saving: false, err: "Image upload failed: " + (e.message || e) };
+    render();
+  }
+}
+
 // ── LOAD ──────────────────────────────────────────────────────────────────────
 async function load_coffees() {
   const { data: coffees, error: ce } = await supabaseClient.from("coffees").select("*").order("name");
@@ -721,6 +767,7 @@ async function save_fp_label_data(fp_code) {
     flavour_2:  m.flavour_2  || null,
     flavour_3:  m.flavour_3  || null,
     price:      m.price      || null,
+    image_path: m.image_path || null,
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await supabaseClient
@@ -1452,6 +1499,19 @@ function build_label_data_section() {
                 <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="price" value="${esc(d.price||"")}" placeholder="e.g. €14.00" />
               </div>
             </div>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid #f0eee9">
+              ${d.image_path
+                ? `<img src="${esc(image_url_for(d.image_path))}" alt="" style="width:46px;height:46px;object-fit:cover;border-radius:8px;border:1px solid #e8e6e1" />`
+                : `<div style="width:46px;height:46px;border-radius:8px;border:1px dashed #d8d4cc;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:18px">🖼️</div>`}
+              <div>
+                <label class="lbl" style="margin-bottom:3px">Origin image — centre of QR</label>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input type="file" accept="image/*" class="label-image-input" data-fp="${esc(f.fp_code)}" style="font-size:12px" />
+                  ${d.image_path ? `<button class="btn btn-ghost btn-sm label-image-remove" data-fp="${esc(f.fp_code)}">Remove</button>` : ""}
+                </div>
+                <div style="font-size:11px;color:#aaa;margin-top:3px">Optional — no image means a normal full QR. Auto-resized; uploads &amp; saves on select.</div>
+              </div>
+            </div>
             <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
               <button class="btn ${is_dirty?"btn-dark":"btn-ghost"} btn-sm label-save-btn" data-fp="${esc(f.fp_code)}" ${(!is_dirty || is_saving)?"disabled":""}>${is_saving?"Saving…":"💾 Save"}</button>
               ${flash_active ? '<span style="color:#16a34a;font-size:12px;font-weight:600">✓ Saved</span>' : ""}
@@ -1722,6 +1782,17 @@ function attach_listeners() {
   // Save button — triggers upsert + re-renders
   app.querySelectorAll(".label-save-btn").forEach(btn => btn.addEventListener("click", () => {
     save_fp_label_data(btn.dataset.fp);
+  }));
+  // Origin image: upload (auto-saves) and remove
+  app.querySelectorAll(".label-image-input").forEach(inp => inp.addEventListener("change", e => {
+    const file = e.target.files && e.target.files[0];
+    if (file) upload_label_image(inp.dataset.fp, file);
+  }));
+  app.querySelectorAll(".label-image-remove").forEach(btn => btn.addEventListener("click", async () => {
+    const fp = btn.dataset.fp;
+    if (!confirm("Remove the origin image? The label will print a normal full QR.")) return;
+    state.ui.label_edit[fp] = { ...(label_for_fp(fp) || {}), ...(state.ui.label_edit[fp] || {}), image_path: null, dirty: true };
+    await save_fp_label_data(fp);
   }));
   // Copy-from sibling: pre-fill all fields except price from the chosen FP code's saved data
   app.querySelectorAll(".label-copy-from").forEach(sel => sel.addEventListener("change", e => {
