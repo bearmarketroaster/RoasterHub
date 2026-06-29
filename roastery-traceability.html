@@ -2096,14 +2096,15 @@ function attach_listeners() {
       if (sug) sug.style.display = "none";
     }
   });
-  // Return autocomplete — match against dispatched or filled buckets (anything not already 'empty' is potentially returnable)
+  // Return autocomplete — only buckets actually out at a shop are returnable (status === "dispatched"),
+  // matching what process_return_scan will accept. Filled buckets still in the roastery aren't returnable.
   app.querySelector("#return-manual-input")?.addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
     const sug = document.getElementById("return-suggestions");
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
     const matches = rank_bucket_matches(
-      state.buckets.filter(b => !b.retired_at && b.status !== "empty"),
+      state.buckets.filter(b => !b.retired_at && b.status === "dispatched"),
       q, new Set(return_state.returned.map(x => x.id))
     );
     if (matches.length === 0) {
