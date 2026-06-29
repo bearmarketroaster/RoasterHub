@@ -112,6 +112,14 @@
     .slot-green { font-size: 11px; color: #16a34a; font-weight: 600; margin-top: 6px; }
 
     .bucket-bar { margin-top: 6px; padding-top: 14px; border-top: 1px solid #f0eee9; font-size: 13px; color: #666; }
+
+    /* Green to order */
+    .order-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+    .order-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid #f0eee9; border-radius: 8px; background: #faf9f7; }
+    .order-coffee { font-weight: 700; font-size: 14px; }
+    .order-meta { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+    .order-kg { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .order-thr { color: #999; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -126,6 +134,7 @@ function r1(n) { return Math.round((Number(n)||0)*10)/10; }
 // Tuning — flag a coffee LOW when cover drops below this; suggest roasting up to the target.
 const LOW_COVER_DAYS = 7;
 const TARGET_COVER_DAYS = 14;
+const GREEN_LOW_KG = 20;   // default green-stock reorder threshold (matches Stock page); per-item override wins
 
 // Drum capacity by size prefix, in number of roasts (batches). Biggest → smallest.
 const SIZE_ROASTS = { XL: 9, L: 7, M: 5, S: 3, W: 1 };
@@ -143,6 +152,7 @@ const state = {
   green_per_roast: {},      // coffee -> avg green kg per roast (from history)
   empty_drums: [],          // [{ id, name, prefix }]
   empty_buckets: [],        // [{ id, name, prefix }]
+  green_order: [],          // green stock to reorder: [{ coffee, current_kg, threshold, status }]
   coffees: [],              // [name]
   plan: {},                 // containerId -> coffee (interactive morning plan)
   selected_coffee: null,    // coffee picked for tap-to-assign
@@ -157,14 +167,30 @@ const state = {
 
 function size_prefix(id) { const m = String(id||"").match(/^([A-Za-z]+)/); return m ? m[1].toUpperCase() : "?"; }
 
+// Supabase caps each request at 1000 rows. These tables (dispatches especially) run well past that
+// over time, so page through them — otherwise usage and packed-out totals come back undercounted.
+async function fetch_all(table, select, order_col, ascending = false) {
+  const PAGE = 1000, out = [];
+  for (let i = 0; i < 20; i++) {
+    let q = supabaseClient.from(table).select(select).range(i * PAGE, i * PAGE + PAGE - 1);
+    if (order_col) q = q.order(order_col, { ascending });
+    const { data, error } = await q;
+    if (error || !data || !data.length) break;
+    out.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return out;
+}
+
 async function load() {
-  const [{ data: containers }, { data: sessions }, { data: disp }, { data: buckets }, { data: coffees }, { data: fp_codes }] = await Promise.all([
-    supabaseClient.from("containers").select("id, name, status, retired_at"),
-    supabaseClient.from("roast_sessions").select("id, container_id, coffee, fill_id, roasted_weight, date, is_test, roast_batches(green_weight)").order("date", { ascending: false }),
-    supabaseClient.from("dispatches").select("id, date, shop, dispatch_lines(*)"),
-    supabaseClient.from("buckets").select("id, name, coffee, fill_id, status, retired_at"),
-    supabaseClient.from("coffees").select("name"),
-    supabaseClient.from("fp_codes").select("fp_code, coffee_name"),
+  const [containers, sessions, disp, buckets, coffees, fp_codes, stock_items] = await Promise.all([
+    supabaseClient.from("containers").select("id, name, status, retired_at").then(r => r.data || []),
+    fetch_all("roast_sessions", "id, container_id, coffee, fill_id, roasted_weight, date, is_test, roast_batches(green_weight)", "date"),
+    fetch_all("dispatches", "id, date, shop, dispatch_lines(*)", "date"),
+    fetch_all("buckets", "id, name, coffee, fill_id, status, retired_at, created_at", "created_at"),
+    supabaseClient.from("coffees").select("name").then(r => r.data || []),
+    supabaseClient.from("fp_codes").select("fp_code, coffee_name").then(r => r.data || []),
+    supabaseClient.from("stock_items").select("coffee, coffee_id, current_kg, low_stock_threshold").then(r => r.data || []),
   ]);
 
   const conts = (containers || []).filter(c => !c.retired_at);
@@ -247,6 +273,20 @@ async function load() {
     .sort((a, b) => size_rank(a.prefix) - size_rank(b.prefix) || a.id.localeCompare(b.id));
   state.empty_buckets = empty_buckets;
   state.coffees = [...new Set([...(coffees || []).map(c => c.name), ...Object.keys(on_hand), ...Object.keys(usage)])].filter(Boolean).sort();
+
+  // Green stock to order — mirror the Stock page: out = 0kg, low = below the line's threshold (default 20kg).
+  state.green_order = (stock_items || [])
+    .map(s => {
+      const kg = Number(s.current_kg) || 0;
+      const threshold = Number(s.low_stock_threshold) || GREEN_LOW_KG;
+      let status = null;
+      if (kg <= 0) status = "out";
+      else if (kg < threshold) status = "low";
+      return status ? { coffee: s.coffee, current_kg: kg, threshold, status } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.status === b.status ? a.current_kg - b.current_kg : a.status === "out" ? -1 : 1));
+
   state.loaded = true;
 }
 
@@ -353,8 +393,21 @@ function render() {
         <div class="hero-stat"><div class="hs-n">${state.empty_drums.length}</div><div class="hs-l">empty drums</div></div>
         <div class="hero-stat"><div class="hs-n">${total_batches}</div><div class="hs-l">batches planned</div></div>
         <div class="hero-stat"><div class="hs-n">${plan_green > 0 ? kg(plan_green) : "—"}</div><div class="hs-l">green needed</div></div>
+        <div class="hero-stat"><div class="hs-n" style="color:${state.green_order.length ? "#dc2626" : "#16a34a"}">${state.green_order.length}</div><div class="hs-l">green to order</div></div>
         <div class="hero-win">use/day = 28-day avg</div>
       </div>
+
+      ${state.green_order.length ? `
+      <div class="card">
+        <div class="section-title">🌱 Green to order <span class="badge b-out">${state.green_order.length}</span></div>
+        <div class="section-sub">Green bean stock at or below its reorder level — time to order more from the supplier.</div>
+        <div class="order-list">
+          ${state.green_order.map(g => `<div class="order-row">
+            <span class="order-coffee">${esc(g.coffee)}</span>
+            <span class="order-meta">${g.status === "out" ? `<span class="badge b-out">OUT</span>` : `<span class="badge b-low">LOW</span>`}<span class="order-kg">${kg(g.current_kg)}</span><span class="order-thr">reorder &lt; ${kg(g.threshold)}</span></span>
+          </div>`).join("")}
+        </div>
+      </div>` : ""}
 
       <div class="split">
         <div class="panel">
