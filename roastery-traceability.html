@@ -792,12 +792,19 @@ function process_return_scan(raw_value) {
     flash_return_scan(`Bucket ${value} not registered`, "error");
     return;
   }
-  if (bucket.status !== "dispatched") {
-    flash_return_scan(`${value} isn't out at a shop (it's "${bucket.status}") — only dispatched buckets can be returned`, "error");
+  if (bucket.retired_at) {
+    flash_return_scan(`${value} is retired`, "error");
     return;
   }
+  // A FILLED bucket holds coffee in the system — returning it clears that fill. Confirm before discarding.
+  if (bucket.status === "filled") {
+    if (!confirm(`${value} is marked FILLED${bucket.coffee ? ` with ${bucket.coffee}` : ""}. Returning it clears that fill and marks it empty. Continue?`)) return;
+  }
+  // Accept it back. Legacy buckets that were sent out before the scan-out flow existed have no
+  // "dispatched" status — accept them anyway so they can be brought back into the system.
+  const legacy = bucket.status !== "dispatched";
   return_state.returned.push({ id: value, prev_status: bucket.status, prev_coffee: bucket.coffee });
-  flash_return_scan(`✓ ${value} marked returned`, "success");
+  flash_return_scan(legacy ? `✓ ${value} accepted back (no prior dispatch on record)` : `✓ ${value} marked returned`, "success");
   update_return_panel();
 }
 
@@ -2096,19 +2103,19 @@ function attach_listeners() {
       if (sug) sug.style.display = "none";
     }
   });
-  // Return autocomplete — only buckets actually out at a shop are returnable (status === "dispatched"),
-  // matching what process_return_scan will accept. Filled buckets still in the roastery aren't returnable.
+  // Return autocomplete — any registered (non-retired) bucket can be brought back, including legacy
+  // buckets that were never scanned out. The status badge on each row shows its current state.
   app.querySelector("#return-manual-input")?.addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
     const sug = document.getElementById("return-suggestions");
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
     const matches = rank_bucket_matches(
-      state.buckets.filter(b => !b.retired_at && b.status === "dispatched"),
+      state.buckets.filter(b => !b.retired_at),
       q, new Set(return_state.returned.map(x => x.id))
     );
     if (matches.length === 0) {
-      sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No matching buckets out</div>`;
+      sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No matching buckets</div>`;
     } else {
       sug.innerHTML = matches.map(b => `<div data-suggest-bucket="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0eee9;font-size:14px">
         <div style="font-weight:600">🪣 ${esc(b.name||b.id)}${b.coffee?` <span style="color:#666;font-weight:400">— ${esc(b.coffee)}</span>`:""}</div>
