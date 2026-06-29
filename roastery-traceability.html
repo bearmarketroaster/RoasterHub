@@ -762,12 +762,14 @@ const return_state = {
   err: "",
   scanner_msg: "",
   scanner_msg_type: "info",
+  scan_mode: "scanner", // "scanner" (HID/manual) | "camera" — defaults to scanner
 };
 
 function reset_return_state() {
   return_state.returned = [];
   return_state.err = "";
   return_state.scanner_msg = "";
+  return_state.scan_mode = "scanner";
 }
 
 function process_return_scan(raw_value) {
@@ -828,7 +830,7 @@ function update_return_panel() {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <div style="font-weight:700;font-size:13px">RETURNED (${return_state.returned.length})</div>
     </div>
-    ${return_state.returned.length ? list : '<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets scanned — scan returning bucket QRs</p>'}
+    ${return_state.returned.length ? list : `<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets scanned — ${return_state.scan_mode==="camera"?"scan returning bucket QRs":"scan or type a bucket ID to begin"}</p>`}
   `;
   panel.querySelectorAll("[data-unreturn]").forEach(btn => btn.addEventListener("click", () => {
     return_state.returned = return_state.returned.filter(b => b.id !== btn.dataset.unreturn);
@@ -855,10 +857,21 @@ function build_bucket_return_overlay() {
       </div>
     </div>
 
+    <div style="display:flex;gap:6px;margin-bottom:10px;background:#f4f2ed;padding:4px;border-radius:8px">
+      <button class="btn ${return_state.scan_mode==="scanner"?"btn-dark":"btn-ghost"} btn-sm" data-return-scan-mode="scanner" style="flex:1;${return_state.scan_mode==="scanner"?"color:#fff":""}">⌨️ Scanner / Manual</button>
+      <button class="btn ${return_state.scan_mode==="camera"?"btn-dark":"btn-ghost"} btn-sm" data-return-scan-mode="camera" style="flex:1;${return_state.scan_mode==="camera"?"color:#fff":""}">📷 Camera</button>
+    </div>
+
+    ${return_state.scan_mode === "camera" ? `
     <div style="position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;margin-bottom:14px;min-height:240px">
       <div id="return-flash" style="${flash_style}">${esc(return_state.scanner_msg||"")}</div>
       <div id="return-qr-scanner" style="width:100%;min-height:240px"></div>
-    </div>
+    </div>` : `
+    <div style="position:relative;background:#f4f2ed;border-radius:12px;padding:18px;margin-bottom:14px;text-align:center;color:#666;font-size:13px;border:1px dashed #d4d1ca">
+      <div id="return-flash" style="${flash_style}">${esc(return_state.scanner_msg||"")}</div>
+      <div style="font-size:22px;margin-bottom:4px">⌨️</div>
+      Scan with your barcode scanner or type a bucket ID below, then press Enter.
+    </div>`}
 
     <div style="position:relative;margin-bottom:14px">
       <div style="display:flex;gap:8px">
@@ -869,7 +882,7 @@ function build_bucket_return_overlay() {
     </div>
 
     <div id="return-panel" style="background:#f4f2ed;border-radius:10px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
-      <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets scanned — scan returning bucket QRs</p>
+      <p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets scanned — ${return_state.scan_mode==="camera"?"scan returning bucket QRs":"scan or type a bucket ID to begin"}</p>
     </div>
 
     <div class="grid-2">
@@ -2125,9 +2138,20 @@ function attach_listeners() {
     stop_return_scanner();
     save_returned_buckets();
   });
-  // Start return scanner when overlay is shown
-  if (state.ui.bucket_return_open) {
+  app.querySelectorAll("[data-return-scan-mode]").forEach(btn => btn.addEventListener("click", () => {
+    const new_mode = btn.dataset.returnScanMode;
+    if (new_mode === return_state.scan_mode) return;
+    return_state.scan_mode = new_mode;
+    if (new_mode !== "camera") stop_return_scanner();
+    render();
+  }));
+  // Start the camera only when the overlay is open AND camera mode is selected.
+  // In Scanner/Manual mode keep the camera off and focus the input so an HID scanner fires straight in.
+  if (state.ui.bucket_return_open && return_state.scan_mode === "camera") {
     setTimeout(() => { start_return_scanner(); update_return_panel(); }, 100);
+  } else if (state.ui.bucket_return_open) {
+    stop_return_scanner();
+    setTimeout(() => { update_return_panel(); document.getElementById("return-manual-input")?.focus(); }, 50);
   } else {
     stop_return_scanner();
   }
