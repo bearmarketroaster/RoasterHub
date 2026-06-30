@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Packing Today — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; }
+    .header-back:hover { color: #fff; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .content { padding: 24px; max-width: 920px; margin: 0 auto; }
+    .loading { text-align: center; padding: 60px; color: #999; }
+
+    .daybar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+    .daybar .d { font-size: 13px; color: #666; }
+    .daybar .d strong { color: #1a1a1a; }
+    .refresh { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+
+    .totals { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+    .tstat { flex: 1; min-width: 130px; background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 14px 16px; }
+    .tstat .n { font-size: 26px; font-weight: 800; line-height: 1; }
+    .tstat .l { font-size: 12px; color: #888; margin-top: 5px; text-transform: uppercase; letter-spacing: .03em; }
+
+    .cont { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .cont-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .cont-id { font-family: ui-monospace, Menlo, monospace; font-weight: 800; font-size: 16px; }
+    .cont-coffee { font-weight: 600; color: #555; }
+    .cont-rem { font-size: 14px; color: #666; }
+    .cont-rem strong { font-size: 18px; color: #1a1a1a; }
+
+    .bar { height: 12px; border-radius: 6px; background: #efece6; overflow: hidden; display: flex; margin: 4px 0 12px; }
+    .bar .seg-today { background: #2563eb; }
+    .bar .seg-earlier { background: #c9c4ba; }
+    .bar .seg-buckets { background: #16a34a; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: #888; margin-bottom: 12px; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+    .packs { border-top: 1px solid #f0eee9; padding-top: 10px; }
+    .packs-h { font-size: 12px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 6px; }
+    .pack { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px dashed #f0eee9; font-size: 14px; }
+    .pack:last-child { border-bottom: none; }
+    .pack .who { font-weight: 600; }
+    .pack .what { color: #999; font-size: 12px; margin-left: 8px; font-weight: 400; }
+    .pack .t { color: #bbb; font-size: 11px; font-variant-numeric: tabular-nums; }
+    .pack .kg { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .recon { font-size: 12px; color: #888; margin-top: 10px; }
+    .idle { color: #999; font-size: 13px; }
+    .muted-list { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 14px 16px; }
+    .muted-list h3 { font-size: 13px; margin-bottom: 8px; color: #555; }
+    .muted-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: #666; border-bottom: 1px solid #f4f2ed; }
+    .muted-row:last-child { border-bottom: none; }
+  </style>
+</head>
+<body>
+<div id="app"><div class="loading">Loading…</div></div>
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function kg(n){ return (Math.round((Number(n)||0)*10)/10).toFixed(1); }
+function size_rank(p){ return ["XL","L","M","S","W"].indexOf(p); }
+function prefix(id){ const m=String(id||"").match(/^([A-Za-z]+)/); return m?m[1].toUpperCase():"?"; }
+function today_str(){ const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; }
+function hhmm(iso){ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; }
+
+async function fetch_all(table, select, order_col, ascending=false){
+  const PAGE=1000, out=[];
+  for(let i=0;i<20;i++){
+    let q=supabaseClient.from(table).select(select).range(i*PAGE,i*PAGE+PAGE-1);
+    if(order_col) q=q.order(order_col,{ascending});
+    const {data,error}=await q;
+    if(error||!data||!data.length) break;
+    out.push(...data);
+    if(data.length<PAGE) break;
+  }
+  return out;
+}
+
+function line_desc(l){
+  if(l.bag_size==="Emptied") return "write-off";
+  if(l.type==="bulk"||l.bag_size==="Batch brew") return l.bag_size || "bulk";
+  const n=Number(l.bags)||0;
+  if(l.bag_size) return `${n}× ${l.bag_size}`;
+  return `${kg(l.kg)}kg`;
+}
+
+const state = { loaded:false, containers:[], rows:[], totals:{kg:0,packs:0,drums:0}, idle:[] };
+
+(async () => {
+  const { data:{ session } } = await supabaseClient.auth.getSession();
+  if(!session){ window.location.href="login.html"; return; }
+  await load();
+  render();
+})();
+
+async function load(){
+  const [containers, sessions, disp, buckets] = await Promise.all([
+    supabaseClient.from("containers").select("id, name, status, retired_at").then(r=>r.data||[]),
+    fetch_all("roast_sessions","id, container_id, coffee, fill_id, roasted_weight, date","date"),
+    fetch_all("dispatches","id, date, shop, confirmed_at, dispatch_lines(*)","date"),
+    fetch_all("buckets","id, fill_id, status, retired_at","id"),
+  ]);
+  const today = today_str();
+
+  // packed kg per fill (all-time) + filled-bucket kg per fill
+  const packed_all = {}, bucket_kg = {};
+  (disp||[]).forEach(d => (d.dispatch_lines||[]).forEach(l => {
+    if(l.fill_id) packed_all[l.fill_id] = (packed_all[l.fill_id]||0) + (Number(l.kg)||0);
+  }));
+  (buckets||[]).forEach(b => { if(b.status==="filled" && !b.retired_at && b.fill_id) bucket_kg[b.fill_id]=(bucket_kg[b.fill_id]||0)+5; });
+
+  // today's packs grouped by container_id
+  const today_by_cont = {};
+  (disp||[]).forEach(d => {
+    if((d.date||"") !== today) return;
+    (d.dispatch_lines||[]).forEach(l => {
+      const cid = l.container_id;
+      if(!cid) return;
+      (today_by_cont[cid] = today_by_cont[cid] || []).push({ shop:d.shop, desc:line_desc(l), kg:Number(l.kg)||0, t:d.confirmed_at });
+    });
+  });
+
+  const conts = (containers||[]).filter(c => !c.retired_at);
+  const rows = [], idle = [];
+  let tot_kg=0, tot_packs=0, tot_drums=0;
+
+  conts.forEach(c => {
+    const cs = (sessions||[]).filter(s => s.container_id===c.id);  // newest-first
+    if(!cs.length) return;
+    const fill = cs[0].fill_id, coffee = cs[0].coffee;
+    const total = cs.filter(s => s.fill_id===fill).reduce((a,s)=>a+(Number(s.roasted_weight)||0),0);
+    const packed = packed_all[fill]||0;
+    const bkt = bucket_kg[fill]||0;
+    const remaining = Math.max(0, total - packed - bkt);
+
+    const packs = (today_by_cont[c.id]||[]).slice().sort((a,b)=> (a.t||"").localeCompare(b.t||""));
+    const packed_today = packs.reduce((a,p)=>a+p.kg,0);
+    const packed_earlier = Math.max(0, packed - packed_today);
+
+    const row = { id:c.id, coffee, status:c.status, total, remaining, packed_today, packed_earlier, bkt, packs };
+    if(packs.length){ rows.push(row); tot_kg+=packed_today; tot_packs+=packs.length; tot_drums++; }
+    else idle.push(row);
+  });
+
+  rows.sort((a,b)=> b.packed_today - a.packed_today || size_rank(prefix(a.id))-size_rank(prefix(b.id)) || a.id.localeCompare(b.id));
+  idle.sort((a,b)=> size_rank(prefix(a.id))-size_rank(prefix(b.id)) || a.id.localeCompare(b.id));
+
+  state.rows = rows;
+  state.idle = idle;
+  state.totals = { kg:tot_kg, packs:tot_packs, drums:tot_drums };
+  state.loaded = true;
+}
+
+function bar(row){
+  const t = row.total || 0;
+  if(t<=0) return "";
+  const pct = v => Math.max(0, Math.min(100, v/t*100));
+  return `<div class="bar">
+    <div class="seg-today" style="width:${pct(row.packed_today)}%"></div>
+    <div class="seg-earlier" style="width:${pct(row.packed_earlier)}%"></div>
+    <div class="seg-buckets" style="width:${pct(row.bkt)}%"></div>
+  </div>`;
+}
+
+function render(){
+  const app=document.getElementById("app");
+  if(!state.loaded){ app.innerHTML=`<div class="loading">Loading…</div>`; return; }
+  const t=new Date();
+  const date_label = t.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"});
+
+  const cards = state.rows.length ? state.rows.map(r => `
+    <div class="cont">
+      <div class="cont-h">
+        <div><span class="cont-id">${esc(r.id)}</span> <span class="cont-coffee">${esc(r.coffee||"")}</span></div>
+        <div class="cont-rem"><strong>${kg(r.remaining)}</strong> / ${kg(r.total)}kg left</div>
+      </div>
+      ${bar(r)}
+      <div class="legend">
+        <span><span class="dot" style="background:#2563eb"></span>packed today ${kg(r.packed_today)}kg</span>
+        ${r.packed_earlier>0?`<span><span class="dot" style="background:#c9c4ba"></span>earlier ${kg(r.packed_earlier)}kg</span>`:""}
+        ${r.bkt>0?`<span><span class="dot" style="background:#16a34a"></span>in buckets ${kg(r.bkt)}kg</span>`:""}
+        <span><span class="dot" style="background:#efece6"></span>left ${kg(r.remaining)}kg</span>
+      </div>
+      <div class="packs">
+        <div class="packs-h">Packed today — ${r.packs.length} pack${r.packs.length!==1?"s":""}, ${kg(r.packed_today)}kg</div>
+        ${r.packs.map(p => `<div class="pack">
+          <span><span class="who">${esc(p.shop||"—")}</span><span class="what">${esc(p.desc)}</span></span>
+          <span><span class="t">${esc(hhmm(p.t))}</span> &nbsp; <span class="kg">${kg(p.kg)}kg</span></span>
+        </div>`).join("")}
+      </div>
+      <div class="recon">${kg(r.packed_today)} today + ${kg(r.packed_earlier)} earlier + ${kg(r.bkt)} in buckets + ${kg(r.remaining)} left = ${kg(r.total)}kg roasted</div>
+    </div>`).join("")
+    : `<div class="cont"><div class="idle">No packing logged yet today.</div></div>`;
+
+  const idle_html = state.idle.length ? `
+    <div class="muted-list">
+      <h3>Active drums with no packing today</h3>
+      ${state.idle.filter(r=>r.status==="active"||r.status==="waiting").map(r => `
+        <div class="muted-row"><span><strong style="font-family:ui-monospace,Menlo,monospace">${esc(r.id)}</strong> ${esc(r.coffee||"")}</span><span>${kg(r.remaining)} / ${kg(r.total)}kg</span></div>`).join("") || `<div class="idle">—</div>`}
+    </div>` : "";
+
+  app.innerHTML = `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="back-btn">← Dashboard</button>
+        <div><div class="header-title">📦 Packing Today</div><div class="header-sub">Container breakdown</div></div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log out</button>
+    </div>
+    <div class="content">
+      <div class="daybar">
+        <div class="d"><strong>${esc(date_label)}</strong> · live as you pack</div>
+        <button class="refresh" id="refresh-btn">↻ Refresh</button>
+      </div>
+      <div class="totals">
+        <div class="tstat"><div class="n">${kg(state.totals.kg)}kg</div><div class="l">packed today</div></div>
+        <div class="tstat"><div class="n">${state.totals.packs}</div><div class="l">packs</div></div>
+        <div class="tstat"><div class="n">${state.totals.drums}</div><div class="l">drums touched</div></div>
+      </div>
+      ${cards}
+      ${idle_html}
+    </div>`;
+
+  document.getElementById("back-btn").addEventListener("click", ()=> window.location.href="index.html");
+  document.getElementById("logout-btn").addEventListener("click", async ()=>{ await supabaseClient.auth.signOut(); window.location.href="login.html"; });
+  document.getElementById("refresh-btn").addEventListener("click", async ()=>{ state.loaded=false; render(); await load(); render(); });
+}
+</script>
+</body>
+</html>
