@@ -33,6 +33,10 @@
 
     .cont { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
     .cont-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .cont-h.toggle { cursor: pointer; margin-bottom: 0; padding: 2px 0; }
+    .cont:has(.legend) .cont-h.toggle { margin-bottom: 10px; }
+    .chev { color: #bbb; font-size: 12px; }
+    .today-tag { color: #2563eb; font-weight: 700; }
     .cont-id { font-family: ui-monospace, Menlo, monospace; font-weight: 800; font-size: 16px; }
     .cont-coffee { font-weight: 600; color: #555; }
     .cont-rem { font-size: 14px; color: #666; }
@@ -94,7 +98,7 @@ function line_desc(l){
   return `${kg(l.kg)}kg`;
 }
 
-const state = { loaded:false, containers:[], rows:[], totals:{kg:0,packs:0,drums:0}, idle:[] };
+const state = { loaded:false, containers:[], rows:[], totals:{kg:0,packs:0,drums:0}, idle:[], open:new Set() };
 
 (async () => {
   const { data:{ session } } = await supabaseClient.auth.getSession();
@@ -178,12 +182,15 @@ function render(){
   const t=new Date();
   const date_label = t.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"});
 
-  const cards = state.rows.length ? state.rows.map(r => `
+  const cards = state.rows.length ? state.rows.map(r => {
+    const open = state.open.has(r.id);
+    return `
     <div class="cont">
-      <div class="cont-h">
-        <div><span class="cont-id">${esc(r.id)}</span> <span class="cont-coffee">${esc(r.coffee||"")}</span></div>
-        <div class="cont-rem"><strong>${kg(r.remaining)}</strong> / ${kg(r.total)}kg left</div>
+      <div class="cont-h toggle" data-toggle="${esc(r.id)}">
+        <div><span class="chev">${open?"▾":"▸"}</span> <span class="cont-id">${esc(r.id)}</span> <span class="cont-coffee">${esc(r.coffee||"")}</span></div>
+        <div class="cont-rem"><span class="today-tag">${kg(r.packed_today)}kg today</span> · <strong>${kg(r.remaining)}</strong> / ${kg(r.total)}kg left</div>
       </div>
+      ${open ? `
       ${bar(r)}
       <div class="legend">
         <span><span class="dot" style="background:#2563eb"></span>packed today ${kg(r.packed_today)}kg</span>
@@ -199,15 +206,12 @@ function render(){
         </div>`).join("")}
       </div>
       <div class="recon">${kg(r.packed_today)} today + ${kg(r.packed_earlier)} earlier + ${kg(r.bkt)} in buckets + ${kg(r.remaining)} left = ${kg(r.total)}kg roasted</div>
-    </div>`).join("")
+      ` : ""}
+    </div>`;
+  }).join("")
     : `<div class="cont"><div class="idle">No packing logged yet today.</div></div>`;
 
-  const idle_html = state.idle.length ? `
-    <div class="muted-list">
-      <h3>Active drums with no packing today</h3>
-      ${state.idle.filter(r=>r.status==="active"||r.status==="waiting").map(r => `
-        <div class="muted-row"><span><strong style="font-family:ui-monospace,Menlo,monospace">${esc(r.id)}</strong> ${esc(r.coffee||"")}</span><span>${kg(r.remaining)} / ${kg(r.total)}kg</span></div>`).join("") || `<div class="idle">—</div>`}
-    </div>` : "";
+  const idle_html = "";
 
   app.innerHTML = `
     <div class="header">
@@ -228,12 +232,16 @@ function render(){
         <div class="tstat"><div class="n">${state.totals.drums}</div><div class="l">drums touched</div></div>
       </div>
       ${cards}
-      ${idle_html}
     </div>`;
 
   document.getElementById("back-btn").addEventListener("click", ()=> window.location.href="index.html");
   document.getElementById("logout-btn").addEventListener("click", async ()=>{ await supabaseClient.auth.signOut(); window.location.href="login.html"; });
   document.getElementById("refresh-btn").addEventListener("click", async ()=>{ state.loaded=false; render(); await load(); render(); });
+  app.querySelectorAll("[data-toggle]").forEach(el => el.addEventListener("click", ()=>{
+    const id = el.dataset.toggle;
+    if(state.open.has(id)) state.open.delete(id); else state.open.add(id);
+    render();
+  }));
 }
 </script>
 </body>
