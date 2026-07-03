@@ -299,6 +299,9 @@
       <div id="a4-21-controls" style="display:none;align-items:center;gap:8px">
         <label>FP Code</label>
         <select id="a4-21-fp-select" style="min-width:240px"></select>
+        <label style="display:flex;align-items:center;gap:5px;margin-left:6px;cursor:pointer;color:#ccc">
+          <input type="checkbox" id="hide-price-toggle" style="width:auto;margin:0" /> Hide pricing
+        </label>
       </div>
       <button class="btn-print" id="print-btn">🖨️ Print All</button>
     </div>
@@ -338,6 +341,7 @@
       fp_codes: [],
       shops: [],
       fp_label_data: {},     // { [fp_code]: { roast_type, region, process, ..., price } }
+      hide_price: false,     // A4 bag labels: omit the price when printing
       selected_ids: new Set(init_ids || []),
       a4_21_fp: null,        // currently selected FP code for A4 21-up mode
     };
@@ -435,6 +439,10 @@
       populate_a4_21_fp_select();
       document.getElementById("a4-21-fp-select").addEventListener("change", e => {
         state.a4_21_fp = e.target.value || null;
+        render_a4_21_sheet();
+      });
+      document.getElementById("hide-price-toggle").addEventListener("change", e => {
+        state.hide_price = e.target.checked;
         render_a4_21_sheet();
       });
 
@@ -612,7 +620,7 @@
           ${label_data.roast_type ? `<div class="bl-roast">${esc(label_data.roast_type)}</div>` : ""}
           ${origin_lines.length ? `<div class="bl-origin">${origin_lines.map(l => esc(l)).join("<br>")}</div>` : ""}
           ${flavours ? `<div class="bl-flavours">${esc(flavours)}</div>` : ""}
-          ${label_data.price ? `<div class="bl-price">${esc(label_data.price)}</div>` : ""}`;
+          ${label_data.price && !state.hide_price ? `<div class="bl-price">${esc(label_data.price)}</div>` : ""}`;
       // 21 copies (3 cols × 7 rows) — each positioned absolutely in mm.
       // OnlineLabels EU30015GM / Avery L7160 spec:
       // top  = 15.15mm + row × 38.1mm
