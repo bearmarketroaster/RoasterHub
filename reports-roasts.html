@@ -63,7 +63,7 @@ const state = {
   sessions: [],   // [{ id, coffee, date, roasted_weight, green_weight, loss_pct, roaster_id, container_id }]
   roaster_names: {},   // user_id → display_name (or email fallback)
   loading: true,
-  ui: { report_from: today(), report_to: today(), grouping: "session" },  // session | weekly | monthly
+  ui: { report_from: today(), report_to: today(), grouping: "session", coffee_filter: "all" },  // session | weekly | monthly
 };
 
 async function init() {
@@ -313,7 +313,12 @@ function build_report() {
   const in_range = state.sessions.filter(s => s.date >= report_from && s.date <= report_to);
   const test_sessions = in_range.filter(s => s.is_test);
   // Production = non-test. All existing metrics use this.
-  const filtered = in_range.filter(s => !s.is_test);
+  const filtered_all = in_range.filter(s => !s.is_test);
+  // Global coffee filter — scopes the whole report. Coerced to "all" if the selected coffee
+  // has no sessions in the current date range.
+  const all_coffees = [...new Set(filtered_all.map(s => s.coffee))].sort();
+  const coffee_filter = (state.ui.coffee_filter !== "all" && all_coffees.includes(state.ui.coffee_filter)) ? state.ui.coffee_filter : "all";
+  const filtered = coffee_filter === "all" ? filtered_all : filtered_all.filter(s => s.coffee === coffee_filter);
 
   // Stats
   const total_green = filtered.reduce((s,r) => s+r.green_weight, 0);
@@ -458,6 +463,12 @@ function build_report() {
         <button class="btn btn-ghost btn-sm" data-report-range="90">90d</button>
         <button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button>
       </div>
+      <div><label class="lbl">Coffee</label>
+        <select id="coffee-filter" style="min-width:180px">
+          <option value="all" ${coffee_filter==="all"?"selected":""}>All coffees</option>
+          ${all_coffees.map(c => `<option value="${esc(c)}" ${coffee_filter===c?"selected":""}>${esc(c)}</option>`).join("")}
+        </select>
+      </div>
       <div style="margin-left:auto"><label class="lbl">Group by</label>
         <div class="flex gap-6">
           <button class="btn ${grouping==="session"?"btn-dark":"btn-ghost"} btn-sm" data-grouping="session" style="${grouping==="session"?"color:#fff":""}">Per Roast</button>
@@ -578,13 +589,18 @@ function build_report() {
       <div class="hint" style="margin-top:10px;font-size:11px">Consistency is the coefficient of variation (lower = tighter end-weights). Green: under 5%. Amber: 5–15%. Red: above 15%.</div>
     </div>` : ""}
 
-    ${yield_points.length > 1 ? `
+    ${coffee_filter !== "all" && yield_points.length > 1 ? `
     <div class="card mb-16">
-      <div style="font-weight:700;color:#1a1a1a;margin-bottom:12px;font-size:15px">Overall Yield Trend</div>
-      <div class="hint" style="font-size:12px;margin-bottom:8px">Yield % = roasted ÷ green. Helps spot if losses are creeping up over time.</div>
+      <div style="font-weight:700;color:#1a1a1a;margin-bottom:12px;font-size:15px">Yield Trend — ${esc(coffee_filter)}</div>
+      <div class="hint" style="font-size:12px;margin-bottom:8px">Yield % = roasted ÷ green for ${esc(coffee_filter)}. Spot creeping losses over time for this coffee.</div>
       <div class="chart-box">
         ${build_chart_svg(yield_points, "yield_pct", "#16a34a", "%")}
       </div>
+    </div>` : ""}
+    ${coffee_filter === "all" ? `
+    <div class="card mb-16">
+      <div style="font-weight:700;color:#1a1a1a;margin-bottom:6px;font-size:15px">Yield Trend</div>
+      <div class="hint" style="font-size:12px">Yield depends on roast level, so a trend blended across all coffees isn't meaningful. Pick a coffee in the filter above to see its yield trend.</div>
     </div>` : ""}
 
     ${container_rows.length > 0 ? `
@@ -633,6 +649,7 @@ function attach_listeners() {
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
   app.querySelector("#report-from")?.addEventListener("change", e => { state.ui.report_from=e.target.value; render(); });
   app.querySelector("#report-to")?.addEventListener("change", e => { state.ui.report_to=e.target.value; render(); });
+  app.querySelector("#coffee-filter")?.addEventListener("change", e => { state.ui.coffee_filter=e.target.value; render(); });
   app.querySelectorAll("[data-report-range]").forEach(btn => btn.addEventListener("click", () => {
     const range = btn.dataset.reportRange, d = new Date();
     if (range==="all") { state.ui.report_from = btn.dataset.first || today(); }
