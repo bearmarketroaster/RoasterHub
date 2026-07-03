@@ -63,7 +63,7 @@ const state = {
   sessions: [],   // [{ id, coffee, date, roasted_weight, green_weight, loss_pct, roaster_id, container_id }]
   roaster_names: {},   // user_id → display_name (or email fallback)
   loading: true,
-  ui: { report_from: today(), report_to: today(), grouping: "session", coffee_filter: "all" },  // session | weekly | monthly
+  ui: { report_from: today(), report_to: today(), grouping: "session", coffee_filter: "all", size_by_coffee: {} },  // session | weekly | monthly
 };
 
 async function init() {
@@ -146,7 +146,11 @@ function stddev(arr) {
 }
 
 // Build SVG chart with tolerance band shading + dots/lines
-function build_chart_svg(points, value_key, color, unit) {
+const SIZE_ORDER = ["XL", "L", "M", "S", "W"];
+function size_rank(p) { const i = SIZE_ORDER.indexOf(p); return i === -1 ? 99 : i; }
+function container_size(id) { const m = String(id || "").match(/^([A-Za-z]+)/); return m ? m[1].toUpperCase() : null; }
+
+function build_chart_svg(points, value_key, color, unit, flag_outliers = true) {
   if (points.length === 0) return `<svg class="chart-svg"></svg>`;
   const W = 600, H = 130, pad_l = 40, pad_r = 12, pad_t = 12, pad_b = 22;
   const inner_w = W - pad_l - pad_r;
@@ -167,12 +171,13 @@ function build_chart_svg(points, value_key, color, unit) {
   const y_for = v => pad_t + inner_h - ((v - y_min) / (y_max - y_min)) * inner_h;
   const x_for = i => pad_l + (points.length === 1 ? inner_w/2 : i * x_step);
 
-  // Tolerance band
+  // Tolerance band (only when we're flagging outliers — i.e. a single container size)
+  const show_band = sd > 0 && flag_outliers;
   const band_y_lo = y_for(band_lo);
   const band_y_hi = y_for(band_hi);
-  const band_rect = sd > 0 ? `<rect x="${pad_l}" y="${band_y_hi}" width="${inner_w}" height="${band_y_lo - band_y_hi}" fill="${color}" fill-opacity="0.08"/>` : "";
-  const band_line_top = sd > 0 ? `<line x1="${pad_l}" y1="${band_y_hi}" x2="${W-pad_r}" y2="${band_y_hi}" stroke="${color}" stroke-opacity="0.3" stroke-dasharray="3 3"/>` : "";
-  const band_line_bot = sd > 0 ? `<line x1="${pad_l}" y1="${band_y_lo}" x2="${W-pad_r}" y2="${band_y_lo}" stroke="${color}" stroke-opacity="0.3" stroke-dasharray="3 3"/>` : "";
+  const band_rect = show_band ? `<rect x="${pad_l}" y="${band_y_hi}" width="${inner_w}" height="${band_y_lo - band_y_hi}" fill="${color}" fill-opacity="0.08"/>` : "";
+  const band_line_top = show_band ? `<line x1="${pad_l}" y1="${band_y_hi}" x2="${W-pad_r}" y2="${band_y_hi}" stroke="${color}" stroke-opacity="0.3" stroke-dasharray="3 3"/>` : "";
+  const band_line_bot = show_band ? `<line x1="${pad_l}" y1="${band_y_lo}" x2="${W-pad_r}" y2="${band_y_lo}" stroke="${color}" stroke-opacity="0.3" stroke-dasharray="3 3"/>` : "";
   const mean_line   = `<line x1="${pad_l}" y1="${y_for(m)}" x2="${W-pad_r}" y2="${y_for(m)}" stroke="${color}" stroke-opacity="0.5" stroke-width="1"/>`;
 
   // Y axis labels (3 ticks)
@@ -184,7 +189,7 @@ function build_chart_svg(points, value_key, color, unit) {
   const polyline = points.length > 1 ? `<polyline points="${line_pts}" fill="none" stroke="${color}" stroke-width="1.5"/>` : "";
   const dots = points.map((p,i) => {
     const v = p[value_key];
-    const out = sd > 0 && (v < band_lo || v > band_hi);
+    const out = flag_outliers && sd > 0 && (v < band_lo || v > band_hi);
     return `<circle cx="${x_for(i)}" cy="${y_for(v)}" r="${out?4.5:3}" fill="${out?"#dc2626":color}" stroke="#fff" stroke-width="1.5"><title>${p.label} — ${v.toFixed(unit==="%"?1:1)}${unit}</title></circle>`;
   }).join("");
 
@@ -413,11 +418,19 @@ function build_report() {
   });
   const test_coffee_rows = Object.entries(test_by_coffee).sort((a,b) => b[1].green - a[1].green);
 
-  // Coffee cards (existing logic)
-  const coffee_cards = coffee_entries.map(([coffee, sessions]) => {
+  // Coffee cards (existing logic + per-coffee container-size scoping)
+  const coffee_cards = coffee_entries.map(([coffee, all_sessions]) => {
+    // Which container sizes has this coffee been roasted in?
+    const sizes_present = [...new Set(all_sessions.map(s => container_size(s.container_id)).filter(Boolean))].sort((a,b) => size_rank(a) - size_rank(b));
+    const sel_raw = state.ui.size_by_coffee[coffee] || "all";
+    const sel = (sel_raw !== "all" && sizes_present.includes(sel_raw)) ? sel_raw : "all";
+    const sessions = sel === "all" ? all_sessions : all_sessions.filter(s => container_size(s.container_id) === sel);
+    // Flag end-weight outliers only within a single container size (all-sizes end weight is apples-to-oranges).
+    // A coffee only ever roasted in one size is effectively single-size, so flag it too.
+    const by_size = sel !== "all" || sizes_present.length <= 1;
+
     // Group by chosen time bucket
     const groups = group_sessions(sessions, grouping);
-    // Aggregate within each group: average roasted weight, average loss %
     const points = groups.map(g => ({
       key: g.key,
       label: g.label,
@@ -430,21 +443,28 @@ function build_report() {
     const all_loss    = sessions.map(s => s.loss_pct);
     const r_avg = avg(all_roasted), r_sd = stddev(all_roasted);
     const l_avg = avg(all_loss),    l_sd = stddev(all_loss);
-    const r_out = points.filter(p => r_sd>0 && (p.roasted < r_avg-1.5*r_sd || p.roasted > r_avg+1.5*r_sd)).length;
+    const r_out = by_size ? points.filter(p => r_sd>0 && (p.roasted < r_avg-1.5*r_sd || p.roasted > r_avg+1.5*r_sd)).length : 0;
     const l_out = points.filter(p => l_sd>0 && (p.loss    < l_avg-1.5*l_sd || p.loss    > l_avg+1.5*l_sd)).length;
+
+    const size_pills = sizes_present.length > 1 ? `
+      <div class="flex gap-6" style="flex-wrap:wrap;margin:2px 0 12px">
+        <button class="btn ${sel==="all"?"btn-dark":"btn-ghost"} btn-sm" data-size-coffee="${esc(coffee)}" data-size="all" style="${sel==="all"?"color:#fff":""}">All sizes</button>
+        ${sizes_present.map(sz => `<button class="btn ${sel===sz?"btn-dark":"btn-ghost"} btn-sm" data-size-coffee="${esc(coffee)}" data-size="${esc(sz)}" style="${sel===sz?"color:#fff":""}">${esc(sz)}</button>`).join("")}
+      </div>` : "";
 
     return `
       <div class="card mb-12">
-        <div class="flex" style="justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="flex" style="justify-content:space-between;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap;gap:8px">
           <div>
             <div style="font-weight:700;font-size:16px">${esc(coffee)}</div>
-            <div class="hint" style="font-size:12px;margin-top:2px">${sessions.length} session${sessions.length!==1?"s":""} · Avg ${r_avg.toFixed(1)}kg out · ${l_avg.toFixed(1)}% loss</div>
+            <div class="hint" style="font-size:12px;margin-top:2px">${sessions.length} session${sessions.length!==1?"s":""} · Avg ${r_avg.toFixed(1)}kg out · ${l_avg.toFixed(1)}% loss${sel!=="all"?` · ${esc(sel)} drums`:""}</div>
           </div>
         </div>
+        ${size_pills}
         <div class="chart-grid">
           <div class="chart-box">
-            <div class="chart-title"><span>End Weight (kg)</span>${r_out>0?`<span class="out-of-band">${r_out} outlier${r_out!==1?"s":""}</span>`:""}</div>
-            ${build_chart_svg(points, "roasted", "#1a1a1a", "kg")}
+            <div class="chart-title"><span>End Weight (kg)</span>${r_out>0?`<span class="out-of-band">${r_out} outlier${r_out!==1?"s":""}</span>`:(by_size?"":`<span class="hint" style="font-size:11px">mixed sizes — pick a size to flag outliers</span>`)}</div>
+            ${build_chart_svg(points, "roasted", "#1a1a1a", "kg", by_size)}
           </div>
           <div class="chart-box">
             <div class="chart-title"><span>Weight Loss (%)</span>${l_out>0?`<span class="out-of-band">${l_out} outlier${l_out!==1?"s":""}</span>`:""}</div>
@@ -650,6 +670,10 @@ function attach_listeners() {
   app.querySelector("#report-from")?.addEventListener("change", e => { state.ui.report_from=e.target.value; render(); });
   app.querySelector("#report-to")?.addEventListener("change", e => { state.ui.report_to=e.target.value; render(); });
   app.querySelector("#coffee-filter")?.addEventListener("change", e => { state.ui.coffee_filter=e.target.value; render(); });
+  app.querySelectorAll("[data-size-coffee]").forEach(btn => btn.addEventListener("click", () => {
+    state.ui.size_by_coffee[btn.dataset.sizeCoffee] = btn.dataset.size;
+    render();
+  }));
   app.querySelectorAll("[data-report-range]").forEach(btn => btn.addEventListener("click", () => {
     const range = btn.dataset.reportRange, d = new Date();
     if (range==="all") { state.ui.report_from = btn.dataset.first || today(); }
