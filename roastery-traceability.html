@@ -1358,6 +1358,7 @@ function packing_count_for(code) {
 // Process a scanned QR value
 let _last_scan = { value: null, at: 0 };
 const SCAN_DEBOUNCE_MS = 500;
+let packing_in_flight = false;   // hard lock: prevents a duplicate dispatch from a double-tap during the save lag
 
 // Kind of the shop currently being packed for (shop | wholesale | online | staff | ...). Drives what's allowed:
 // buckets go everywhere EXCEPT online; batch brew is shops only.
@@ -2349,6 +2350,9 @@ function attach_listeners() {
   });
   app.querySelector("#packing-back-edit")?.addEventListener("click", () => { packing_state.step="scan"; render(); });
   app.querySelector("#packing-confirm")?.addEventListener("click", async () => {
+    if (packing_in_flight) return;   // already saving — ignore the second tap (screen lag → accidental double-press)
+    packing_in_flight = true;
+    try {
     // Build dispatch_lines: ONE line per (FP code × container)
     const lines = [];
     for (const [code, entry] of Object.entries(packing_state.scanned_items)) {
@@ -2437,6 +2441,9 @@ function attach_listeners() {
     }
     packing_state.step = "done";
     render();
+    } finally {
+      packing_in_flight = false;
+    }
   });
   app.querySelector("#packing-done")?.addEventListener("click", () => {
     state.scan_id = null;
