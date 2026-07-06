@@ -226,7 +226,7 @@ async function load() {
   state.dispatches = (disp || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
   const { data: maps } = await supabaseClient.from("shop_mappings").select("master_name, kind");
   state.shop_mappings = maps || [];
-  const { data: fps } = await supabaseClient.from("fp_codes").select("fp_code, coffee_name");
+  const { data: fps } = await supabaseClient.from("fp_codes").select("fp_code, coffees(name)");
   state.fp_codes = fps || [];
   const { data: rs } = await supabaseClient.from("roast_sessions").select("fill_id, coffee, coffee_id, roasted_weight, is_test, roast_batches(green_weight)");
   const fm = {}, lossByC = {};
@@ -341,7 +341,7 @@ function coffee_id_for_name(name) {
 }
 function line_coffee_id(l) {
   let name = null;
-  if (l.fp_code) { const f = state.fp_codes.find(x => x.fp_code === l.fp_code); if (f) name = f.coffee_name; }
+  if (l.fp_code) { const f = state.fp_codes.find(x => x.fp_code === l.fp_code); if (f && f.coffees) name = f.coffees.name; }
   if (!name && l.fill_id) name = state.fillmap[l.fill_id] || null;
   return coffee_id_for_name(name);
 }
