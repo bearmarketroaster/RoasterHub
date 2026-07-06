@@ -189,13 +189,13 @@ async function load() {
     fetch_all("dispatches", "id, date, shop, dispatch_lines(*)", "date"),
     fetch_all("buckets", "id, name, coffee, fill_id, status, retired_at, created_at", "created_at"),
     supabaseClient.from("coffees").select("name").then(r => r.data || []),
-    supabaseClient.from("fp_codes").select("fp_code, coffee_name").then(r => r.data || []),
+    supabaseClient.from("fp_codes").select("fp_code, coffees(name)").then(r => r.data || []),
     supabaseClient.from("stock_items").select("coffee, coffee_id, current_kg, low_stock_threshold").then(r => r.data || []),
   ]);
 
   const conts = (containers || []).filter(c => !c.retired_at);
   const sess = sessions || [];
-  const fpmap = {}; (fp_codes || []).forEach(f => { if (f.fp_code) fpmap[f.fp_code] = f.coffee_name; });
+  const fpmap = {}; (fp_codes || []).forEach(f => { if (f.fp_code && f.coffees) fpmap[f.fp_code] = f.coffees.name; });
   const fillmap = {}; sess.forEach(s => { if (s.fill_id && s.coffee && !fillmap[s.fill_id]) fillmap[s.fill_id] = s.coffee; });
 
   // Dispatch line kg per fill_id (for container remaining)
