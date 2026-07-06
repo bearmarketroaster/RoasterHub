@@ -88,6 +88,26 @@
 
     /* Plan summary */
     .plan-summary { background: #f4f2ed; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+    .worklist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+    .wl { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #e6e2d8; border-radius: 8px; padding: 8px 10px; }
+    .wl.done { background: #f0faf3; border-color: #bfe3c9; opacity: .85; }
+    .wl.skipped { background: #f6f6f6; opacity: .6; }
+    .wl-ord { display: flex; flex-direction: column; gap: 2px; }
+    .wl-mv { width: 22px; height: 18px; line-height: 1; border: 1px solid #ddd; background: #fafafa; border-radius: 4px; cursor: pointer; font-size: 10px; padding: 0; }
+    .wl-mv:disabled { opacity: .3; cursor: default; }
+    .wl-body { flex: 1; min-width: 0; }
+    .wl-top { font-size: 14px; }
+    .wl-drum { font-weight: 700; font-family: ui-monospace, monospace; }
+    .wl-coffee { font-weight: 600; }
+    .wl-sub { font-size: 12px; color: #666; margin-top: 3px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .wl-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+    .wl-badge.done { background: #16a34a; color: #fff; }
+    .wl-badge.skip { background: #999; color: #fff; }
+    .wl-act { display: flex; align-items: center; gap: 6px; }
+    .wl-start { background: #16a34a; color: #fff; text-decoration: none; font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
+    .wl-skip { background: #fff; border: 1px solid #ddd; font-size: 12px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+    .wl-x { background: none; border: none; color: #bbb; font-size: 14px; cursor: pointer; padding: 2px 4px; }
+    .wl-x:hover { color: #dc2626; }
 
     /* Size rooms + drum slots */
     .room { margin-bottom: 16px; }
@@ -131,6 +151,14 @@ function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"
 function kg(n) { return (Math.round((Number(n)||0)*10)/10).toFixed(1) + "kg"; }
 function r1(n) { return Math.round((Number(n)||0)*10)/10; }
 
+// ---- Persistent roast plan (roast_plan table) ----
+function today_str() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function gen_plan_id() { return `PLAN-${today_str().replace(/-/g,"")}-${Math.random().toString(36).slice(2,8).toUpperCase()}`; }
+async function load_plan() {
+  const { data } = await supabaseClient.from("roast_plan").select("*").eq("plan_date", today_str()).order("seq", { ascending: true });
+  state.plan_items = data || [];
+}
+
 // Tuning — flag a coffee LOW when cover drops below this; suggest roasting up to the target.
 const LOW_COVER_DAYS = 7;
 const TARGET_COVER_DAYS = 14;
@@ -154,7 +182,7 @@ const state = {
   empty_buckets: [],        // [{ id, name, prefix }]
   green_order: [],          // green stock to reorder: [{ coffee, current_kg, threshold, status }]
   coffees: [],              // [name]
-  plan: {},                 // containerId -> coffee (interactive morning plan)
+  plan_items: [],           // persistent roast_plan rows for today: {id, container_id, coffee, coffee_id, batches, seq, status, roast_session_id}
   selected_coffee: null,    // coffee picked for tap-to-assign
 };
 
@@ -288,6 +316,7 @@ async function load() {
     .sort((a, b) => (a.status === b.status ? a.current_kg - b.current_kg : a.status === "out" ? -1 : 1));
 
   state.loaded = true;
+  await load_plan();
 }
 
 // Build the per-coffee "what to roast" rows, sorted by urgency.
@@ -319,10 +348,12 @@ function render() {
 
   const rows = roast_rows();
   const need = rows.filter(r => r.status === "out" || r.status === "low");
-  const plan_ids = Object.keys(state.plan).filter(id => state.plan[id] && state.plan[id].coffee);
-  const total_batches = plan_ids.reduce((a, id) => a + (Number(state.plan[id].roasts) || 0), 0);
-  let plan_green = 0, green_known = plan_ids.length > 0;
-  plan_ids.forEach(id => { const g = state.green_per_roast[state.plan[id].coffee]; if (g > 0) plan_green += g * state.plan[id].roasts; else green_known = false; });
+  const items = [...state.plan_items].sort((a, b) => (Number(a.seq)||0) - (Number(b.seq)||0));
+  const active = items.filter(i => i.status !== "skipped");
+  const done_count = items.filter(i => i.status === "done").length;
+  const total_batches = active.reduce((a, i) => a + (Number(i.batches) || 0), 0);
+  let plan_green = 0, green_known = active.length > 0;
+  active.forEach(i => { const g = state.green_per_roast[i.coffee]; if (g > 0) plan_green += g * i.batches; else green_known = false; });
 
   const SCOL = { out: "#dc2626", low: "#d97706", ok: "#16a34a", idle: "#bbb" };
   const SLAB = { out: "OUT", low: "LOW", ok: "OK", idle: "—" };
@@ -349,17 +380,12 @@ function render() {
       <div class="room-h">${esc(pfx)} <span>· ${by_prefix[pfx].length} empty · ${max_roasts(pfx)} batches each</span></div>
       <div class="slots">
         ${by_prefix[pfx].map(d => {
-          const p = state.plan[d.id];
-          if (p && p.coffee) {
-            const g = state.green_per_roast[p.coffee];
+          const planned = state.plan_items.find(i => i.container_id === d.id && i.status !== "skipped");
+          if (planned) {
             return `<div class="slot filled">
-              <div class="slot-id">${esc(d.id)} <button class="slot-x" data-clear="${esc(d.id)}" title="Remove">✕</button></div>
-              <div class="slot-coffee">${esc(p.coffee)}</div>
-              <div class="stepper">
-                <button data-step="${esc(d.id)}|-1">−</button><span>${p.roasts}</span><button data-step="${esc(d.id)}|1">+</button>
-                <span class="slot-max">/ ${d.max} batches</span>
-              </div>
-              <div class="slot-green">${g > 0 ? `${p.roasts} × ${r1(g)}kg = ${kg(g * p.roasts)} green` : "no batch history yet"}</div>
+              <div class="slot-id">${esc(d.id)}</div>
+              <div class="slot-coffee">${esc(planned.coffee)}</div>
+              <div class="slot-hint" style="color:#166534">✓ ${planned.status === "done" ? "done" : "in plan"}</div>
             </div>`;
           }
           return `<button class="slot empty ${assignable ? "go" : ""}" data-assign="${esc(d.id)}">
@@ -377,6 +403,30 @@ function render() {
   const bkt_bar = state.empty_buckets.length
     ? Object.keys(bkt_by).sort().map(p => `<span class="pill">${esc(p)}: ${bkt_by[p]}</span>`).join("")
     : `<span style="color:#bbb;font-style:italic">none empty</span>`;
+
+  // ---- Today's plan as an ordered, persistent worklist ----
+  const drum_size = (cid) => (String(cid||"").match(/^([A-Za-z]+)/) || [,""])[1].toUpperCase();
+  const max_for = (cid) => max_roasts(drum_size(cid)) || 99;
+  const worklist = items.length ? items.map((it, idx) => {
+    const g = state.green_per_roast[it.coffee];
+    const mx = max_for(it.container_id);
+    const done = it.status === "done", skip = it.status === "skipped";
+    return `<div class="wl ${it.status}">
+      <div class="wl-ord">
+        <button class="wl-mv" data-move="${it.id}|-1" ${idx===0?"disabled":""}>▲</button>
+        <button class="wl-mv" data-move="${it.id}|1" ${idx===items.length-1?"disabled":""}>▼</button>
+      </div>
+      <div class="wl-body">
+        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee">${esc(it.coffee)}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""}</div>
+        <div class="wl-sub">${(done||skip)?`${it.batches} batch${it.batches!=1?"es":""}`:`<span class="stepper"><button data-pbatch="${it.id}|-1">−</button><span>${it.batches}</span><button data-pbatch="${it.id}|1">+</button> <span class="slot-max">/ ${mx} batches</span></span>`}${g>0?` · ≈ ${kg(g*it.batches)} green`:""}</div>
+      </div>
+      <div class="wl-act">
+        ${it.status==="planned"?`<a class="wl-start" href="roasts.html?from_plan=${encodeURIComponent(it.id)}">▶ Start</a><button class="wl-skip" data-skip="${it.id}">Skip</button>`:""}
+        ${skip?`<button class="wl-skip" data-unskip="${it.id}">Undo</button>`:""}
+        <button class="wl-x" data-remove="${it.id}" title="Remove from plan">✕</button>
+      </div>
+    </div>`;
+  }).join("") : "";
 
   app.innerHTML = `
     <div class="header">
@@ -415,10 +465,12 @@ function render() {
           <div class="prio-list">${prio_cards || `<p class="plan-empty">No coffees yet.</p>`}</div>
         </div>
         <div class="panel">
-          <div class="panel-h">🛢️ Today's plan ${plan_ids.length ? `<button class="btn-clear" id="clear-plan">Clear</button>` : ""}</div>
-          ${plan_ids.length
-            ? `<div class="plan-summary">${total_batches} batch${total_batches!=1?"es":""}${plan_green>0?` · ≈ ${kg(plan_green)} green${green_known?"":" (some unknown)"}`:""} · ${plan_ids.length} drum${plan_ids.length!=1?"s":""}</div>`
-            : `<div class="plan-summary" style="background:#f0faf3;color:#166534">Pick a coffee on the left, then tap an empty drum below to plan it.</div>`}
+          <div class="panel-h">🛢️ Today's plan ${items.length ? `<button class="btn-clear" id="clear-plan">Clear</button>` : ""}</div>
+          ${items.length
+            ? `<div class="plan-summary">${done_count} of ${active.length} done${total_batches?` · ${total_batches} batch${total_batches!=1?"es":""}`:""}${plan_green>0?` · ≈ ${kg(plan_green)} green${green_known?"":" (some unknown)"}`:""}</div>
+               <div class="worklist">${worklist}</div>`
+            : `<div class="plan-summary" style="background:#f0faf3;color:#166534">Pick a coffee on the left, then tap an empty drum below to add it to the plan.</div>`}
+          <div class="panel-h" style="margin-top:16px;font-size:13px">➕ Add to plan <span class="panel-hint">${assignable ? "tap an empty drum" : "pick a coffee first"}</span></div>
           ${rooms}
           <div class="bucket-bar">🪣 Empty buckets: ${bkt_bar}</div>
         </div>
@@ -428,30 +480,62 @@ function render() {
 
   document.getElementById("back-btn").addEventListener("click", () => window.location.href = "index.html");
   document.getElementById("logout-btn").addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; });
-  document.getElementById("clear-plan")?.addEventListener("click", () => { state.plan = {}; render(); });
+  document.getElementById("clear-plan")?.addEventListener("click", async () => {
+    if (!confirm("Clear the whole plan for today?")) return;
+    await supabaseClient.from("roast_plan").delete().eq("plan_date", today_str());
+    await load_plan(); render();
+  });
 
   app.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
     const c = b.dataset.pick;
     state.selected_coffee = state.selected_coffee === c ? null : c;
     render();
   }));
-  app.querySelectorAll("[data-assign]").forEach(b => b.addEventListener("click", () => {
+  app.querySelectorAll("[data-assign]").forEach(b => b.addEventListener("click", async () => {
     if (!state.selected_coffee) return;
     const id = b.dataset.assign;
+    if (state.plan_items.find(i => i.container_id === id && i.status !== "skipped")) return; // already planned
     const d = state.empty_drums.find(x => x.id === id);
-    state.plan[id] = { coffee: state.selected_coffee, roasts: d ? d.max : 1 };
-    render();
+    const seq = state.plan_items.length ? Math.max(...state.plan_items.map(i => Number(i.seq) || 0)) + 1 : 0;
+    await supabaseClient.from("roast_plan").insert({
+      id: gen_plan_id(), plan_date: today_str(), seq,
+      container_id: id, coffee: state.selected_coffee, coffee_id: null,
+      batches: d ? d.max : 1, status: "planned",
+    });
+    await load_plan(); render();
   }));
-  app.querySelectorAll("[data-step]").forEach(b => b.addEventListener("click", () => {
-    const [id, delta] = b.dataset.step.split("|");
-    const d = state.empty_drums.find(x => x.id === id);
-    const p = state.plan[id]; if (!p) return;
-    let v = (Number(p.roasts) || 1) + Number(delta);
-    v = Math.max(1, Math.min(d ? d.max : v, v));
-    p.roasts = v;
-    render();
+  app.querySelectorAll("[data-pbatch]").forEach(b => b.addEventListener("click", async () => {
+    const [id, delta] = b.dataset.pbatch.split("|");
+    const it = state.plan_items.find(i => i.id === id); if (!it) return;
+    const mx = max_roasts(drum_size(it.container_id)) || 99;
+    let v = (Number(it.batches) || 1) + Number(delta);
+    v = Math.max(1, Math.min(mx, v));
+    if (v === it.batches) return;
+    await supabaseClient.from("roast_plan").update({ batches: v, updated_at: new Date().toISOString() }).eq("id", id);
+    await load_plan(); render();
   }));
-  app.querySelectorAll("[data-clear]").forEach(b => b.addEventListener("click", () => { delete state.plan[b.dataset.clear]; render(); }));
+  app.querySelectorAll("[data-move]").forEach(b => b.addEventListener("click", async () => {
+    const [id, dir] = b.dataset.move.split("|");
+    const arr = [...state.plan_items].sort((a, b) => (Number(a.seq)||0) - (Number(b.seq)||0));
+    const idx = arr.findIndex(i => i.id === id); if (idx < 0) return;
+    const j = idx + Number(dir); if (j < 0 || j >= arr.length) return;
+    const a = arr[idx], c = arr[j];
+    await supabaseClient.from("roast_plan").update({ seq: c.seq }).eq("id", a.id);
+    await supabaseClient.from("roast_plan").update({ seq: a.seq }).eq("id", c.id);
+    await load_plan(); render();
+  }));
+  app.querySelectorAll("[data-skip]").forEach(b => b.addEventListener("click", async () => {
+    await supabaseClient.from("roast_plan").update({ status: "skipped", updated_at: new Date().toISOString() }).eq("id", b.dataset.skip);
+    await load_plan(); render();
+  }));
+  app.querySelectorAll("[data-unskip]").forEach(b => b.addEventListener("click", async () => {
+    await supabaseClient.from("roast_plan").update({ status: "planned", updated_at: new Date().toISOString() }).eq("id", b.dataset.unskip);
+    await load_plan(); render();
+  }));
+  app.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", async () => {
+    await supabaseClient.from("roast_plan").delete().eq("id", b.dataset.remove);
+    await load_plan(); render();
+  }));
 }
 </script>
 </body>

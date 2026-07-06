@@ -103,6 +103,7 @@ const state = {
   loading:        true,
   saving:         false,
   session:        new_session(),
+  from_plan_id:   null,   // set when this roast was launched from a roast_plan item
   ui: { step: 1, gross_weight: "" },
 };
 
@@ -181,6 +182,12 @@ async function save_session() {
     }
   }
 
+  // If this roast was launched from a plan item, tick it off and link the session.
+  if (state.from_plan_id) {
+    await supabaseClient.from("roast_plan").update({ status: "done", roast_session_id: id, updated_at: new Date().toISOString() }).eq("id", state.from_plan_id);
+    state.from_plan_id = null;
+  }
+
   state.saving = false;
   await load_data();
   state.ui.step = 4;
@@ -188,7 +195,25 @@ async function save_session() {
   render();
 }
 
-async function init() { await load_data(); state.loading = false; render(); }
+async function init() {
+  await load_data();
+  // Launched from the Roaster dashboard? Pre-fill the log from that plan item.
+  const plan_id = new URLSearchParams(location.search).get("from_plan");
+  if (plan_id) {
+    const { data: p } = await supabaseClient.from("roast_plan").select("*").eq("id", plan_id).maybeSingle();
+    if (p && p.status !== "done") {
+      state.session = new_session();
+      state.session.coffee = p.coffee || "";
+      state.session.container_id = p.container_id || "";
+      state.session.batch_count = Math.max(1, Number(p.batches) || 1);
+      state.from_plan_id = p.id;
+      state.view = "new";
+      state.ui.step = 1;   // land on step 1 so the roaster can confirm coffee/drum/batches before weighing
+    }
+  }
+  state.loading = false;
+  render();
+}
 
 function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
 
@@ -436,10 +461,10 @@ function attach_listeners() {
   const app = document.getElementById("app");
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
-  app.querySelector("#start-new")?.addEventListener("click", () => { state.session=new_session(); state.ui.step=1; state.ui.gross_weight=""; state.view="new"; render(); });
+  app.querySelector("#start-new")?.addEventListener("click", () => { state.session=new_session(); state.from_plan_id=null; state.ui.step=1; state.ui.gross_weight=""; state.view="new"; render(); });
   app.querySelector("#go-history")?.addEventListener("click", () => { state.view="history"; render(); });
   app.querySelector("#history-back")?.addEventListener("click", () => { state.view="home"; render(); });
-  app.querySelector("#cancel-new")?.addEventListener("click", () => { state.view="home"; state.ui.step=1; state.ui.gross_weight=""; render(); });
+  app.querySelector("#cancel-new")?.addEventListener("click", () => { state.view="home"; state.from_plan_id=null; state.ui.step=1; state.ui.gross_weight=""; render(); });
 
   app.querySelector("#s1-is-test")?.addEventListener("change", e => {
     state.session.is_test = e.target.checked;
