@@ -108,6 +108,9 @@
     .wl-skip { background: #fff; border: 1px solid #ddd; font-size: 12px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
     .wl-x { background: none; border: none; color: #bbb; font-size: 14px; cursor: pointer; padding: 2px 4px; }
     .wl-x:hover { color: #dc2626; }
+    .unplanned { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #ddd; text-align: center; }
+    .unplanned a { color: #777; font-size: 13px; text-decoration: none; }
+    .unplanned a:hover { color: #1a1a1a; text-decoration: underline; }
 
     /* Size rooms + drum slots */
     .room { margin-bottom: 16px; }
@@ -473,6 +476,7 @@ function render() {
           <div class="panel-h" style="margin-top:16px;font-size:13px">➕ Add to plan <span class="panel-hint">${assignable ? "tap an empty drum" : "pick a coffee first"}</span></div>
           ${rooms}
           <div class="bucket-bar">🪣 Empty buckets: ${bkt_bar}</div>
+          <div class="unplanned"><a href="roasts.html">＋ Roast without a plan — log a one-off →</a></div>
         </div>
       </div>
 
