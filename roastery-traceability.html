@@ -2141,7 +2141,13 @@ function attach_listeners() {
   });
   app.querySelectorAll("[data-set-condition]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.bucket_return_condition = btn.dataset.setCondition;
-    render();
+    // Update the pill styling in place — a full render() would tear down and orphan the live camera.
+    app.querySelectorAll("[data-set-condition]").forEach(b => {
+      const active = b.dataset.setCondition === state.ui.bucket_return_condition;
+      b.classList.toggle("btn-dark", active);
+      b.classList.toggle("btn-ghost", !active);
+      b.style.color = active ? "#fff" : "";
+    });
   }));
   app.querySelector("#return-confirm-btn")?.addEventListener("click", () => {
     stop_return_scanner();
