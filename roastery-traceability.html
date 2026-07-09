@@ -151,6 +151,9 @@ function resolveFp(code, asOf) {
   return matches[matches.length - 1];
 }
 function active_fill(c) { return { coffee: c.coffee, remaining: c.remaining||0, fill_number: 1, date: c.roast_sessions?.[0]?.date||"" }; }
+// Display helper for AVAILABLE/REMAINING coffee: always round DOWN so we never overstate.
+// 0.96kg must read as 0.9kg, never 1.0kg, or a packer would try to pack a full kg and fall short.
+function kgfloor(n) { return (Math.floor((Number(n)||0)*10)/10).toFixed(1); }
 
 // ── HTML5 QR scanner integration ──
 let _html5_qr = null;
@@ -594,7 +597,7 @@ function process_fill_scan(raw_value) {
   // Check there's enough left in the container for another 5kg bucket
   const already_session_kg = fill_state.filled.length * 5;
   if (Math.round((container.remaining - already_session_kg) * 1000) / 1000 < 5) {
-    flash_fill_scan(`Not enough left in ${container.id} (${(container.remaining - already_session_kg).toFixed(1)}kg)`, "error");
+    flash_fill_scan(`Not enough left in ${container.id} (${kgfloor(container.remaining - already_session_kg)}kg)`, "error");
     return;
   }
   fill_state.filled.push({
@@ -630,7 +633,7 @@ function update_fill_panel() {
   if (!panel) { render(); return; }
   const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
   const session_kg = fill_state.filled.length * 5;
-  const remaining_after = container ? (container.remaining - session_kg).toFixed(1) : "?";
+  const remaining_after = container ? kgfloor(container.remaining - session_kg) : "?";
   const list = fill_state.filled.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
     <div><div style="font-weight:600;font-size:14px">🪣 5kg ${esc(b.coffee||"?")}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
     <button data-unfill="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
@@ -687,7 +690,7 @@ function build_fill_buckets_overlay() {
     <div style="text-align:center;margin-bottom:14px">
       <div style="font-size:40px">🪣</div>
       <h2 style="margin:8px 0 2px">Fill Buckets</h2>
-      <div class="hint" style="font-size:13px;margin-top:4px">From ${esc(container.id)} · ${esc(container.coffee||"?")} · ${container.remaining.toFixed(1)}kg available</div>
+      <div class="hint" style="font-size:13px;margin-top:4px">From ${esc(container.id)} · ${esc(container.coffee||"?")} · ${kgfloor(container.remaining)}kg available</div>
     </div>
 
     <div style="display:flex;gap:6px;margin-bottom:10px;background:#f4f2ed;padding:4px;border-radius:8px">
@@ -1005,7 +1008,7 @@ function build_rooms_view() {
         <div style="font-size:16px;color:#333;margin:2px 0 8px">${esc(c.coffee || "—")}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
           <div style="flex:1;height:8px;background:#eee;border-radius:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${low?"#dc2626":"#16a34a"}"></div></div>
-          <span style="font-size:13px;font-weight:700;color:${low?"#dc2626":"#16a34a"}">${remaining.toFixed(1)}kg</span>
+          <span style="font-size:13px;font-weight:700;color:${low?"#dc2626":"#16a34a"}">${kgfloor(remaining)}kg</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${buttons}
@@ -1768,7 +1771,7 @@ function build_packing_page(container, fill) {
     if (active_containers.length > 0) {
       summary = `<div style="background:#f4f2ed;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
           <div style="font-weight:600;margin-bottom:4px">Available (FIFO):</div>
-          ${active_containers.sort((a,b) => (a.latest_roast_date||"").localeCompare(b.latest_roast_date||"")).map(c => `<div>📦 ${esc(c.id)} · ${esc(c.coffee||"?")} · ${c.remaining.toFixed(1)}kg</div>`).join("")}
+          ${active_containers.sort((a,b) => (a.latest_roast_date||"").localeCompare(b.latest_roast_date||"")).map(c => `<div>📦 ${esc(c.id)} · ${esc(c.coffee||"?")} · ${kgfloor(c.remaining)}kg</div>`).join("")}
         </div>`;
     } else if (filled_buckets_available.length > 0 && shop_kind !== "online") {
       summary = `<div style="background:#fff7ed;border:1px solid #d97706;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:14px">
@@ -1821,7 +1824,7 @@ function build_packing_page(container, fill) {
         <div style="display:flex;gap:6px;align-items:center;margin-top:${ps.samples.length?"8px":"0"}">
           <select id="sample-container" style="flex:1;font-size:14px;padding:9px">
             <option value="">— ${LANG==="uk"?"Кава для зразка":"Coffee to sample"} —</option>
-            ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${c.remaining.toFixed(1)}kg)</option>`).join("")}
+            ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${kgfloor(c.remaining)}kg)</option>`).join("")}
           </select>
           <input type="number" id="sample-count" min="1" step="1" value="1" style="width:58px;font-size:14px;padding:9px;text-align:center" />
           <button class="btn btn-amber btn-sm" id="sample-add">+ ${tr("Add","Додати")}</button>
@@ -1839,7 +1842,7 @@ function build_packing_page(container, fill) {
           <div style="display:flex;gap:6px;align-items:center">
             <select id="batch-container" style="flex:1;font-size:14px;padding:9px">
               <option value="">— ${tr("Coffee for batch","Кава для batch")} —</option>
-              ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${c.remaining.toFixed(1)}kg)</option>`).join("")}
+              ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${kgfloor(c.remaining)}kg)</option>`).join("")}
             </select>
             <select id="batch-kg" style="width:72px;font-size:14px;padding:9px;text-align:center">
               <option value="1">1kg</option>
@@ -1884,7 +1887,7 @@ function build_packing_page(container, fill) {
       <div style="font-size:40px">📦</div>
       <h2 style="margin:8px 0 2px">${esc(fill.coffee)}</h2>
       <div class="mono" style="color:#666;font-size:15px;font-weight:700">${esc(container.id)}</div>
-      <div style="color:#16a34a;font-size:15px;margin-top:4px">${fill.remaining.toFixed(1)}kg ${tr("available","доступно")}</div>
+      <div style="color:#16a34a;font-size:15px;margin-top:4px">${kgfloor(fill.remaining)}kg ${tr("available","доступно")}</div>
     </div>
     <h3 style="font-size:18px;margin-bottom:8px">${tr("Where is this going?","Куди це відправляється?")}</h3>
     ${group("Shops", shops_only, "#16a34a", "")}
@@ -2182,7 +2185,7 @@ function attach_listeners() {
     if (!cont) { flash_scan("Container not found", "error"); return; }
     if (cont.status !== "active") { flash_scan(`${cont.coffee||cid} isn't active — samples can only come from active drums`, "error"); return; }
     const queued = packing_state.samples.filter(s => s.container_id === cid).reduce((a,s)=>a+s.count*0.03, 0);
-    if (count*0.03 + queued > cont.remaining + 1e-9) { flash_scan(`Only ${(cont.remaining-queued).toFixed(2)}kg left in ${cont.coffee}`, "error"); return; }
+    if (count*0.03 + queued > cont.remaining + 1e-9) { flash_scan(`Only ${(Math.floor((cont.remaining-queued)*100)/100).toFixed(2)}kg left in ${cont.coffee}`, "error"); return; }
     const existing = packing_state.samples.find(s => s.container_id === cid);
     if (existing) existing.count += count;
     else packing_state.samples.push({ container_id: cid, fill_id: cont.fill_id, coffee: cont.coffee, count });
@@ -2199,7 +2202,7 @@ function attach_listeners() {
     if (!cont) { flash_scan("Container not found", "error"); return; }
     if (cont.status !== "active") { flash_scan(`${cont.coffee||cid} isn't active — batch brew comes from active drums`, "error"); return; }
     const queued = packing_state.samples.filter(s => s.container_id === cid).reduce((a,s)=>a+s.count*0.03, 0);
-    if (kg + queued > cont.remaining + 1e-9) { flash_scan(`Only ${(cont.remaining-queued).toFixed(1)}kg left in ${cont.coffee}`, "error"); return; }
+    if (kg + queued > cont.remaining + 1e-9) { flash_scan(`Only ${kgfloor(cont.remaining-queued)}kg left in ${cont.coffee}`, "error"); return; }
     packing_state.batch = { container_id: cid, fill_id: cont.fill_id, coffee: cont.coffee, kg };
     flash_scan(`+ ${kg}kg ${cont.coffee} batch brew`, "success");
     render();
