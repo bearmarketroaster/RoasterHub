@@ -182,14 +182,17 @@ async function save_session() {
     }
   }
 
-  // If this roast was launched from a plan item, tick it off and link the session.
+  // If this roast was launched from a plan item, tick it off, link the session, and return to the plan list.
   if (state.from_plan_id) {
     await supabaseClient.from("roast_plan").update({ status: "done", roast_session_id: id, updated_at: new Date().toISOString() }).eq("id", state.from_plan_id);
     state.from_plan_id = null;
+    window.location.href = "roaster.html";   // back to the worklist to pick the next roast
+    return;
   }
 
   state.saving = false;
   await load_data();
+  state.last_saved_id = id;   // so the confirmation shows THIS roast, not just the newest-dated one
   state.ui.step = 4;
   state.ui.gross_weight = "";
   render();
@@ -419,7 +422,7 @@ function build_step3() {
 }
 
 function build_done() {
-  const s = state.roast_sessions[0];
+  const s = state.roast_sessions.find(x => x.id === state.last_saved_id) || state.roast_sessions[0];
   const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
   const yp = yield_pct(total_green, s.roasted_weight);
   const ids = s.batches.map(b => b.cropster_id).filter(Boolean).join(", ");
@@ -464,7 +467,7 @@ function attach_listeners() {
   app.querySelector("#start-new")?.addEventListener("click", () => { state.session=new_session(); state.from_plan_id=null; state.ui.step=1; state.ui.gross_weight=""; state.view="new"; render(); });
   app.querySelector("#go-history")?.addEventListener("click", () => { state.view="history"; render(); });
   app.querySelector("#history-back")?.addEventListener("click", () => { state.view="home"; render(); });
-  app.querySelector("#cancel-new")?.addEventListener("click", () => { state.view="home"; state.from_plan_id=null; state.ui.step=1; state.ui.gross_weight=""; render(); });
+  app.querySelector("#cancel-new")?.addEventListener("click", () => { if (state.from_plan_id) { window.location.href="roaster.html"; return; } state.view="home"; state.from_plan_id=null; state.ui.step=1; state.ui.gross_weight=""; render(); });
 
   app.querySelector("#s1-is-test")?.addEventListener("change", e => {
     state.session.is_test = e.target.checked;
