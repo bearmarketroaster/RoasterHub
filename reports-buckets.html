@@ -7,6 +7,7 @@
   <link rel="icon" type="image/png" href="bear-icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
@@ -87,6 +88,9 @@
     .condition-bar-seg { height: 100%; }
     .condition-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; }
     .condition-legend span { display: flex; align-items: center; gap: 4px; }
+    .btn-scan { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .scan-mode-pill { flex: 1; border: none; background: transparent; padding: 8px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; color: #666; }
+    .scan-mode-pill.active { background: #1a1a1a; color: #fff; font-weight: 600; }
 
     /* Section toggle / collapse */
     .section-collapsible { cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; }
@@ -128,6 +132,11 @@ const state = {
   sort_col: "name",
   sort_dir: "asc",
   show_full_list: false,           // collapsed by default
+  lookup_text: "",                 // top-of-page bucket search
+  _lookup_focus: null,
+  scan_open: false,                // scan-a-bucket modal
+  scan_mode: "scanner",            // scanner | camera
+  scan_msg: "",
   history_modal_bucket_id: null,   // when set, the history modal is open
 };
 
@@ -182,6 +191,40 @@ function in_range(ts) {
   const cutoff = range_cutoff();
   if (!cutoff) return true;
   return new Date(ts).getTime() >= cutoff.getTime();
+}
+
+// ── Bucket lookup (top-of-page search: find a bucket, see where it last was) ──
+function build_lookup_results() {
+  const q = state.lookup_text.trim().toLowerCase();
+  if (!q) return `<p class="hint" style="margin:0">Type a bucket name or ID (e.g. "Eco Bucket 14") to see its current state and where it last was.</p>`;
+  const matches = state.buckets.filter(b => `${b.id} ${b.name||""} ${b.coffee||""}`.toLowerCase().includes(q)).slice(0, 30);
+  if (matches.length === 0) return `<p class="hint" style="margin:0">No bucket matches “${esc(state.lookup_text)}”.</p>`;
+  const state_label = { at_shop: "At shop", in_transit: "In transit", filled: "Filled", empty: "Empty", retired: "Retired", unknown: "Unknown" };
+  return `<div style="overflow-x:auto"><table>
+      <thead><tr><th>Bucket</th><th>State</th><th>Last location</th><th>When</th><th>Condition</th><th style="text-align:right">Trips</th></tr></thead>
+      <tbody>
+        ${matches.map(b => {
+          const eff = effective_state(b);
+          const history = state.per_bucket_history[b.id] || [];
+          const latest = history[0];
+          const last_loc = latest
+            ? (latest.confirmed_at ? `Delivered to ${esc(latest.shop)}` : `In transit to ${esc(latest.shop)}`)
+            : (b.filled_at ? "Filled, not dispatched" : "Never dispatched");
+          const when = b.returned_at
+            ? `Returned ${new Date(b.returned_at).toLocaleDateString()}`
+            : (latest ? new Date(latest.scanned_at).toLocaleDateString() : "—");
+          const cond = b.condition ? `<span class="tag tag-${b.condition}">${esc(b.condition)}</span>` : "—";
+          return `<tr class="clickable" data-bucket-history="${esc(b.id)}">
+            <td><div style="font-weight:600">${esc(b.name || b.id)}</div>${b.name ? `<div class="mono">${esc(b.id)}</div>` : ""}</td>
+            <td>${state_label[eff] || eff}</td>
+            <td>${last_loc}</td>
+            <td>${when}</td>
+            <td>${cond}</td>
+            <td style="text-align:right">${history.length}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>`;
 }
 
 // ── Bucket state helpers ────────────────────────────────────────────────────
@@ -429,6 +472,14 @@ function render() {
   const recently_returned = build_recently_returned();
   const shop_stats = build_shop_stats();
 
+  // Shop-first views: who holds buckets right now, and who returns them dirty/damaged (in range)
+  const holding = shop_stats.filter(s => s.currently_out > 0).sort((a, b) => b.currently_out - a.currently_out);
+  const total_held = holding.reduce((n, s) => n + s.currently_out, 0);
+  const dd = shop_stats
+    .map(s => ({ shop: s.shop, dirty: s.condition_counts.dirty, damaged: s.condition_counts.damaged, tot: s.condition_counts.dirty + s.condition_counts.damaged }))
+    .filter(s => s.tot > 0)
+    .sort((a, b) => b.tot - a.tot);
+
   // Compact summary stats
   const total_active = state.buckets.filter(b => !b.retired_at).length;
   const retired_count = state.buckets.filter(b =>  b.retired_at).length;
@@ -455,6 +506,16 @@ function render() {
 
     <div class="content">
 
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px">
+          <div class="section-title" style="margin:0">🔍 Find a Bucket</div>
+          <button class="btn-scan" id="open-scan">📷 Scan a bucket</button>
+        </div>
+        <input type="text" id="lookup-text" placeholder="Search by bucket name or ID…" value="${esc(state.lookup_text)}"
+          style="width:100%;padding:12px 14px;border:1px solid #d4d1ca;border-radius:8px;font-size:15px;margin-bottom:12px" autocomplete="off" />
+        <div id="lookup-results">${build_lookup_results()}</div>
+      </div>
+
       <div class="range-tabs">
         ${range_button("7d", "7 days")}
         ${range_button("30d", "30 days")}
@@ -473,6 +534,40 @@ function render() {
           ${dirty_returns ? `<div class="summary-item"><span class="summary-num summary-warn">${dirty_returns}</span><span class="summary-lbl">dirty returns</span></div>` : ""}
           ${broken_returns ? `<div class="summary-item"><span class="summary-num summary-alert">${broken_returns}</span><span class="summary-lbl">broken returns</span></div>` : ""}
         </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">🏬 Shops Holding Buckets (${total_held})</div>
+        ${holding.length === 0 ? '<p class="hint">No buckets currently out.</p>' : `
+          <div style="overflow-x:auto">
+            <table>
+              <thead><tr><th>Shop</th><th style="text-align:right">Buckets held</th><th style="text-align:right">Overdue &gt;30d</th></tr></thead>
+              <tbody>
+                ${holding.map(s => `<tr>
+                  <td style="font-weight:600">${esc(s.shop || "(unknown)")}</td>
+                  <td style="text-align:right;font-weight:700">${s.currently_out}</td>
+                  <td style="text-align:right">${s.lost_count ? `<span class="summary-alert">${s.lost_count}</span>` : "—"}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>`}
+      </div>
+
+      <div class="card">
+        <div class="section-title">⚠️ Dirty / Damaged Returns by Shop · ${esc(range_label())}</div>
+        ${dd.length === 0 ? `<p class="hint">No dirty or damaged returns in this period.</p>` : `
+          <div style="overflow-x:auto">
+            <table>
+              <thead><tr><th>Shop</th><th style="text-align:right">Dirty</th><th style="text-align:right">Damaged</th></tr></thead>
+              <tbody>
+                ${dd.map(s => `<tr>
+                  <td style="font-weight:600">${esc(s.shop || "(unknown)")}</td>
+                  <td style="text-align:right">${s.dirty ? `<span class="tag tag-dirty">${s.dirty}</span>` : "—"}</td>
+                  <td style="text-align:right">${s.damaged ? `<span class="tag tag-damaged">${s.damaged}</span>` : "—"}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>`}
       </div>
 
       <div class="card">
@@ -569,9 +664,14 @@ function render() {
     </div>
 
     ${state.history_modal_bucket_id ? build_history_modal() : ""}
+    ${state.scan_open ? build_scan_modal() : ""}
   `;
 
   attach_listeners();
+
+  // Scan modal camera/focus lifecycle
+  if (state.scan_open && state.scan_mode === "camera") start_scan_scanner(); else stop_scan_scanner();
+  if (state.scan_open && state.scan_mode === "scanner") { const si = document.getElementById("scan-input"); if (si) si.focus(); }
 }
 
 // ── Full bucket list (collapsed by default) ─────────────────────────────────
@@ -649,12 +749,109 @@ function build_full_list_html() {
       </div>`}`;
 }
 
+// ── Scan a bucket → its full history (mirrors the return-scan flow) ──────────
+function resolve_bucket(raw) {
+  const v = (raw || "").trim();
+  if (!v) return null;
+  const up = v.toUpperCase();
+  // Bucket QR = the id (BKT-…). HID scanner types this.
+  let b = state.buckets.find(x => (x.id || "").toUpperCase() === up);
+  if (b) return b;
+  // Friendly name (exact, case-insensitive)
+  b = state.buckets.find(x => (x.name || "").toLowerCase() === v.toLowerCase());
+  if (b) return b;
+  // Single partial match on name or id
+  const partial = state.buckets.filter(x => (x.name || "").toLowerCase().includes(v.toLowerCase()) || (x.id || "").toUpperCase().includes(up));
+  return partial.length === 1 ? partial[0] : null;
+}
+
+let _last_scan_bl = { value: null, at: 0 };
+function process_scan(raw) {
+  const value = (raw || "").trim();
+  if (!value) return;
+  const now = Date.now();
+  if (_last_scan_bl.value === value.toUpperCase() && (now - _last_scan_bl.at) < 800) return;
+  _last_scan_bl = { value: value.toUpperCase(), at: now };
+  const b = resolve_bucket(value);
+  if (!b) { state.scan_msg = `No bucket found for “${value}”`; const m = document.getElementById("scan-msg"); if (m) m.textContent = state.scan_msg; return; }
+  // Found → close scanner, open that bucket's full history
+  stop_scan_scanner();
+  state.scan_open = false;
+  state.scan_msg = "";
+  state.history_modal_bucket_id = b.id;
+  render();
+}
+
+let _bl_html5_qr = null;
+function start_scan_scanner() {
+  if (!window.Html5Qrcode) return;
+  const el = document.getElementById("scan-qr-reader");
+  if (!el || _bl_html5_qr) return;
+  _bl_html5_qr = new window.Html5Qrcode("scan-qr-reader", { verbose: false });
+  _bl_html5_qr.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 220, height: 220 } },
+    decoded => process_scan(decoded), () => {}
+  ).catch(() => { _bl_html5_qr = null; });
+}
+function stop_scan_scanner() {
+  if (!_bl_html5_qr) return;
+  _bl_html5_qr.stop().then(() => _bl_html5_qr.clear()).catch(()=>{}).finally(() => { _bl_html5_qr = null; });
+}
+
+function build_scan_modal() {
+  const pill = (mode, label) => `<button class="scan-mode-pill ${state.scan_mode===mode?'active':''}" data-scan-mode="${mode}">${label}</button>`;
+  return `
+    <div class="modal-overlay" id="scan-overlay">
+      <div class="modal" style="max-width:460px;padding:18px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h2 style="margin:0;font-size:18px">🔍 Scan a bucket</h2>
+          <button id="scan-close" style="background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#666">✕</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:12px;background:#f4f2ed;padding:4px;border-radius:8px">
+          ${pill("scanner","⌨️ Scanner / Manual")}
+          ${pill("camera","📷 Camera")}
+        </div>
+        ${state.scan_mode === "camera"
+          ? `<div style="position:relative;background:#1a1a1a;border-radius:12px;overflow:hidden;margin-bottom:10px;min-height:240px"><div id="scan-qr-reader" style="width:100%;min-height:240px"></div></div>`
+          : `<input type="text" id="scan-input" placeholder="Scan a bucket or type its name…" autocomplete="off"
+               style="width:100%;padding:12px 14px;border:1px solid #d4d1ca;border-radius:8px;font-size:16px;margin-bottom:8px" />
+             <p class="hint" style="font-size:12px;margin:0 0 4px">Scan with your barcode scanner, or type a bucket name/ID and press Enter.</p>`}
+        <div id="scan-msg" style="color:#dc2626;font-size:13px;min-height:18px">${esc(state.scan_msg||"")}</div>
+      </div>
+    </div>`;
+}
+
 function attach_listeners() {
   document.getElementById("back-btn")?.addEventListener("click", () => window.location.href = "reports.html");
   document.getElementById("logout-btn")?.addEventListener("click", async () => {
     await supabaseClient.auth.signOut();
     window.location.href = "login.html";
   });
+
+  // Top bucket lookup — update results live, keep focus, no full re-render
+  const lookup_input = document.getElementById("lookup-text");
+  if (lookup_input) {
+    lookup_input.addEventListener("input", e => {
+      state.lookup_text = e.target.value;
+      const box = document.getElementById("lookup-results");
+      if (box) {
+        box.innerHTML = build_lookup_results();
+        box.querySelectorAll("[data-bucket-history]").forEach(el => el.addEventListener("click", () => {
+          state.history_modal_bucket_id = el.dataset.bucketHistory;
+          render();
+        }));
+      }
+    });
+  }
+
+  // Scan-a-bucket modal
+  document.getElementById("open-scan")?.addEventListener("click", () => { state.scan_open = true; state.scan_msg = ""; state.scan_mode = "scanner"; render(); });
+  document.getElementById("scan-close")?.addEventListener("click", () => { stop_scan_scanner(); state.scan_open = false; state.scan_msg = ""; render(); });
+  document.getElementById("scan-overlay")?.addEventListener("click", e => { if (e.target.id === "scan-overlay") { stop_scan_scanner(); state.scan_open = false; state.scan_msg = ""; render(); } });
+  document.querySelectorAll("[data-scan-mode]").forEach(btn => btn.addEventListener("click", () => {
+    if (state.scan_mode !== btn.dataset.scanMode) { stop_scan_scanner(); state.scan_mode = btn.dataset.scanMode; state.scan_msg = ""; render(); }
+  }));
+  const scan_input = document.getElementById("scan-input");
+  if (scan_input) scan_input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); process_scan(scan_input.value); } });
 
   // Range tabs
   document.querySelectorAll("[data-range]").forEach(btn => btn.addEventListener("click", () => {
