@@ -163,7 +163,8 @@
        regardless of printer driver quirks (flexbox + aspect-ratio were unreliable). */
     @media print {
       body.mode-single { margin: 0; padding: 0; }
-      body.mode-single .qr-grid { display: block; gap: 0; padding: 0; margin: 0; text-align: left; }
+      body.mode-single .sheet { margin: 0 !important; padding: 0 !important; max-width: none !important; width: 104mm !important; }
+      body.mode-single .qr-grid { display: block; gap: 0; padding: 0; margin: 0; text-align: left; width: 104mm !important; }
       body.mode-single .qr-tile { border: none !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; width: 104mm !important; page-break-after: always; break-after: page; }
       body.mode-single .qr-tile:last-child { page-break-after: auto; break-after: auto; }
 
@@ -182,20 +183,20 @@
         overflow: hidden;
       }
 
-      /* QR: 75mm square, centred horizontally, sitting in the upper portion of the label */
+      /* QR: 62mm square, well inside the 104mm width (21mm clear each side) */
       body.mode-single .label-frame .qr-canvas {
         position: absolute;
-        left: 17mm;        /* (104 - 70) / 2 — centred with 17mm clear each side */
-        top: 12mm;
-        width: 70mm;
-        height: 70mm;
+        left: 21mm;        /* (104 - 62) / 2 */
+        top: 14mm;
+        width: 62mm;
+        height: 62mm;
         display: block;
       }
       body.mode-single .label-frame.fp-mode .qr-canvas {
-        left: 7mm;          /* (104 - 90) / 2 */
-        top: 27.5mm;
-        width: 90mm;
-        height: 90mm;
+        left: 12mm;         /* (104 - 80) / 2 */
+        top: 30mm;
+        width: 80mm;
+        height: 80mm;
       }
       /* Force the QR image inside to fill its container */
       body.mode-single .label-frame .qr-canvas img,
@@ -211,13 +212,13 @@
         position: absolute;
         left: 0;
         right: 0;
-        top: 100mm;        /* QR ends at 12 + 75 = 87mm; gap, then text */
+        top: 88mm;
         text-align: center;
-        font-size: 22pt;
+        font-size: 20pt;
         font-weight: 700;
         color: #1a1a1a;
         line-height: 1.1;
-        padding: 0 4mm;
+        padding: 0 6mm;
         margin: 0;
       }
       /* Secondary text — smaller, below primary */
@@ -225,12 +226,12 @@
         position: absolute;
         left: 0;
         right: 0;
-        top: 118mm;
+        top: 106mm;
         text-align: center;
-        font-size: 13pt;
+        font-size: 12pt;
         color: #1a1a1a;
         line-height: 1.1;
-        padding: 0 4mm;
+        padding: 0 6mm;
         margin: 0;
       }
 
