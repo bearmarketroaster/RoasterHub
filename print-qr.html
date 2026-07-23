@@ -163,15 +163,18 @@
        regardless of printer driver quirks (flexbox + aspect-ratio were unreliable). */
     @media print {
       body.mode-single { margin: 0; padding: 0; }
-      body.mode-single .qr-grid { display: block; gap: 0; padding: 0; margin: 0; }
-      body.mode-single .qr-tile { border: none !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; page-break-after: always; break-after: page; }
+      body.mode-single .qr-grid { display: block; gap: 0; padding: 0; margin: 0; text-align: left; }
+      body.mode-single .qr-tile { border: none !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; width: 104mm !important; page-break-after: always; break-after: page; }
       body.mode-single .qr-tile:last-child { page-break-after: auto; break-after: auto; }
 
-      /* The label-frame becomes a 105×150mm canvas with absolutely-positioned children */
+      /* The label-frame becomes a 104×150mm canvas, pinned to the top-left of the page
+         (matches the ZD230's 104mm printhead). Left-pinning means that even if the browser
+         renders onto an oversized page, the whole label stays inside the printable strip. */
       body.mode-single .label-frame {
         position: relative;
-        width: 105mm;
+        width: 104mm;
         height: 150mm;
+        margin: 0 !important;
         aspect-ratio: auto;
         border: none !important;
         padding: 0 !important;
@@ -182,17 +185,17 @@
       /* QR: 75mm square, centred horizontally, sitting in the upper portion of the label */
       body.mode-single .label-frame .qr-canvas {
         position: absolute;
-        left: 15mm;        /* (105 - 75) / 2 */
+        left: 17mm;        /* (104 - 70) / 2 — centred with 17mm clear each side */
         top: 12mm;
-        width: 75mm;
-        height: 75mm;
+        width: 70mm;
+        height: 70mm;
         display: block;
       }
       body.mode-single .label-frame.fp-mode .qr-canvas {
-        left: 5mm;          /* (105 - 95) / 2 */
-        top: 27.5mm;        /* (150 - 95) / 2 — vertical-centre for FP since no descriptor */
-        width: 95mm;
-        height: 95mm;
+        left: 7mm;          /* (104 - 90) / 2 */
+        top: 27.5mm;
+        width: 90mm;
+        height: 90mm;
       }
       /* Force the QR image inside to fill its container */
       body.mode-single .label-frame .qr-canvas img,
@@ -350,7 +353,7 @@
       // (Reliable in Chrome, unlike the named @page rules that broke.)
       function apply_print_page_size() {
         const PAGE = {
-          single: "@page { size: 105mm 150mm; margin: 0; }",
+          single: "@page { size: 104mm 150mm; margin: 0; }",
           sheet:  "@page { size: A4; margin: 10mm; }",
           a4_21:  "@page { size: A4 portrait; margin: 0; }",
         };
