@@ -238,10 +238,9 @@
     }
     /* The @page rule must be at the top level of the stylesheet (not nested in @media block in some browsers) */
     @page single-label { size: 105mm 150mm; margin: 0; }
-    /* When mode-single class is on body, use the single-label page rule */
-    @media print {
-      body.mode-single { page: single-label; }
-    }
+    /* Page size is set dynamically per mode via JS (apply_print_page_size).
+       Named @page + the `page:` property is unreliable in Chrome and was causing
+       single labels to fall back to A4 (clipping the right side). */
 
     /* Sheet print: A4 default, tiles stack naturally */
     @media print {
@@ -249,16 +248,12 @@
       body.mode-sheet.print-single .qr-tile:not(.printing-only) { display: none !important; }
       body.mode-sheet .pdf-btn { display: none !important; }
     }
-    @page sheet { margin: 10mm; }
-    @media print {
-      body.mode-sheet { page: sheet; }
-    }
 
     /* A4 21-up print: page is A4 portrait, sheet sized to fit exactly.
        Hide the screen-only dashed borders on labels. */
     @page a4-21 { size: A4 portrait; margin: 0; }
     @media print {
-      body.mode-a4_21 { page: a4-21; margin: 0; padding: 0; background: #fff; }
+      body.mode-a4_21 { margin: 0; padding: 0; background: #fff; }
       body.mode-a4_21 .sheet { padding: 0 !important; }
       body.mode-a4_21 .a4-sheet { margin: 0 !important; box-shadow: none !important; page-break-after: always; break-after: page; }
       body.mode-a4_21 .a4-sheet:last-child { page-break-after: auto; break-after: auto; }
@@ -351,7 +346,21 @@
       document.getElementById("go-back").addEventListener("click", () => {
         window.location.href = "settings.html";
       });
-      document.getElementById("print-btn").addEventListener("click", () => window.print());
+      // Set a plain @page size for the active mode right before printing.
+      // (Reliable in Chrome, unlike the named @page rules that broke.)
+      function apply_print_page_size() {
+        const PAGE = {
+          single: "@page { size: 105mm 150mm; margin: 0; }",
+          sheet:  "@page { size: A4; margin: 10mm; }",
+          a4_21:  "@page { size: A4 portrait; margin: 0; }",
+        };
+        let st = document.getElementById("dynamic-page-size");
+        if (!st) { st = document.createElement("style"); st.id = "dynamic-page-size"; document.head.appendChild(st); }
+        st.textContent = PAGE[state.mode] || "@page { size: A4; margin: 10mm; }";
+      }
+      window.addEventListener("beforeprint", apply_print_page_size);  // covers Ctrl+P, Ctrl+Shift+P, and the button
+      apply_print_page_size();
+      document.getElementById("print-btn").addEventListener("click", () => { apply_print_page_size(); window.print(); });
 
       // Mode toggle
       document.querySelectorAll("[data-mode]").forEach(btn => btn.addEventListener("click", () => {
