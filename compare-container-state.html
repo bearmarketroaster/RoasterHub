@@ -112,23 +112,28 @@ async function js_container_state() {
   const live_dispatch_ids = [...new Set(dbk.filter(d=>live_bucket_ids.has(d.bucket_id)).map(d=>d.dispatch_id).filter(Boolean))];
   const D = "*, dispatch_lines(*)";
   const since = local_date_str(1);
-  const batches = await Promise.all([
-    fetch_pages(() => supabaseClient.from("dispatches").select(D)
-      .or(`confirmed_at.is.null,date.gte.${since}`).order("id",{ascending:true})),
-    ...chunk_list(current_fills,50).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D)
-      .in("fill_id",ids).order("id",{ascending:true}))),
-    ...chunk_list(live_dispatch_ids,100).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D)
-      .in("id",ids).order("id",{ascending:true}))),
+  // packed_kg comes from dispatch_LINES selected by the line's own fill_id — never via the parent
+  // dispatch's fill_id, which misses lines riding on a dispatch tagged to another drum.
+  const [line_batches] = await Promise.all([
+    Promise.all(chunk_list(current_fills,100).map(ids => fetch_pages(() =>
+      supabaseClient.from("dispatch_lines").select("id, container_id, fill_id, kg")
+        .in("fill_id",ids).order("id",{ascending:true})))),
+    Promise.all([
+      fetch_pages(() => supabaseClient.from("dispatches").select(D)
+        .or(`confirmed_at.is.null,date.gte.${since}`).order("id",{ascending:true})),
+      ...chunk_list(live_dispatch_ids,100).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D)
+        .in("id",ids).order("id",{ascending:true}))),
+    ]),
   ]);
-  const by_id = new Map();
-  batches.forEach(rows => rows.forEach(d => { if(!by_id.has(d.id)) by_id.set(d.id,d); }));
-  const dispatches = [...by_id.values()].map(d => ({...d, lines: d.dispatch_lines||[]}));
-
-  dispatches.forEach(d => (d.lines||[]).forEach(l => {
+  const seen_lines = new Set(), packed_lines = [];
+  line_batches.forEach(rows => rows.forEach(l => {
+    if (!seen_lines.has(l.id)) { seen_lines.add(l.id); packed_lines.push(l); }
+  }));
+  packed_lines.forEach(l => {
     if (!l.container_id) return;
     const c = containers.find(x => x.id === l.container_id);
     if (c && c.fill_id && l.fill_id === c.fill_id) c.packed_kg = (c.packed_kg||0) + (Number(l.kg)||0);
-  }));
+  });
 
   containers.forEach(c => { c.held_kg = 0; });
   buckets.forEach(b => {

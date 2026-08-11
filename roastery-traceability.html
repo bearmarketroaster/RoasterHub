@@ -340,15 +340,6 @@ function chunk_list(arr, size) {
   return out;
 }
 
-// A query that comes back with exactly 1000 rows has almost certainly hit Supabase's default cap and is
-// silently truncating. Shout about it in the console rather than quietly returning partial data.
-function warn_if_capped(label, data) {
-  if (data && data.length === 1000) {
-    console.warn(`[load_data] "${label}" returned exactly 1000 rows — probably truncated by the row cap.`);
-  }
-  return data || [];
-}
-
 // Fetch EVERY row matching a query, paging past Supabase's 1000-row cap. `build` is a factory because a
 // query builder can't be reused across requests. In the normal case (under 1000 rows) this costs exactly
 // one round trip — the loop exits on the first short page — so there's no penalty for the safety.
@@ -386,30 +377,45 @@ function local_date_str(days_back) {
 // while still truncating the old dispatches that consumers 2 and 3 genuinely need.
 async function load_data() {
   // ── PHASE 1: the working set. All small, all independent, one parallel batch.
+  // Every one of these pages past the 1000-row cap too. Most are small and bounded by physical reality
+  // (coffees, drums, shops), but roast_sessions grows with every roast and dispatch_buckets with every
+  // bucket sent out — both reach 1000 eventually. Under 1000 rows this is still one round trip each.
+  // Each carries a deterministic tiebreaker on id: paging without one can overlap or skip rows. The
+  // PRIMARY sort is unchanged, because downstream logic depends on it — roast_sessions must stay
+  // newest-first (first session seen per drum = its current fill) and dispatch_buckets newest-scan-first.
   const [
-    { data: coffees_data },
-    { data: fp_codes_data },
-    { data: fp_assign_data },
-    { data: shop_mappings_data },
-    { data: buckets_raw },
-    { data: roast_sessions_raw },
-    { data: container_rows },
-    { data: dispatch_buckets_raw },
+    coffees_data,
+    fp_codes_data,
+    fp_assign_data,
+    shop_mappings_data,
+    buckets_data,
+    roast_sessions,
+    container_rows,
+    dispatch_buckets_data,
   ] = await Promise.all([
-    supabaseClient.from("coffees").select("id, name, retired_at").order("name"),
-    supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
-    supabaseClient.from("fp_assignments").select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)"),
-    supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind"),
+    fetch_pages("coffees", () => supabaseClient.from("coffees")
+      .select("id, name, retired_at").order("name")),
+    fetch_pages("fp_codes", () => supabaseClient.from("fp_codes")
+      .select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code")),
+    fetch_pages("fp_assignments", () => supabaseClient.from("fp_assignments")
+      .select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)")
+      .order("id", { ascending: true })),
+    fetch_pages("shop_mappings", () => supabaseClient.from("shop_mappings")
+      .select("parsed_name, master_name, shop_qr_id, kind").order("id", { ascending: true })),
     // Only the columns this page reads — condition/filled_at/notes/label_printed_at are write-only here.
-    supabaseClient.from("buckets").select("id, name, coffee, status, retired_at, fill_id, container_id").order("created_at", { ascending: false }),
-    supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false }),
-    supabaseClient.from("containers").select("id, status, status_changed_at, retired_at").is("retired_at", null),
-    supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false }),
+    fetch_pages("buckets", () => supabaseClient.from("buckets")
+      .select("id, name, coffee, status, retired_at, fill_id, container_id")
+      .order("created_at", { ascending: false }).order("id", { ascending: true })),
+    fetch_pages("roast_sessions", () => supabaseClient.from("roast_sessions")
+      .select("id, coffee, date, container_id, roasted_weight, fill_id")
+      .order("date", { ascending: false }).order("id", { ascending: true })),
+    fetch_pages("containers", () => supabaseClient.from("containers")
+      .select("id, status, status_changed_at, retired_at").is("retired_at", null)
+      .order("id", { ascending: true })),
+    fetch_pages("dispatch_buckets", () => supabaseClient.from("dispatch_buckets")
+      .select("bucket_id, dispatch_id, scanned_at")
+      .order("scanned_at", { ascending: false }).order("id", { ascending: true })),
   ]);
-
-  const buckets_data          = warn_if_capped("buckets", buckets_raw);
-  const roast_sessions        = warn_if_capped("roast_sessions", roast_sessions_raw);
-  const dispatch_buckets_data = warn_if_capped("dispatch_buckets", dispatch_buckets_raw);
 
   // Load all coffees + FPs (incl. retired) — used for historical lookups so dispatches that reference
   // a now-retired FP still resolve to the right coffee name.
@@ -510,22 +516,34 @@ async function load_data() {
   // Every one of these pages past the 1000-row cap, so none of them can silently truncate no matter how
   // much history builds up. Clause (2) matters most: if it ever came back short, packed_kg would read low,
   // remaining would read high, and a drum could be overpacked. .order("id") makes the paging deterministic.
-  const batches = await Promise.all([
-    // (1) pending + recent, for the Deliveries tab, badges and the pending-per-container/shop lookups
-    fetch_pages("dispatches:pending+recent", () =>
-      supabaseClient.from("dispatches").select(D_SELECT)
-        .or(`confirmed_at.is.null,date.gte.${since}`).order("id", { ascending: true })),
-    // (2) every dispatch against a drum's CURRENT fill, at any age — this is what packed_kg sums
-    ...chunk_list(current_fills, 50).map((ids, n) =>
-      fetch_pages(`dispatches:current_fills[${n}]`, () =>
+  // packed_kg sums dispatch_LINES, and a dispatch row carries only ONE primary fill_id while its lines
+  // can span several drums. So the lines are fetched directly by their own fill_id — filtering the parent
+  // dispatch instead silently dropped any line that rode along on a dispatch belonging to another drum,
+  // which made packed_kg read low and remaining read high. Lines are narrow rows with no nested join,
+  // so this is cheaper than fetching the dispatches was.
+  const [line_batches, dispatch_batches] = await Promise.all([
+    Promise.all(chunk_list(current_fills, 100).map((ids, n) =>
+      fetch_pages(`dispatch_lines:current_fills[${n}]`, () =>
+        supabaseClient.from("dispatch_lines").select("id, container_id, fill_id, kg")
+          .in("fill_id", ids).order("id", { ascending: true })))),
+    Promise.all([
+      // (1) pending + recent, for the Deliveries tab, badges and the pending-per-container/shop lookups
+      fetch_pages("dispatches:pending+recent", () =>
         supabaseClient.from("dispatches").select(D_SELECT)
-          .in("fill_id", ids).order("id", { ascending: true }))),
-    // (3) the dispatches live buckets went out on, at any age — drives at-shop vs in-transit
-    ...chunk_list(live_dispatch_ids, 100).map((ids, n) =>
-      fetch_pages(`dispatches:live_buckets[${n}]`, () =>
-        supabaseClient.from("dispatches").select(D_SELECT)
-          .in("id", ids).order("id", { ascending: true }))),
+          .or(`confirmed_at.is.null,date.gte.${since}`).order("id", { ascending: true })),
+      // (2) the dispatches live buckets went out on, at any age — drives at-shop vs in-transit
+      ...chunk_list(live_dispatch_ids, 100).map((ids, n) =>
+        fetch_pages(`dispatches:live_buckets[${n}]`, () =>
+          supabaseClient.from("dispatches").select(D_SELECT)
+            .in("id", ids).order("id", { ascending: true }))),
+    ]),
   ]);
+  const packed_lines = [];
+  const seen_line_ids = new Set();
+  line_batches.forEach(rows => rows.forEach(l => {
+    if (!seen_line_ids.has(l.id)) { seen_line_ids.add(l.id); packed_lines.push(l); }
+  }));
+  const batches = dispatch_batches;
   const dispatch_by_id = new Map();
   batches.forEach(rows => {
     rows.forEach(d => { if (!dispatch_by_id.has(d.id)) dispatch_by_id.set(d.id, d); });
@@ -544,14 +562,14 @@ async function load_data() {
     }
   });
 
-  // Compute packed_kg per container from dispatch_lines (line-level for accuracy)
-  state.dispatches.forEach(d => {
-    (d.lines||[]).forEach(l => {
-      if (!l.container_id) return;
-      const c = state.containers.find(c => c.id === l.container_id);
-      // Only dispatches from the drum's CURRENT fill count against it; prior fills are history.
-      if (c && c.fill_id && l.fill_id === c.fill_id) c.packed_kg = (c.packed_kg||0) + (Number(l.kg)||0);
-    });
+  // Compute packed_kg per container from the dispatch_lines fetched above. Sourced from the lines
+  // themselves rather than from state.dispatches, so a line is never missed because its parent dispatch
+  // was tagged with a different drum's fill_id.
+  packed_lines.forEach(l => {
+    if (!l.container_id) return;
+    const c = state.containers.find(c => c.id === l.container_id);
+    // Only lines from the drum's CURRENT fill count against it; prior fills are history.
+    if (c && c.fill_id && l.fill_id === c.fill_id) c.packed_kg = (c.packed_kg||0) + (Number(l.kg)||0);
   });
 
   // Compute held-in-buckets kg per container: filled buckets that haven't been dispatched yet
