@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>v_container_state — equivalence check</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<style>
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:#f4f2ed; color:#1a1a1a; margin:0; padding:24px; }
+  .wrap { max-width:1200px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .hint { color:#666; font-size:13px; margin:0 0 18px; }
+  .card { background:#fff; border:1px solid #e8e6e1; border-radius:12px; padding:18px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:#666; border-bottom:1px solid #e8e6e1; padding:7px 5px; }
+  td { padding:7px 5px; border-bottom:1px solid #f0eee9; font-variant-numeric:tabular-nums; }
+  td.n { text-align:right; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  tr.bad { background:#fdf5f5; }
+  tr.bad td { color:#dc2626; font-weight:700; }
+  .verdict { font-size:17px; font-weight:800; padding:14px; border-radius:10px; margin-bottom:14px; }
+  .ok { background:#f0f7f2; color:#15803d; border:1px solid #bfe0cb; }
+  .no { background:#fdf5f5; color:#dc2626; border:1px solid #f3d4d4; }
+  .warn { background:#fff7ed; border:1px solid #f5d9b8; border-radius:8px; padding:10px 12px; font-size:13px; margin-top:12px; }
+  button { background:#1a1a1a; color:#fff; border:0; border-radius:8px; padding:12px 20px; font-size:15px; font-weight:600; cursor:pointer; }
+  #status { font-size:14px; color:#666; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>v_container_state — equivalence check</h1>
+  <p class="hint">Runs the live JS container math and the new SQL view against the same data and diffs every field, per drum. Read-only — writes nothing. Nothing in the app uses the view yet.</p>
+  <div class="card">
+    <div id="status">Checking session…</div>
+    <div id="verdict"></div>
+    <div id="out"></div>
+  </div>
+  <div class="card"><button id="again">Run again</button></div>
+</div>
+
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const EPS = 0.005;   // kg tolerance: JS accumulates floats, SQL numeric is exact decimal
+
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function chunk_list(a,n){ const o=[]; for(let i=0;i<a.length;i+=n) o.push(a.slice(i,i+n)); return o; }
+function local_date_str(back){ const d=new Date(); if(back) d.setDate(d.getDate()-back);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+
+async function fetch_pages(build){
+  const PAGE=1000, out=[];
+  for(let p=0;p<25;p++){
+    const {data,error}=await build().range(p*PAGE,p*PAGE+PAGE-1);
+    if(error){ console.error(error.message); break; }
+    if(!data||!data.length) break;
+    out.push(...data);
+    if(data.length<PAGE) break;
+  }
+  return out;
+}
+
+// ── The JS pipeline, copied faithfully from load_data() ──────────────────────
+async function js_container_state() {
+  const [buckets, roast_sessions, container_rows] = await Promise.all([
+    fetch_pages(() => supabaseClient.from("buckets")
+      .select("id, name, coffee, status, retired_at, fill_id, container_id")
+      .order("created_at",{ascending:false}).order("id",{ascending:true})),
+    fetch_pages(() => supabaseClient.from("roast_sessions")
+      .select("id, coffee, date, container_id, roasted_weight, fill_id")
+      .order("date",{ascending:false}).order("id",{ascending:true})),
+    fetch_pages(() => supabaseClient.from("containers")
+      .select("id, status, status_changed_at, retired_at").is("retired_at",null)
+      .order("id",{ascending:true})),
+  ]);
+
+  const status_map = {};
+  container_rows.forEach(c => { status_map[c.id] = { status: c.status || "waiting", status_changed_at: c.status_changed_at }; });
+
+  const container_map = {};
+  roast_sessions.forEach(s => {
+    if (!s.container_id) return;
+    if (!container_map[s.container_id]) container_map[s.container_id] = {
+      id: s.container_id, coffee: s.coffee, fill_id: s.fill_id,
+      total_roasted: 0, packed_kg: 0,
+      latest_roast_date: s.date, fill_start_date: null,
+      status: status_map[s.container_id]?.status || "waiting",
+    };
+    const cm = container_map[s.container_id];
+    if (s.fill_id === cm.fill_id) {
+      cm.total_roasted += Number(s.roasted_weight)||0;
+      if (s.date && (!cm.fill_start_date || s.date < cm.fill_start_date)) cm.fill_start_date = s.date;
+    }
+  });
+  container_rows.forEach(c => {
+    if (!container_map[c.id]) container_map[c.id] = {
+      id: c.id, coffee: null, fill_id: null,
+      total_roasted: 0, packed_kg: 0,
+      latest_roast_date: null, fill_start_date: null,
+      status: c.status || "empty",
+    };
+  });
+  const containers = Object.values(container_map);
+
+  // dispatches, loaded exactly as the app loads them
+  const current_fills = [...new Set(containers.map(c => c.fill_id).filter(Boolean))];
+  const live_bucket_ids = new Set(buckets.filter(b => b.status==="filled"||b.status==="dispatched").map(b=>b.id));
+  const dbk = await fetch_pages(() => supabaseClient.from("dispatch_buckets")
+    .select("bucket_id, dispatch_id, scanned_at")
+    .order("scanned_at",{ascending:false}).order("id",{ascending:true}));
+  const live_dispatch_ids = [...new Set(dbk.filter(d=>live_bucket_ids.has(d.bucket_id)).map(d=>d.dispatch_id).filter(Boolean))];
+  const D = "*, dispatch_lines(*)";
+  const since = local_date_str(1);
+  const batches = await Promise.all([
+    fetch_pages(() => supabaseClient.from("dispatches").select(D)
+      .or(`confirmed_at.is.null,date.gte.${since}`).order("id",{ascending:true})),
+    ...chunk_list(current_fills,50).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D)
+      .in("fill_id",ids).order("id",{ascending:true}))),
+    ...chunk_list(live_dispatch_ids,100).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D)
+      .in("id",ids).order("id",{ascending:true}))),
+  ]);
+  const by_id = new Map();
+  batches.forEach(rows => rows.forEach(d => { if(!by_id.has(d.id)) by_id.set(d.id,d); }));
+  const dispatches = [...by_id.values()].map(d => ({...d, lines: d.dispatch_lines||[]}));
+
+  dispatches.forEach(d => (d.lines||[]).forEach(l => {
+    if (!l.container_id) return;
+    const c = containers.find(x => x.id === l.container_id);
+    if (c && c.fill_id && l.fill_id === c.fill_id) c.packed_kg = (c.packed_kg||0) + (Number(l.kg)||0);
+  }));
+
+  containers.forEach(c => { c.held_kg = 0; });
+  buckets.forEach(b => {
+    if (b.status !== "filled" || !b.container_id) return;
+    const c = containers.find(x => x.id === b.container_id);
+    if (c && c.fill_id && b.fill_id === c.fill_id) c.held_kg = (c.held_kg||0) + 5;
+  });
+  containers.forEach(c => { c.remaining = Math.max(0, c.total_roasted - (c.packed_kg||0) - (c.held_kg||0)); });
+
+  // third opinion: sum dispatch_lines directly, bypassing the dispatch filter entirely.
+  // If this disagrees with packed_kg above, the dispatch filter is missing rows.
+  const direct = {};
+  const all_lines = await fetch_pages(() => supabaseClient.from("dispatch_lines")
+    .select("container_id, fill_id, kg").order("id",{ascending:true}));
+  containers.forEach(c => {
+    if (!c.fill_id) { direct[c.id] = 0; return; }
+    direct[c.id] = all_lines
+      .filter(l => l.container_id === c.id && l.fill_id === c.fill_id)
+      .reduce((a,l) => a + num(l.kg), 0);
+  });
+
+  return { containers, direct };
+}
+
+async function run() {
+  const status = document.getElementById("status");
+  const out = document.getElementById("out");
+  const verdict = document.getElementById("verdict");
+  out.innerHTML = ""; verdict.innerHTML = "";
+
+  const { data:{ session } } = await supabaseClient.auth.getSession();
+  if (!session) { status.innerHTML = 'Not logged in — open <span class="mono">login.html</span> first, then reload.'; return; }
+  status.textContent = "Running both pipelines…";
+
+  const [{ containers: js, direct }, view_res] = await Promise.all([
+    js_container_state(),
+    fetch_pages(() => supabaseClient.from("v_container_state").select("*").order("id",{ascending:true})),
+  ]);
+
+  if (!view_res || !view_res.length) {
+    status.textContent = "";
+    verdict.className = "verdict no";
+    verdict.textContent = "The view returned nothing — has sql/v_container_state.sql been run yet?";
+    return;
+  }
+
+  const view = {}; view_res.forEach(r => { view[r.id] = r; });
+  const ids = [...new Set([...js.map(c=>c.id), ...Object.keys(view)])].sort();
+
+  const FIELDS = [
+    ["coffee",            "text"],
+    ["fill_id",           "text"],
+    ["status",            "text"],
+    ["latest_roast_date", "text"],
+    ["fill_start_date",   "text"],
+    ["total_roasted",     "kg"],
+    ["packed_kg",         "kg"],
+    ["held_kg",           "kg"],
+    ["remaining",         "kg"],
+  ];
+
+  const rows = [];
+  let mismatches = 0, drift = 0, filter_gaps = 0;
+
+  ids.forEach(id => {
+    const a = js.find(c => c.id === id), b = view[id];
+    const cells = [], bad = [];
+    if (!a) { bad.push("missing from JS"); }
+    if (!b) { bad.push("missing from view"); }
+    FIELDS.forEach(([f, kind]) => {
+      const av = a ? a[f] : null, bv = b ? b[f] : null;
+      let same, disp;
+      if (kind === "kg") {
+        const an = num(av), bn = num(bv);
+        same = Math.abs(an - bn) <= EPS;
+        if (!same) bad.push(f);
+        else if (an !== bn) drift++;
+        disp = `${an.toFixed(2)} / ${bn.toFixed(2)}`;
+      } else {
+        const as = av == null ? "—" : String(av), bs = bv == null ? "—" : String(bv);
+        same = as === bs;
+        if (!same) bad.push(f);
+        disp = as === bs ? as : `${as} / ${bs}`;
+      }
+      cells.push({ disp, same });
+    });
+    // dispatch-filter sanity: JS packed_kg vs a direct dispatch_lines sum
+    const gap = a ? Math.abs(num(a.packed_kg) - num(direct[id])) > EPS : false;
+    if (gap) filter_gaps++;
+    if (bad.length) mismatches++;
+    rows.push({ id, cells, bad, gap, direct: a ? num(direct[id]) : 0 });
+  });
+
+  const bad_rows = rows.filter(r => r.bad.length || r.gap);
+  verdict.className = "verdict " + (mismatches === 0 && filter_gaps === 0 ? "ok" : "no");
+  verdict.textContent = mismatches === 0 && filter_gaps === 0
+    ? `EQUIVALENT — ${ids.length} drums, every field matches. Safe to migrate.`
+    : `${mismatches} drum(s) differ, ${filter_gaps} dispatch-filter gap(s). Do NOT migrate — send this to Claude.`;
+
+  out.innerHTML = `
+    <p class="hint" style="margin:14px 0 6px">Each cell shows <strong>JS / view</strong>. A single value means they agree.
+    ${bad_rows.length ? " Only differing drums are listed." : " All drums shown."}</p>
+    <table>
+      <thead><tr><th>Drum</th>${FIELDS.map(([f])=>`<th class="${f.endsWith("kg")||f==="total_roasted"||f==="remaining"?"n":""}">${esc(f)}</th>`).join("")}<th class="n">lines direct</th></tr></thead>
+      <tbody>
+        ${(bad_rows.length ? bad_rows : rows).map(r => `<tr class="${r.bad.length||r.gap?"bad":""}">
+          <td class="mono">${esc(r.id)}</td>
+          ${r.cells.map(c => `<td class="${c.same?"":"n"}" style="${c.same?"":"font-weight:700"}">${esc(c.disp)}</td>`).join("")}
+          <td class="n">${r.direct.toFixed(2)}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+    ${drift ? `<div class="warn"><strong>${drift} value(s) differ by less than ${EPS}kg</strong> — float accumulation in JS versus exact decimal in SQL. Counted as equivalent; the view is the more accurate of the two.</div>` : ""}
+    ${filter_gaps ? `<div class="warn"><strong>Dispatch-filter gap:</strong> JS packed_kg disagrees with a direct dispatch_lines sum on ${filter_gaps} drum(s). That points at the dispatch load missing rows, not at the view.</div>` : ""}`;
+  status.textContent = `Done — ${ids.length} drums compared.`;
+}
+
+document.getElementById("again").addEventListener("click", run);
+run();
+</script>
+</body>
+</html>
