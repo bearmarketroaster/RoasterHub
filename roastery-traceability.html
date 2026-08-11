@@ -333,31 +333,66 @@ async function render_qr(el, value, size=140) {
   new window.QRCode(el,{text:value,width:size,height:size,colorDark:"#1a1a1a",colorLight:"#fff",correctLevel:window.QRCode.CorrectLevel.M});
 }
 
+// Split an array into fixed-size chunks so a long .in(...) list can't overflow the request URL.
+function chunk_list(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// A query that comes back with exactly 1000 rows has almost certainly hit Supabase's default cap and is
+// silently truncating. Shout about it in the console rather than quietly returning partial data.
+function warn_if_capped(label, data) {
+  if (data && data.length === 1000) {
+    console.warn(`[load_data] "${label}" returned exactly 1000 rows — probably truncated by the row cap.`);
+  }
+  return data || [];
+}
+
+// Local calendar date (not UTC) as YYYY-MM-DD, offset by `days_back`.
+function local_date_str(days_back) {
+  const d = new Date();
+  if (days_back) d.setDate(d.getDate() - days_back);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+// ── DATA LOAD ────────────────────────────────────────────────────────────────
+// `dispatches` is the only append-only ledger here: one row per pack, forever. Every other table is a
+// small working set (drums in rotation, buckets in circulation, live roasts). So this loads in two
+// phases: the working set first, then only the dispatches the page actually consumes, derived from it.
+//
+// Exactly three things read state.dispatches, and none of them wants deep history:
+//   1. Deliveries tab / badges / pending lookups  → unconfirmed (any age) + today's
+//   2. packed_kg per drum                         → lines whose fill_id is a drum's CURRENT fill
+//   3. Bucket at-shop vs in-transit               → the dispatch a live bucket went out on
+// Fetching the newest 1000 by date served none of those properly: it pulled ~980 rows the UI discarded,
+// while still truncating the old dispatches that consumers 2 and 3 genuinely need.
 async function load_data() {
-  // All nine fetches below are independent of each other — none needs a previous one's result — so they
-  // go out in one parallel batch. Sequentially this was nine network round trips every reload, which is
-  // what made saves feel like they hung. Processing order below is unchanged.
+  // ── PHASE 1: the working set. All small, all independent, one parallel batch.
   const [
     { data: coffees_data },
     { data: fp_codes_data },
     { data: fp_assign_data },
     { data: shop_mappings_data },
-    { data: buckets_data },
-    { data: roast_sessions },
+    { data: buckets_raw },
+    { data: roast_sessions_raw },
     { data: container_rows },
-    { data: dispatches },
-    { data: dispatch_buckets_data },
+    { data: dispatch_buckets_raw },
   ] = await Promise.all([
     supabaseClient.from("coffees").select("id, name, retired_at").order("name"),
     supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
     supabaseClient.from("fp_assignments").select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)"),
     supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind"),
-    supabaseClient.from("buckets").select("*").order("created_at", { ascending: false }),
+    // Only the columns this page reads — condition/filled_at/notes/label_printed_at are write-only here.
+    supabaseClient.from("buckets").select("id, name, coffee, status, retired_at, fill_id, container_id").order("created_at", { ascending: false }),
     supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false }),
     supabaseClient.from("containers").select("id, status, status_changed_at, retired_at").is("retired_at", null),
-    supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date",{ascending:false}),
     supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false }),
   ]);
+
+  const buckets_data          = warn_if_capped("buckets", buckets_raw);
+  const roast_sessions        = warn_if_capped("roast_sessions", roast_sessions_raw);
+  const dispatch_buckets_data = warn_if_capped("dispatch_buckets", dispatch_buckets_raw);
 
   // Load all coffees + FPs (incl. retired) — used for historical lookups so dispatches that reference
   // a now-retired FP still resolve to the right coffee name.
@@ -439,7 +474,42 @@ async function load_data() {
   });
   state.containers = Object.values(container_map);
 
-  state.dispatches=(dispatches||[]).map(d=>({...d,lines:d.dispatch_lines||[]}));
+  // ── PHASE 2: only the dispatches the three consumers above need, derived from the working set.
+  const current_fills = [...new Set(state.containers.map(c => c.fill_id).filter(Boolean))];
+  // Any bucket holding coffee or out at a shop, retired or not. Retired ones aren't shown in the Buckets
+  // tab today, but excluding them here would make _bucket_to_dispatch quietly incomplete for any future
+  // consumer — and including them costs a handful of ids.
+  const live_bucket_ids = new Set(
+    buckets_data.filter(b => b.status === "filled" || b.status === "dispatched").map(b => b.id)
+  );
+  const live_dispatch_ids = [...new Set(
+    dispatch_buckets_data.filter(db => live_bucket_ids.has(db.bucket_id)).map(db => db.dispatch_id).filter(Boolean)
+  )];
+
+  const D_SELECT = "*, dispatch_lines(*)";
+  // One day of slack on the date bound so nothing near a midnight/UTC boundary can be missed. Extra rows
+  // are harmless — the Deliveries tab still filters to its own definition of "today".
+  const since = local_date_str(1);
+  const requests = [
+    // (1) pending + recent, for the Deliveries tab, badges and the pending-per-container/shop lookups
+    supabaseClient.from("dispatches").select(D_SELECT).or(`confirmed_at.is.null,date.gte.${since}`),
+    // (2) every dispatch against a drum's CURRENT fill, at any age — this is what packed_kg sums
+    ...chunk_list(current_fills, 100).map(ids =>
+      supabaseClient.from("dispatches").select(D_SELECT).in("fill_id", ids)),
+    // (3) the dispatches live buckets went out on, at any age — drives at-shop vs in-transit
+    ...chunk_list(live_dispatch_ids, 100).map(ids =>
+      supabaseClient.from("dispatches").select(D_SELECT).in("id", ids)),
+  ];
+  const results = await Promise.all(requests);
+  const dispatch_by_id = new Map();
+  results.forEach((r, i) => {
+    warn_if_capped(`dispatches[${i}]`, r.data);
+    (r.data || []).forEach(d => { if (!dispatch_by_id.has(d.id)) dispatch_by_id.set(d.id, d); });
+  });
+  // Same newest-first order the single query used to return, so downstream ordering is unchanged.
+  state.dispatches = [...dispatch_by_id.values()]
+    .sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.id||"").localeCompare(a.id||""))
+    .map(d => ({ ...d, lines: d.dispatch_lines || [] }));
 
   // Build a bucket_id → dispatch lookup so we can derive in-transit vs at-shop status
   state._bucket_to_dispatch = {};
@@ -2547,12 +2617,17 @@ function attach_listeners() {
         const c = state.containers.find(x => x.id === cid);
         return c && (c.remaining || 0) <= 0.01;
       });
-      // Only pay for a second reload if a drum actually changed status.
       if (to_empty.length) {
+        const now_iso = new Date().toISOString();
         await supabaseClient.from("containers")
-          .update({ status: "empty", status_changed_at: new Date().toISOString() })
+          .update({ status: "empty", status_changed_at: now_iso })
           .in("id", to_empty);
-        await load_data();
+        // Status is the only thing that changed, and we know exactly what we set it to — so patch local
+        // state instead of paying for a second full reload of every table.
+        to_empty.forEach(cid => {
+          const c = state.containers.find(x => x.id === cid);
+          if (c) { c.status = "empty"; c.status_changed_at = now_iso; }
+        });
       }
     }
     packing_state.step = "done";
