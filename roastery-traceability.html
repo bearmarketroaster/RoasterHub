@@ -1009,6 +1009,15 @@ function sort_containers_fifo(list) {
   });
 }
 
+// Start the empty flow for a drum. Used by both the Empty drop zone and the Empty button on Active cards,
+// so the two routes can never diverge: if there's loose coffee left, ask samples-or-write-off first;
+// an already-empty drum just flips straight to empty.
+function request_empty(container_id) {
+  const c = state.containers.find(x => x.id === container_id);
+  if (c && (c.remaining || 0) > 0.01) { state.ui.empty_choice = container_id; render(); }
+  else empty_container(container_id, true);
+}
+
 function build_rooms_view() {
   const inactive = sort_containers_fifo(state.containers.filter(c => c.status === "waiting" && c.remaining > 0));
   const filling  = sort_containers_fifo(state.containers.filter(c => c.status === "filling" && c.remaining > 0));
@@ -1028,7 +1037,8 @@ function build_rooms_view() {
       buttons = (remaining >= 5 ? `<button class="btn btn-green" data-fill-buckets="${esc(c.id)}" style="${bstyle}">🪣 Fill bucket</button>` : "")
               + mv("active","📦 Active →","btn-dark") + mv("waiting","← Store","btn-ghost");
     } else {
-      buttons = mv("filling","← 🪣 Filling","btn-ghost") + mv("waiting","← Store","btn-ghost");
+      buttons = mv("filling","← 🪣 Filling","btn-ghost") + mv("waiting","← Store","btn-ghost")
+              + `<button class="btn" data-empty-room="${esc(c.id)}" style="${bstyle};background:#fdf5f5;color:#dc2626;border:1px solid #f3d4d4">🗑️ Empty</button>`;
     }
     return `<div class="room-card" draggable="true" data-room-card="${esc(c.id)}"
         style="background:#fff;border:2px solid ${accent};border-radius:10px;padding:12px 14px;margin-bottom:12px;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
@@ -1995,6 +2005,9 @@ function attach_listeners() {
     const [id, target] = btn.dataset.moveRoom.split("|");
     move_to_room(id, target);
   }));
+  app.querySelectorAll("[data-empty-room]").forEach(btn => btn.addEventListener("click", () => {
+    request_empty(btn.dataset.emptyRoom);
+  }));
   const clear_room_hl = () => app.querySelectorAll("[data-room-drop]").forEach(z => { z.style.boxShadow=""; z.style.background="#faf9f7"; });
   app.querySelectorAll("[data-room-card]").forEach(cardEl => {
     cardEl.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", cardEl.dataset.roomCard); e.dataTransfer.effectAllowed = "move"; cardEl.style.opacity = "0.4"; });
@@ -2003,7 +2016,7 @@ function attach_listeners() {
   app.querySelectorAll("[data-room-drop]").forEach(zone => {
     const danger = zone.dataset.roomDrop === "empty";
     zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; clear_room_hl(); zone.style.boxShadow = `inset 0 0 0 4px ${danger?"#dc2626":"#2563eb"}`; zone.style.background = danger ? "#fdeaea" : "#eaf2ff"; });
-    zone.addEventListener("drop", e => { e.preventDefault(); clear_room_hl(); const id = e.dataTransfer.getData("text/plain"); if (!id) return; if (zone.dataset.roomDrop === "empty") { const c = state.containers.find(x => x.id === id); if (c && (c.remaining || 0) > 0.01) { state.ui.empty_choice = id; render(); } else empty_container(id, true); } else move_to_room(id, zone.dataset.roomDrop); });
+    zone.addEventListener("drop", e => { e.preventDefault(); clear_room_hl(); const id = e.dataTransfer.getData("text/plain"); if (!id) return; if (zone.dataset.roomDrop === "empty") { request_empty(id); } else move_to_room(id, zone.dataset.roomDrop); });
   });
   app.querySelectorAll("[data-samples]").forEach(btn => btn.addEventListener("click", () => {
     send_to_samples(btn.dataset.samples);
