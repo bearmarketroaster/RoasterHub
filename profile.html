@@ -27,10 +27,14 @@
 <body>
 <div class="wrap">
   <h1>Query Profiler</h1>
-  <p class="hint">Temporary diagnostic page — times each query <span class="mono">load_data()</span> runs on the Roastery Trace page. Delete this file when we're done.</p>
+  <p class="hint">Temporary diagnostic page. Compares the <strong>old</strong> single-fetch load against the <strong>new</strong> two-phase load in <span class="mono">roastery-traceability.html</span>. Delete this file when we're done.</p>
   <div class="card">
     <div id="status">Checking session…</div>
+    <h2 style="font-size:15px;margin:18px 0 8px">A · OLD load — every dispatch, newest 1000 by date</h2>
     <div id="out"></div>
+    <h2 style="font-size:15px;margin:26px 0 8px">B · NEW load — working set, then only the dispatches consumers need</h2>
+    <div id="out2"></div>
+    <div id="verdict"></div>
   </div>
   <div class="card">
     <button id="again">Run again</button>
@@ -66,6 +70,7 @@ async function run() {
     return;
   }
   status.textContent = "Running…";
+  await supabaseClient.from("containers").select("id").limit(1);   // warm the connection first
 
   // Sequential, so each query's own cost is visible (load_data runs them in parallel).
   const rows = [];
@@ -90,6 +95,8 @@ async function run() {
   rows.sort((a, b) => b.ms - a.ms);
   const sequential_ms = rows.reduce((a, r) => a + r.ms, 0);
   const capped = rows.filter(r => r.rows === 1000);
+  window.__old_total_kb = rows.reduce((a, r) => a + r.kb, 0);
+  window.__old_disp_rows = (rows.find(r => r.name === "dispatches") || {}).rows || 0;
 
   out.innerHTML = `
     <table>
@@ -110,8 +117,114 @@ async function run() {
   status.textContent = "Done.";
 }
 
-document.getElementById("again").addEventListener("click", run);
-run();
+// ── B: the new two-phase load, mirroring load_data() in roastery-traceability.html ──────────
+function chunk_list(arr, size) {
+  const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out;
+}
+function local_date_str(days_back) {
+  const d = new Date(); if (days_back) d.setDate(d.getDate() - days_back);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+async function run_new() {
+  const out2 = document.getElementById("out2");
+  const verdict = document.getElementById("verdict");
+  out2.innerHTML = ""; verdict.innerHTML = "";
+
+  const t_all = performance.now();
+
+  // PHASE 1 — the working set
+  const t1 = performance.now();
+  const [
+    { data: coffees_data }, { data: fp_codes_data }, { data: fp_assign_data },
+    { data: shop_mappings_data }, { data: buckets_data }, { data: roast_sessions },
+    { data: container_rows }, { data: dispatch_buckets_data },
+  ] = await Promise.all([
+    supabaseClient.from("coffees").select("id, name, retired_at").order("name"),
+    supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
+    supabaseClient.from("fp_assignments").select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)"),
+    supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind"),
+    supabaseClient.from("buckets").select("id, name, coffee, status, retired_at, fill_id, container_id").order("created_at", { ascending: false }),
+    supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false }),
+    supabaseClient.from("containers").select("id, status, status_changed_at, retired_at").is("retired_at", null),
+    supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false }),
+  ]);
+  const phase1_ms = Math.round(performance.now() - t1);
+  const phase1_kb = Math.round([coffees_data, fp_codes_data, fp_assign_data, shop_mappings_data,
+    buckets_data, roast_sessions, container_rows, dispatch_buckets_data]
+    .reduce((a, d) => a + JSON.stringify(d || []).length, 0) / 1024);
+
+  // derive the working set exactly as load_data does
+  const seen = {}, current_fills_set = new Set();
+  (roast_sessions || []).forEach(s => {
+    if (!s.container_id || seen[s.container_id]) return;
+    seen[s.container_id] = true;               // newest-first, so first seen = current fill
+    if (s.fill_id) current_fills_set.add(s.fill_id);
+  });
+  const current_fills = [...current_fills_set];
+  const live_bucket_ids = new Set((buckets_data || [])
+    .filter(b => b.status === "filled" || b.status === "dispatched").map(b => b.id));
+  const live_dispatch_ids = [...new Set((dispatch_buckets_data || [])
+    .filter(db => live_bucket_ids.has(db.bucket_id)).map(db => db.dispatch_id).filter(Boolean))];
+
+  // PHASE 2 — only the dispatches the consumers need
+  const D_SELECT = "*, dispatch_lines(*)";
+  const since = local_date_str(1);
+  const t2 = performance.now();
+  async function fetch_pages(build) {
+    const PAGE = 1000, out = [];
+    for (let page = 0; page < 25; page++) {
+      const { data, error } = await build().range(page * PAGE, page * PAGE + PAGE - 1);
+      if (error || !data || !data.length) break;
+      out.push(...data);
+      if (data.length < PAGE) break;
+    }
+    return out;
+  }
+  const results = await Promise.all([
+    fetch_pages(() => supabaseClient.from("dispatches").select(D_SELECT).or(`confirmed_at.is.null,date.gte.${since}`).order("id", { ascending: true })),
+    ...chunk_list(current_fills, 50).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D_SELECT).in("fill_id", ids).order("id", { ascending: true }))),
+    ...chunk_list(live_dispatch_ids, 100).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D_SELECT).in("id", ids).order("id", { ascending: true }))),
+  ]);
+  const phase2_ms = Math.round(performance.now() - t2);
+  const by_id = new Map();
+  const capped2 = false;
+  results.forEach(rows => rows.forEach(d => { if (!by_id.has(d.id)) by_id.set(d.id, d); }));
+  const merged = [...by_id.values()];
+  const disp_kb = Math.round(JSON.stringify(merged).length / 1024);
+  const total_ms = Math.round(performance.now() - t_all);
+  const total_kb = phase1_kb + disp_kb;
+
+  out2.innerHTML = `
+    <table>
+      <thead><tr><th>Step</th><th class="n">ms</th><th class="n">Rows</th><th class="n">KB</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">phase 1 — working set (8 queries, parallel)</td><td class="n">${phase1_ms}</td><td class="n">—</td><td class="n">${phase1_kb}</td></tr>
+        <tr><td class="mono">phase 2 — dispatches (${results.length} queries, parallel)</td><td class="n">${phase2_ms}</td><td class="n ${capped2 ? "slow" : ""}">${merged.length}</td><td class="n">${disp_kb}</td></tr>
+      </tbody>
+    </table>
+    <div class="total">Total: ${total_ms} ms · ${total_kb} KB</div>
+    <div class="hint" style="margin:6px 0 0">
+      Derived working set: ${current_fills.length} current fill${current_fills.length===1?"":"s"},
+      ${live_bucket_ids.size} live bucket${live_bucket_ids.size===1?"":"s"},
+      ${live_dispatch_ids.length} dispatch${live_dispatch_ids.length===1?"":"es"} referenced by live buckets.
+    </div>
+    ${capped2 ? `<div class="warn"><strong>Row cap hit in phase 2</strong> — one of the filtered queries returned 1000 rows. Tell Claude.</div>` : ""}`;
+
+  const old_kb = window.__old_total_kb || 0;
+  const old_rows = window.__old_disp_rows || 0;
+  verdict.innerHTML = `<div class="warn" style="background:#f0f7f2;border-color:#bfe0cb">
+      <strong>Old vs new:</strong> dispatch rows ${old_rows} → ${merged.length}
+      &nbsp;·&nbsp; total payload ${old_kb} KB → ${total_kb} KB
+      ${old_kb ? ` (${Math.round((1 - total_kb / old_kb) * 100)}% smaller)` : ""}
+      <div style="margin-top:6px">Section A above is the OLD query, kept for comparison — it will always
+      show 1000 rows. Section B is what the app actually does now.</div>
+    </div>`;
+}
+
+async function run_all() { await run(); await run_new(); }
+document.getElementById("again").addEventListener("click", run_all);
+run_all();
 </script>
 </body>
 </html>

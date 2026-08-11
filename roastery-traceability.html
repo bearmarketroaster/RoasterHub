@@ -349,6 +349,23 @@ function warn_if_capped(label, data) {
   return data || [];
 }
 
+// Fetch EVERY row matching a query, paging past Supabase's 1000-row cap. `build` is a factory because a
+// query builder can't be reused across requests. In the normal case (under 1000 rows) this costs exactly
+// one round trip — the loop exits on the first short page — so there's no penalty for the safety.
+// The caller must supply a deterministic .order(), or pages can overlap or skip rows.
+async function fetch_pages(label, build) {
+  const PAGE = 1000, out = [];
+  for (let page = 0; page < 25; page++) {
+    const { data, error } = await build().range(page * PAGE, page * PAGE + PAGE - 1);
+    if (error) { console.error(`[load_data] "${label}" page ${page} failed:`, error.message); break; }
+    if (!data || !data.length) break;
+    out.push(...data);
+    if (data.length < PAGE) break;                 // short page = last page
+    if (page === 24) console.error(`[load_data] "${label}" hit the 25-page ceiling — data may be incomplete.`);
+  }
+  return out;
+}
+
 // Local calendar date (not UTC) as YYYY-MM-DD, offset by `days_back`.
 function local_date_str(days_back) {
   const d = new Date();
@@ -490,21 +507,28 @@ async function load_data() {
   // One day of slack on the date bound so nothing near a midnight/UTC boundary can be missed. Extra rows
   // are harmless — the Deliveries tab still filters to its own definition of "today".
   const since = local_date_str(1);
-  const requests = [
+  // Every one of these pages past the 1000-row cap, so none of them can silently truncate no matter how
+  // much history builds up. Clause (2) matters most: if it ever came back short, packed_kg would read low,
+  // remaining would read high, and a drum could be overpacked. .order("id") makes the paging deterministic.
+  const batches = await Promise.all([
     // (1) pending + recent, for the Deliveries tab, badges and the pending-per-container/shop lookups
-    supabaseClient.from("dispatches").select(D_SELECT).or(`confirmed_at.is.null,date.gte.${since}`),
+    fetch_pages("dispatches:pending+recent", () =>
+      supabaseClient.from("dispatches").select(D_SELECT)
+        .or(`confirmed_at.is.null,date.gte.${since}`).order("id", { ascending: true })),
     // (2) every dispatch against a drum's CURRENT fill, at any age — this is what packed_kg sums
-    ...chunk_list(current_fills, 100).map(ids =>
-      supabaseClient.from("dispatches").select(D_SELECT).in("fill_id", ids)),
+    ...chunk_list(current_fills, 50).map((ids, n) =>
+      fetch_pages(`dispatches:current_fills[${n}]`, () =>
+        supabaseClient.from("dispatches").select(D_SELECT)
+          .in("fill_id", ids).order("id", { ascending: true }))),
     // (3) the dispatches live buckets went out on, at any age — drives at-shop vs in-transit
-    ...chunk_list(live_dispatch_ids, 100).map(ids =>
-      supabaseClient.from("dispatches").select(D_SELECT).in("id", ids)),
-  ];
-  const results = await Promise.all(requests);
+    ...chunk_list(live_dispatch_ids, 100).map((ids, n) =>
+      fetch_pages(`dispatches:live_buckets[${n}]`, () =>
+        supabaseClient.from("dispatches").select(D_SELECT)
+          .in("id", ids).order("id", { ascending: true }))),
+  ]);
   const dispatch_by_id = new Map();
-  results.forEach((r, i) => {
-    warn_if_capped(`dispatches[${i}]`, r.data);
-    (r.data || []).forEach(d => { if (!dispatch_by_id.has(d.id)) dispatch_by_id.set(d.id, d); });
+  batches.forEach(rows => {
+    rows.forEach(d => { if (!dispatch_by_id.has(d.id)) dispatch_by_id.set(d.id, d); });
   });
   // Same newest-first order the single query used to return, so downstream ordering is unchanged.
   state.dispatches = [...dispatch_by_id.values()]
