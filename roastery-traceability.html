@@ -334,14 +334,37 @@ async function render_qr(el, value, size=140) {
 }
 
 async function load_data() {
+  // All nine fetches below are independent of each other — none needs a previous one's result — so they
+  // go out in one parallel batch. Sequentially this was nine network round trips every reload, which is
+  // what made saves feel like they hung. Processing order below is unchanged.
+  const [
+    { data: coffees_data },
+    { data: fp_codes_data },
+    { data: fp_assign_data },
+    { data: shop_mappings_data },
+    { data: buckets_data },
+    { data: roast_sessions },
+    { data: container_rows },
+    { data: dispatches },
+    { data: dispatch_buckets_data },
+  ] = await Promise.all([
+    supabaseClient.from("coffees").select("id, name, retired_at").order("name"),
+    supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
+    supabaseClient.from("fp_assignments").select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)"),
+    supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind"),
+    supabaseClient.from("buckets").select("*").order("created_at", { ascending: false }),
+    supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false }),
+    supabaseClient.from("containers").select("id, status, status_changed_at, retired_at").is("retired_at", null),
+    supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date",{ascending:false}),
+    supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false }),
+  ]);
+
   // Load all coffees + FPs (incl. retired) — used for historical lookups so dispatches that reference
   // a now-retired FP still resolve to the right coffee name.
-  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name, retired_at").order("name");
   state.coffees = (coffees_data||[]).map(c => c.name);
   // Active-only list for NEW input (dropdowns, autocomplete, scan suggestions)
   state.active_coffees = (coffees_data||[]).filter(c => !c.retired_at).map(c => c.name);
 
-  const { data: fp_codes_data } = await supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code");
   state.fp_codes = (fp_codes_data||[]).map(f => ({
     fp_code: f.fp_code,
     bag_size: f.bag_size,
@@ -357,8 +380,6 @@ async function load_data() {
   // Time-versioned FP -> coffee assignments (source of truth for as-of resolution).
   // Seeds are open-ended, so today() resolves to the current coffee — identical to
   // the old behaviour until a real reuse introduces a version boundary.
-  const { data: fp_assign_data } = await supabaseClient.from("fp_assignments")
-    .select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)");
   state.fp_assignments = (fp_assign_data||[]).map(a => ({
     fp_code: a.fp_code,
     coffee_id: a.coffee_id,
@@ -367,21 +388,17 @@ async function load_data() {
     effective_start: a.effective_start,   // null = open start
     effective_end: a.effective_end,       // null = open/current
   }));
-  const { data: shop_mappings_data } = await supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind");
   state.shop_mappings = shop_mappings_data || [];
 
   // Load buckets with their lifecycle state
-  const { data: buckets_data } = await supabaseClient.from("buckets").select("*").order("created_at", { ascending: false });
   state.buckets = buckets_data || [];
 
   // (bucket_id → dispatch lookup is built after dispatches load — see below)
 
   // Build containers from roast_sessions — group by container_id
-  const { data: roast_sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false });
   state.roast_sessions = roast_sessions || [];
 
   // Get container statuses
-  const { data: container_rows } = await supabaseClient.from("containers").select("id, status, status_changed_at, retired_at").is("retired_at", null);
   const status_map = {};
   (container_rows || []).forEach(c => { status_map[c.id] = { status: c.status || "waiting", status_changed_at: c.status_changed_at }; });
 
@@ -422,12 +439,10 @@ async function load_data() {
   });
   state.containers = Object.values(container_map);
 
-  const { data: dispatches } = await supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("date",{ascending:false});
   state.dispatches=(dispatches||[]).map(d=>({...d,lines:d.dispatch_lines||[]}));
 
   // Build a bucket_id → dispatch lookup so we can derive in-transit vs at-shop status
   state._bucket_to_dispatch = {};
-  const { data: dispatch_buckets_data } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false });
   (dispatch_buckets_data || []).forEach(db => {
     if (!state._bucket_to_dispatch[db.bucket_id]) {
       const d = state.dispatches.find(x => x.id === db.dispatch_id);
@@ -466,8 +481,10 @@ async function save_dispatch_v2(primary_container_id, primary_fill_id, shop, lin
   // Ensure all referenced containers exist as rows
   const all_containers = [...new Set(lines.map(l => l.container_id).filter(Boolean))];
   if (primary_container_id) all_containers.push(primary_container_id);
-  for (const cid of [...new Set(all_containers)]) {
-    await supabaseClient.from("containers").upsert({ id: cid }, { onConflict: "id" });
+  const container_rows_payload = [...new Set(all_containers)].map(cid => ({ id: cid }));
+  // One upsert for every referenced container instead of a request each.
+  if (container_rows_payload.length) {
+    await supabaseClient.from("containers").upsert(container_rows_payload, { onConflict: "id" });
   }
   const dispatch_id = gen_id("DSP");
   // Auto-confirm Online (and Samples) dispatches — they leave immediately, never sit "in transit"
@@ -493,7 +510,8 @@ async function save_dispatch_v2(primary_container_id, primary_fill_id, shop, lin
   }));
   const { error: l_err } = await supabaseClient.from("dispatch_lines").insert(lines_payload);
   if (l_err) { state.saving = false; alert("Failed to save dispatch lines: " + l_err.message); return null; }
-  state.saving = false; await load_data(); render();
+  // No reload here — the caller reloads once after ALL its writes are done, so we don't pay for
+  // load_data twice (or three times) in a single save. state.saving stays true until the caller finishes.
   return dispatch_id;
 }
 
@@ -553,8 +571,15 @@ function build_scan_overlay() {
 
 // ── BUCKET FILL WORKFLOW ─────────────────────────────────────────────────────
 // State tracking buckets currently being filled from a container
+// Friendly label for a bucket ID — its name if it has one, else the raw ID. Used in scan feedback so
+// the roaster reads "Bucket 12" rather than a BKT- code.
+function bucket_label(id) {
+  const b = state.buckets.find(x => x.id === id);
+  return (b && b.name) ? b.name : id;
+}
+
 const fill_state = {
-  filled: [],          // [{ id, container_id, fill_id, coffee }]
+  filled: [],          // [{ id, name, container_id, fill_id, coffee }]
   err: "",
   scanner_msg: "",
   scanner_msg_type: "info",
@@ -580,7 +605,7 @@ function process_fill_scan(raw_value) {
     return;
   }
   if (fill_state.filled.find(b => b.id === value)) {
-    flash_fill_scan(`${value} already scanned in this session`, "error");
+    flash_fill_scan(`${bucket_label(value)} already scanned in this session`, "error");
     return;
   }
   const bucket = state.buckets.find(b => b.id === value);
@@ -589,11 +614,11 @@ function process_fill_scan(raw_value) {
     return;
   }
   if (bucket.retired_at) {
-    flash_fill_scan(`Bucket ${value} is retired`, "error");
+    flash_fill_scan(`Bucket ${bucket_label(value)} is retired`, "error");
     return;
   }
   if (bucket.status === "filled") {
-    flash_fill_scan(`${value} is already filled (${bucket.coffee||"?"})`, "error");
+    flash_fill_scan(`${bucket_label(value)} is already filled (${bucket.coffee||"?"})`, "error");
     return;
   }
   const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
@@ -609,11 +634,12 @@ function process_fill_scan(raw_value) {
   }
   fill_state.filled.push({
     id: value,
+    name: bucket.name || null,
     container_id: container.id,
     fill_id: container.fill_id,
     coffee: container.coffee,
   });
-  flash_fill_scan(`✓ ${value} filled with ${container.coffee||"?"}`, "success");
+  flash_fill_scan(`✓ ${bucket_label(value)} filled with ${container.coffee||"?"}`, "success");
   update_fill_panel();
 }
 
@@ -642,7 +668,7 @@ function update_fill_panel() {
   const session_kg = fill_state.filled.length * 5;
   const remaining_after = container ? kgfloor(container.remaining - session_kg) : "?";
   const list = fill_state.filled.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-    <div><div style="font-weight:600;font-size:14px">🪣 5kg ${esc(b.coffee||"?")}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">🪣 ${esc(b.name||b.id)}</div><div class="hint" style="font-size:11px">5kg · ${esc(b.coffee||"?")}${b.name?` · <span style="font-family:monospace">${esc(b.id)}</span>`:""}</div></div>
     <button data-unfill="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
   panel.innerHTML = `
@@ -657,7 +683,7 @@ function update_fill_panel() {
     update_fill_panel();
   }));
   const confirmBtn = document.getElementById("fill-confirm-btn");
-  if (confirmBtn) confirmBtn.disabled = fill_state.filled.length === 0;
+  if (confirmBtn) confirmBtn.disabled = state.saving || fill_state.filled.length === 0;
 }
 
 // Rank bucket suggestions so the exact match always surfaces above the result cap.
@@ -732,37 +758,45 @@ function build_fill_buckets_overlay() {
 
     <div class="grid-2">
       <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="fill-cancel">← Cancel</button>
-      <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="fill-confirm-btn" disabled>✓ Save</button>
+      <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="fill-confirm-btn" ${(state.saving || fill_state.filled.length === 0)?"disabled":""}>${state.saving?"Saving…":"✓ Save"}</button>
     </div>
   </div></div>`;
 }
 
+let fill_in_flight = false;
 async function save_filled_buckets() {
   const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
   if (!container || fill_state.filled.length === 0) return;
+  if (fill_in_flight) return;          // a save is already running — ignore repeat taps
+  fill_in_flight = true;
   state.saving = true; render();
+  try {
   const now = new Date().toISOString();
-  // Update all scanned buckets: set status=filled, container, fill_id, coffee
-  for (const b of fill_state.filled) {
-    await supabaseClient.from("buckets").update({
-      status: "filled",
-      container_id: container.id,
-      fill_id: container.fill_id,
-      coffee: container.coffee,
-      filled_at: now,
-      condition: "clean",
-      returned_at: null,
-    }).eq("id", b.id);
-  }
+  // Every bucket in the session gets identical values, so this is one batched UPDATE rather than one
+  // round trip per bucket — a 10-bucket fill was 10 sequential requests before.
+  const bucket_ids = fill_state.filled.map(b => b.id);
+  const { error: fill_err } = await supabaseClient.from("buckets").update({
+    status: "filled",
+    container_id: container.id,
+    fill_id: container.fill_id,
+    coffee: container.coffee,
+    filled_at: now,
+    condition: "clean",
+    returned_at: null,
+  }).in("id", bucket_ids);
+  if (fill_err) { alert("Failed to save buckets: " + fill_err.message); return; }
   // Auto-flip container to "empty" if remaining hits 0
   const session_kg = fill_state.filled.length * 5;
   if (container.remaining - session_kg <= 0.01) {
     await supabaseClient.from("containers").update({ status: "empty", status_changed_at: now }).eq("id", container.id);
   }
-  state.saving = false;
   state.ui.fill_bucket_container = null;
   reset_fill_state();
   await load_data();
+  } finally {
+    state.saving = false;
+    fill_in_flight = false;
+  }
   render();
 }
 
@@ -794,7 +828,7 @@ function process_return_scan(raw_value) {
     return;
   }
   if (return_state.returned.find(b => b.id === value)) {
-    flash_return_scan(`${value} already scanned`, "error");
+    flash_return_scan(`${bucket_label(value)} already scanned`, "error");
     return;
   }
   const bucket = state.buckets.find(b => b.id === value);
@@ -803,18 +837,18 @@ function process_return_scan(raw_value) {
     return;
   }
   if (bucket.retired_at) {
-    flash_return_scan(`${value} is retired`, "error");
+    flash_return_scan(`${bucket_label(value)} is retired`, "error");
     return;
   }
   // A FILLED bucket holds coffee in the system — returning it clears that fill. Confirm before discarding.
   if (bucket.status === "filled") {
-    if (!confirm(`${value} is marked FILLED${bucket.coffee ? ` with ${bucket.coffee}` : ""}. Returning it clears that fill and marks it empty. Continue?`)) return;
+    if (!confirm(`${bucket_label(value)} is marked FILLED${bucket.coffee ? ` with ${bucket.coffee}` : ""}. Returning it clears that fill and marks it empty. Continue?`)) return;
   }
   // Accept it back. Legacy buckets that were sent out before the scan-out flow existed have no
   // "dispatched" status — accept them anyway so they can be brought back into the system.
   const legacy = bucket.status !== "dispatched";
-  return_state.returned.push({ id: value, prev_status: bucket.status, prev_coffee: bucket.coffee });
-  flash_return_scan(legacy ? `✓ ${value} accepted back (no prior dispatch on record)` : `✓ ${value} marked returned`, "success");
+  return_state.returned.push({ id: value, name: bucket.name || null, prev_status: bucket.status, prev_coffee: bucket.coffee });
+  flash_return_scan(legacy ? `✓ ${bucket_label(value)} accepted back (no prior dispatch on record)` : `✓ ${bucket_label(value)} marked returned`, "success");
   update_return_panel();
 }
 
@@ -840,7 +874,7 @@ function update_return_panel() {
   const panel = document.getElementById("return-panel");
   if (!panel) { render(); return; }
   const list = return_state.returned.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-    <div><div style="font-weight:600;font-size:14px">🪣 ${esc(b.id)}</div><div class="hint" style="font-size:11px">Previously: ${esc(b.prev_status||"?")}${b.prev_coffee?` · ${esc(b.prev_coffee)}`:""}</div></div>
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">🪣 ${esc(b.name||b.id)}</div><div class="hint" style="font-size:11px">Previously: ${esc(b.prev_status||"?")}${b.prev_coffee?` · ${esc(b.prev_coffee)}`:""}${b.name?` · <span style="font-family:monospace">${esc(b.id)}</span>`:""}</div></div>
     <button data-unreturn="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
   panel.innerHTML = `
@@ -1426,7 +1460,7 @@ function process_scan(raw_value) {
       return;
     }
     if (packing_state.scanned_buckets.find(b => b.id === value)) {
-      flash_scan(`${value} already scanned`, "error");
+      flash_scan(`${bucket_label(value)} already scanned`, "error");
       return;
     }
     // Look up the bucket in state
@@ -1436,21 +1470,22 @@ function process_scan(raw_value) {
       return;
     }
     if (bucket.retired_at) {
-      flash_scan(`Bucket ${value} is retired`, "error");
+      flash_scan(`Bucket ${bucket_label(value)} is retired`, "error");
       return;
     }
     if (bucket.status !== "filled") {
-      flash_scan(`${value} is not filled — fill it from a container first`, "error");
+      flash_scan(`${bucket_label(value)} is not filled — fill it from a container first`, "error");
       return;
     }
     // Filled bucket carries its own coffee/container/fill provenance
     packing_state.scanned_buckets.push({
       id: value,
+      name: bucket.name || null,
       container_id: bucket.container_id,
       fill_id: bucket.fill_id,
       coffee: bucket.coffee,
     });
-    flash_scan(`✓ ${value} — ${bucket.coffee||"?"}`, "success");
+    flash_scan(`✓ ${bucket_label(value)} — ${bucket.coffee||"?"}`, "success");
     update_scan_panel();
     return;
   }
@@ -1576,7 +1611,7 @@ function update_scan_panel() {
   }
 
   const bucket_list = ps.scanned_buckets.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px">🪣 Bar 5kg${b.coffee?` — ${esc(b.coffee)}`:""}</div><div class="hint" style="font-size:11px;font-family:monospace">${esc(b.id)}</div></div>
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">🪣 ${esc(b.name||b.id)}</div><div class="hint" style="font-size:11px">Bar 5kg${b.coffee?` · ${esc(b.coffee)}`:""}${b.name?` · <span style="font-family:monospace">${esc(b.id)}</span>`:""}</div></div>
     <button data-remove-bucket="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
 
@@ -1740,7 +1775,7 @@ function build_packing_page(container, fill) {
         </div>`);
       });
     }
-    const bucket_rows = ps.scanned_buckets.length ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;padding-top:6px;border-top:1px solid #eee"><span>🪣 Buckets (5kg each)</span><span style="font-weight:600">× ${ps.scanned_buckets.length} (${(ps.scanned_buckets.length*5).toFixed(1)}kg)</span></div><div style="font-size:11px;color:#666;font-family:monospace;margin-top:2px">${ps.scanned_buckets.map(b => esc(b.id)).join(" · ")}</div>` : "";
+    const bucket_rows = ps.scanned_buckets.length ? `<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px;padding-top:6px;border-top:1px solid #eee"><span>🪣 Buckets (5kg each)</span><span style="font-weight:600">× ${ps.scanned_buckets.length} (${(ps.scanned_buckets.length*5).toFixed(1)}kg)</span></div><div style="font-size:11px;color:#666;margin-top:2px">${ps.scanned_buckets.map(b => esc(b.name||b.id)).join(" · ")}</div>` : "";
 
     // Also show summary by container
     const by_container = {};
@@ -2491,34 +2526,40 @@ function attach_listeners() {
     }
     const dispatch_id = await save_dispatch_v2(primary_container_id, primary_fill_id, packing_state.shop, lines, total_kg);
     if (dispatch_id && packing_state.scanned_buckets.length > 0) {
-      // Record bucket → dispatch link
-      await supabaseClient.from("dispatch_buckets").insert(
-        packing_state.scanned_buckets.map(b => ({ dispatch_id, bucket_id: b.id }))
-      );
-      // Mark each bucket as dispatched (status flip)
+      // Record bucket → dispatch link and flip the buckets to dispatched. Independent writes, so both
+      // requests go out together rather than one after the other.
       const bucket_ids = packing_state.scanned_buckets.map(b => b.id);
-      await supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids);
-      // Reload so held-in-buckets reflects the now-dispatched buckets BEFORE we read remaining.
-      // Without this the just-dispatched buckets count as BOTH held and packed (double-subtracted),
-      // making remaining read far too low and wrongly tripping the auto-empty below.
-      await load_data();
+      await Promise.all([
+        supabaseClient.from("dispatch_buckets").insert(
+          packing_state.scanned_buckets.map(b => ({ dispatch_id, bucket_id: b.id }))
+        ),
+        supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids),
+      ]);
     }
-    // Auto-flip a used container to empty only if it's now genuinely exhausted — using the
-    // reloaded, correct remaining (not the transient double-counted value).
+    // ONE reload, after every write above is done. This has to come before the auto-empty check below:
+    // until the just-dispatched buckets are re-read as "dispatched" they'd count as BOTH held and packed
+    // (double-subtracted), making remaining read far too low and wrongly tripping the auto-empty.
+    if (dispatch_id) await load_data();
+    // Auto-flip used containers to empty only if genuinely exhausted, against the reloaded remaining.
     if (dispatch_id) {
       const containers_used = [...new Set(lines.map(l => l.container_id).filter(Boolean))];
-      for (const cid of containers_used) {
+      const to_empty = containers_used.filter(cid => {
         const c = state.containers.find(x => x.id === cid);
-        if (!c) continue;
-        if ((c.remaining || 0) <= 0.01) {
-          await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", cid);
-        }
+        return c && (c.remaining || 0) <= 0.01;
+      });
+      // Only pay for a second reload if a drum actually changed status.
+      if (to_empty.length) {
+        await supabaseClient.from("containers")
+          .update({ status: "empty", status_changed_at: new Date().toISOString() })
+          .in("id", to_empty);
+        await load_data();
       }
-      await load_data();
     }
     packing_state.step = "done";
+    state.saving = false;
     render();
     } finally {
+      state.saving = false;
       packing_in_flight = false;
     }
   });
