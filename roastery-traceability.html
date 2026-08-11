@@ -393,6 +393,7 @@ async function load_data() {
       id: s.container_id, coffee: s.coffee, fill_id: s.fill_id,
       roast_sessions: [], total_roasted: 0, packed_kg: 0,
       latest_roast_date: s.date,
+      fill_start_date: null,
       status: status_map[s.container_id]?.status || "waiting",
       status_changed_at: status_map[s.container_id]?.status_changed_at || null,
     };
@@ -401,7 +402,12 @@ async function load_data() {
     // Sessions come back newest-first, so the container's coffee/fill_id (set at creation above) is the
     // CURRENT fill. Only sessions belonging to that current fill count toward the drum's roasted total —
     // when a drum is emptied and refilled, the previous fill's roast no longer inflates the new capacity.
-    if (s.fill_id === cm.fill_id) cm.total_roasted += Number(s.roasted_weight)||0;
+    if (s.fill_id === cm.fill_id) {
+      cm.total_roasted += Number(s.roasted_weight)||0;
+      // fill_start_date = the EARLIEST roast into the current fill. Top-up roasts don't reset a drum's
+      // age, so this is the date FIFO ordering should follow (not latest_roast_date, which is the newest).
+      if (s.date && (!cm.fill_start_date || s.date < cm.fill_start_date)) cm.fill_start_date = s.date;
+    }
   });
   // Also include container rows that exist but have no roast sessions (e.g. empty after sample-out)
   (container_rows || []).forEach(c => {
@@ -409,6 +415,7 @@ async function load_data() {
       id: c.id, coffee: null, fill_id: null,
       roast_sessions: [], total_roasted: 0, packed_kg: 0,
       latest_roast_date: null,
+      fill_start_date: null,
       status: c.status || "empty",
       status_changed_at: c.status_changed_at,
     };
@@ -980,11 +987,32 @@ async function move_to_room(container_id, target) {
   await set_container_status(container_id, target);
 }
 
+// Order drums for the room columns: FIFO by fill, grouped by coffee.
+// The coffee holding the oldest drum leads the column, and inside each coffee the oldest fill is first —
+// so the drum you should work through next is always at the top with its stablemates directly beneath it.
+function sort_containers_fifo(list) {
+  const FAR = "9999-12-31", LAST = "\uffff";
+  const oldest_by_coffee = {};
+  list.forEach(c => {
+    const key = c.coffee || LAST;
+    const d = c.fill_start_date || FAR;
+    if (!oldest_by_coffee[key] || d < oldest_by_coffee[key]) oldest_by_coffee[key] = d;
+  });
+  return list.slice().sort((a, b) => {
+    const ka = a.coffee || LAST, kb = b.coffee || LAST;
+    const ga = oldest_by_coffee[ka], gb = oldest_by_coffee[kb];
+    if (ga !== gb) return ga < gb ? -1 : 1;
+    if (ka !== kb) return ka.localeCompare(kb);
+    const da = a.fill_start_date || FAR, db = b.fill_start_date || FAR;
+    if (da !== db) return da < db ? -1 : 1;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
 function build_rooms_view() {
-  const bycoffee = (a,b)=>(a.coffee||"").localeCompare(b.coffee||"");
-  const inactive = state.containers.filter(c => c.status === "waiting" && c.remaining > 0).sort(bycoffee);
-  const filling  = state.containers.filter(c => c.status === "filling" && c.remaining > 0).sort(bycoffee);
-  const active   = state.containers.filter(c => c.status === "active"  && c.remaining > 0).sort(bycoffee);
+  const inactive = sort_containers_fifo(state.containers.filter(c => c.status === "waiting" && c.remaining > 0));
+  const filling  = sort_containers_fifo(state.containers.filter(c => c.status === "filling" && c.remaining > 0));
+  const active   = sort_containers_fifo(state.containers.filter(c => c.status === "active"  && c.remaining > 0));
 
   const card = (c, room) => {
     const remaining = c.remaining || 0;
@@ -1319,6 +1347,9 @@ const packing_state = {
   sample_err: "",
   batch: null,          // { container_id, fill_id, coffee, kg } batch-brew bulk, SHOPS ONLY, one per dispatch
   batch_err: "",
+  // Shop-picker section collapse state, keyed by kind. All sections start collapsed — the point of the
+  // accordion is to keep a long destination list short, so nothing is expanded until it's tapped.
+  shop_groups_open: {},
 };
 
 function reset_packing_state() {
@@ -1333,6 +1364,7 @@ function reset_packing_state() {
   packing_state.sample_err = "";
   packing_state.batch = null;
   packing_state.batch_err = "";
+  packing_state.shop_groups_open = {};
 }
 
 // Compute totals from scanned items + buckets
@@ -1871,15 +1903,31 @@ function build_packing_page(container, fill) {
   const shops_only     = all_entries.filter(e => (e.kind||"shop") === "shop");
   const wholesale_only = all_entries.filter(e => e.kind === "wholesale");
   const online_only    = all_entries.filter(e => e.kind === "online");
+  const charity_only   = all_entries.filter(e => e.kind === "charity");
 
   const render_btn = (e, badge_color, badge_label) => `<button data-pick-shop="${esc(e.master_name)}" style="background:#f4f2ed;border:2px solid #e8e6e1;border-radius:12px;padding:18px 18px;cursor:pointer;text-align:left;width:100%;font-weight:700;font-size:17px;display:flex;justify-content:space-between;align-items:center;gap:8px">
     <span>${esc(e.master_name)}</span>
     ${badge_label ? `<span style="background:${badge_color};color:#fff;padding:3px 9px;border-radius:4px;font-size:11px;font-weight:700">${badge_label}</span>` : ""}
   </button>`;
 
-  const group = (title, list, badge_color, badge_label) => list.length === 0 ? "" : `
-    <div style="font-size:12px;color:#666;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin:18px 0 8px">${title}</div>
-    <div style="display:grid;gap:10px">${list.map(e => render_btn(e, badge_color, badge_label)).join("")}</div>`;
+  // Sections collapse so the picker stays short. A section with a single destination has nothing worth
+  // hiding, so it renders open with no toggle.
+  const group = (key, title, list, badge_color, badge_label) => {
+    if (list.length === 0) return "";
+    const label = `<span style="font-size:12px;color:#666;font-weight:700;letter-spacing:1px;text-transform:uppercase">${title}</span>`;
+    const buttons = `<div style="display:grid;gap:10px">${list.map(e => render_btn(e, badge_color, badge_label)).join("")}</div>`;
+    if (list.length === 1) return `<div style="margin:18px 0 8px">${label}</div>${buttons}`;
+    const open = !!ps.shop_groups_open[key];
+    return `
+      <button data-toggle-shop-group="${key}" style="width:100%;background:none;border:0;border-bottom:1px solid #e8e6e1;padding:16px 2px 10px;margin-top:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;text-align:left">
+        ${label}
+        <span style="display:flex;align-items:center;gap:8px">
+          <span style="background:#f0eee9;color:#666;padding:2px 9px;border-radius:10px;font-size:12px;font-weight:700">${list.length}</span>
+          <span style="color:#999;font-size:12px">${open ? "\u25b2" : "\u25bc"}</span>
+        </span>
+      </button>
+      ${open ? `<div style="margin-top:10px">${buttons}</div>` : ""}`;
+  };
 
   return `<div class="overlay"><div class="modal">
     ${pack_step_bar("shop")}
@@ -1890,9 +1938,10 @@ function build_packing_page(container, fill) {
       <div style="color:#16a34a;font-size:15px;margin-top:4px">${kgfloor(fill.remaining)}kg ${tr("available","доступно")}</div>
     </div>
     <h3 style="font-size:18px;margin-bottom:8px">${tr("Where is this going?","Куди це відправляється?")}</h3>
-    ${group("Shops", shops_only, "#16a34a", "")}
-    ${group("Wholesale", wholesale_only, "#7e57c2", "WHOLESALE")}
-    ${group("Online", online_only, "#666", "ONLINE")}
+    ${group("online", "Online", online_only, "#666", "ONLINE")}
+    ${group("shop", "Shops", shops_only, "#16a34a", "")}
+    ${group("wholesale", "Wholesale", wholesale_only, "#7e57c2", "WHOLESALE")}
+    ${group("charity", "Charity", charity_only, "#16a34a", "CHARITY")}
     <div style="background:#fff7ed;border-radius:8px;padding:14px;margin-top:18px;margin-bottom:14px">
       <label class="lbl" style="font-size:14px">${tr("Or type a custom destination","Або введіть інше місце")}</label>
       <input id="pack-shop-custom" placeholder="e.g. Stillorgan" style="font-size:16px;padding:12px 14px" />
@@ -2211,6 +2260,12 @@ function attach_listeners() {
     packing_state.batch = null;
     render();
   });
+  // Shop step: expand/collapse a destination section
+  app.querySelectorAll("[data-toggle-shop-group]").forEach(btn => btn.addEventListener("click", () => {
+    const k = btn.dataset.toggleShopGroup;
+    packing_state.shop_groups_open[k] = !packing_state.shop_groups_open[k];
+    render();
+  }));
   // Shop step: pick a shop or type custom
   app.querySelectorAll("[data-pick-shop]").forEach(btn => btn.addEventListener("click", () => {
     packing_state.shop = btn.dataset.pickShop;
