@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>stock.html staff picker — equivalence check</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<style>
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:#f4f2ed; color:#1a1a1a; margin:0; padding:24px; }
+  .wrap { max-width:1200px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:22px 0 8px; }
+  .hint { color:#666; font-size:13px; margin:0 0 18px; }
+  .card { background:#fff; border:1px solid #e8e6e1; border-radius:12px; padding:18px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:#666; border-bottom:1px solid #e8e6e1; padding:7px 5px; }
+  td { padding:7px 5px; border-bottom:1px solid #f0eee9; font-variant-numeric:tabular-nums; }
+  td.n { text-align:right; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  tr.bad { background:#fdf5f5; } tr.bad td { color:#dc2626; font-weight:700; }
+  .verdict { font-size:17px; font-weight:800; padding:14px; border-radius:10px; margin-bottom:14px; }
+  .ok { background:#f0f7f2; color:#15803d; border:1px solid #bfe0cb; }
+  .no { background:#fff7ed; color:#b45309; border:1px solid #f5d9b8; }
+  .warn { background:#fff7ed; border:1px solid #f5d9b8; border-radius:8px; padding:10px 12px; font-size:13px; margin-top:12px; }
+  .bad-box { background:#fdf5f5; border:1px solid #f3d4d4; border-radius:8px; padding:10px 12px; font-size:13px; margin-top:12px; }
+  button { background:#1a1a1a; color:#fff; border:0; border-radius:8px; padding:12px 20px; font-size:15px; font-weight:600; cursor:pointer; }
+  #status { font-size:14px; color:#666; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>stock.html staff picker — equivalence check</h1>
+  <p class="hint">Runs stock.html's <strong>real current logic</strong> — the same four queries, including the
+  unpaginated dispatches fetch — against <span class="mono">v_container_state</span>, and diffs remaining per drum.
+  The truncation can only be observed through the live API, which is why this exists rather than a SQL query.
+  Read-only, writes nothing.</p>
+  <div class="card">
+    <div id="status">Checking session…</div>
+    <div id="verdict"></div>
+    <div id="trunc"></div>
+    <div id="out"></div>
+    <div id="order"></div>
+  </div>
+  <div class="card"><button id="again">Run again</button></div>
+</div>
+
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+const EPS = 0.005;
+
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function num(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
+
+async function fetch_pages(build){
+  const PAGE=1000, out=[];
+  for(let p=0;p<25;p++){
+    const {data,error}=await build().range(p*PAGE,p*PAGE+PAGE-1);
+    if(error){ console.error(error.message); break; }
+    if(!data||!data.length) break;
+    out.push(...data);
+    if(data.length<PAGE) break;
+  }
+  return out;
+}
+
+// ── stock.html's CURRENT logic, copied verbatim ───────────────────────────────
+async function stock_current() {
+  const [{ data: container_rows }, { data: roast_sessions }, { data: all_dispatches }, { data: all_buckets }] =
+    await Promise.all([
+      supabaseClient.from("containers").select("id, name, status, retired_at").is("retired_at", null),
+      supabaseClient.from("roast_sessions").select("id, container_id, fill_id, coffee, date, roasted_weight").order("date", { ascending: false }),
+      supabaseClient.from("dispatches").select("id, shop, date, container_id, fill_id, dispatch_lines(kg, fill_id, container_id)"),
+      supabaseClient.from("buckets").select("id, container_id, fill_id, status"),
+    ]);
+
+  const containers = (container_rows || []).filter(c => c.status === "active" || c.status === "waiting");
+  containers.forEach(c => {
+    const latest_roast = (roast_sessions || []).find(s => s.container_id === c.id);
+    if (!latest_roast) { c.coffee = null; c.remaining = 0; return; }
+    c.coffee = latest_roast.coffee;
+    c.fill_id = latest_roast.fill_id;
+    const dispatched_kg = (all_dispatches || []).reduce((s, d) => s + (d.dispatch_lines || [])
+      .filter(l => l.fill_id === c.fill_id || (!l.fill_id && l.container_id === c.id))
+      .reduce((ss, l) => ss + (Number(l.kg) || 0), 0), 0);
+    const held_in_buckets = (all_buckets || []).filter(b => b.fill_id === c.fill_id && b.status === "filled").length * 5;
+    c.remaining = Math.max(0, Number(latest_roast.roasted_weight || 0) - dispatched_kg - held_in_buckets);
+    c._roasted = Number(latest_roast.roasted_weight || 0);
+    c._dispatched = dispatched_kg;
+    c._held = held_in_buckets;
+  });
+
+  // How badly is the dispatches fetch truncated, and WHICH rows did it get?
+  const got = (all_dispatches || []);
+  const complete = await fetch_pages(() => supabaseClient.from("dispatches")
+    .select("id, date").order("id", { ascending: true }));
+  const got_ids = new Set(got.map(d => d.id));
+  const missing = complete.filter(d => !got_ids.has(d.id));
+  const dates = got.map(d => d.date).filter(Boolean).sort();
+  const missing_dates = missing.map(d => d.date).filter(Boolean).sort();
+
+  return {
+    containers,
+    trunc: {
+      returned: got.length,
+      total: complete.length,
+      missing: missing.length,
+      got_oldest: dates[0] || "—", got_newest: dates[dates.length-1] || "—",
+      missing_oldest: missing_dates[0] || "—", missing_newest: missing_dates[missing_dates.length-1] || "—",
+    },
+  };
+}
+
+async function run() {
+  const status = document.getElementById("status");
+  const out = document.getElementById("out");
+  const verdict = document.getElementById("verdict");
+  const trunc = document.getElementById("trunc");
+  const order = document.getElementById("order");
+  out.innerHTML = ""; verdict.innerHTML = ""; trunc.innerHTML = ""; order.innerHTML = "";
+
+  const { data:{ session } } = await supabaseClient.auth.getSession();
+  if (!session) { status.innerHTML = 'Not logged in — open <span class="mono">login.html</span> first, then reload.'; return; }
+  status.textContent = "Running both pipelines…";
+
+  const [{ containers: cur, trunc: t }, view_rows] = await Promise.all([
+    stock_current(),
+    fetch_pages(() => supabaseClient.from("v_container_state")
+      .select("id, coffee, fill_id, status, fill_start_date, total_roasted, packed_kg, held_kg, remaining")
+      .in("status", ["active","waiting"]).order("id",{ascending:true})),
+  ]);
+
+  if (!view_rows || !view_rows.length) {
+    status.textContent = ""; verdict.className = "verdict no";
+    verdict.textContent = "The view returned nothing — has sql/v_container_state.sql been run?";
+    return;
+  }
+
+  // Truncation report
+  trunc.innerHTML = `<div class="${t.missing > 0 ? "bad-box" : "warn"}">
+    <strong>stock.html's dispatches fetch:</strong> returned ${t.returned} of ${t.total} rows${t.missing > 0 ? `, <strong>missing ${t.missing}</strong>` : " — complete"}.
+    ${t.missing > 0 ? `<div style="margin-top:6px">Rows it received span ${esc(t.got_oldest)} to ${esc(t.got_newest)}.
+      Rows it MISSED span ${esc(t.missing_oldest)} to ${esc(t.missing_newest)}. Any missed line means remaining reads HIGH.</div>` : ""}
+  </div>`;
+
+  const view = {}; view_rows.forEach(r => { view[r.id] = r; });
+  const ids = [...new Set([...cur.map(c => c.id), ...Object.keys(view)])].sort();
+
+  const rows = []; let differ = 0, appear = 0, vanish = 0;
+  ids.forEach(id => {
+    const a = cur.find(c => c.id === id), v = view[id];
+    const a_rem = a ? num(a.remaining) : null, v_rem = v ? num(v.remaining) : null;
+    const a_shown = a_rem != null && a_rem > 0, v_shown = v_rem != null && v_rem > 0;
+    const diff = (a_rem == null || v_rem == null) ? null : +(a_rem - v_rem).toFixed(2);
+    const bad = diff == null ? true : Math.abs(diff) > EPS;
+    if (bad) differ++;
+    if (!a_shown && v_shown) appear++;
+    if (a_shown && !v_shown) vanish++;
+    rows.push({
+      id, coffee: (v && v.coffee) || (a && a.coffee) || "—",
+      a_roasted: a ? num(a._roasted) : null, v_roasted: v ? num(v.total_roasted) : null,
+      a_disp: a ? num(a._dispatched) : null, v_disp: v ? num(v.packed_kg) : null,
+      a_rem, v_rem, diff, bad, a_shown, v_shown,
+      fill_start: v ? v.fill_start_date : null, fill_id: (v && v.fill_id) || (a && a.fill_id) || null,
+    });
+  });
+
+  const bad_rows = rows.filter(r => r.bad);
+  verdict.className = "verdict " + (differ === 0 ? "ok" : "no");
+  verdict.textContent = differ === 0
+    ? `IDENTICAL — ${ids.length} drums, remaining matches on every one. The stock.html change is speed-only.`
+    : `${differ} drum(s) change value. ${appear} would appear in the picker, ${vanish} would disappear. Read the table before uploading.`;
+
+  out.innerHTML = `
+    <h2>${bad_rows.length ? "Drums whose remaining changes" : "All drums"}</h2>
+    <p class="hint" style="margin:0 0 6px">Each cell shows <strong>stock.html now / view</strong>. Positive difference means stock.html is currently reading HIGH.</p>
+    <table>
+      <thead><tr><th>Drum</th><th>Coffee</th><th class="n">roasted</th><th class="n">dispatched</th>
+        <th class="n">remaining</th><th class="n">difference</th><th>in picker</th></tr></thead>
+      <tbody>
+        ${(bad_rows.length ? bad_rows : rows).map(r => `<tr class="${r.bad?"bad":""}">
+          <td class="mono">${esc(r.id)}</td><td>${esc(r.coffee)}</td>
+          <td class="n">${r.a_roasted==null?"—":r.a_roasted.toFixed(2)} / ${r.v_roasted==null?"—":r.v_roasted.toFixed(2)}</td>
+          <td class="n">${r.a_disp==null?"—":r.a_disp.toFixed(2)} / ${r.v_disp==null?"—":r.v_disp.toFixed(2)}</td>
+          <td class="n">${r.a_rem==null?"—":r.a_rem.toFixed(2)} / ${r.v_rem==null?"—":r.v_rem.toFixed(2)}</td>
+          <td class="n">${r.diff==null?"—":(r.diff>0?"+":"")+r.diff.toFixed(2)}</td>
+          <td>${r.a_shown===r.v_shown ? (r.a_shown?"yes":"no") : (r.a_shown?"yes &rarr; NO":"no &rarr; YES")}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+
+  // FIFO ordering: old sort was on fill_id, new sort is on fill_start_date
+  const shown = rows.filter(r => r.v_shown);
+  const by_coffee = {};
+  shown.forEach(r => { (by_coffee[r.coffee] = by_coffee[r.coffee] || []).push(r); });
+  const FAR = "9999-12-31";
+  const changed = Object.entries(by_coffee).filter(([, list]) => list.length > 1).map(([coffee, list]) => {
+    const old_order = [...list].sort((a,b) => (a.fill_id||"").localeCompare(b.fill_id||""));
+    const new_order = [...list].sort((a,b) => (a.fill_start||FAR).localeCompare(b.fill_start||FAR) || a.id.localeCompare(b.id));
+    return { coffee, old_first: old_order[0], new_first: new_order[0],
+             old_order: old_order.map(r=>r.id), new_order: new_order.map(r=>r.id) };
+  }).filter(x => x.old_first.id !== x.new_first.id);
+
+  order.innerHTML = `<h2>Staff picker auto-selection</h2>` + (changed.length === 0
+    ? `<p class="hint">No coffee has more than one drum with a different oldest, so the FIFO sort change picks the same drum as before.</p>`
+    : `<p class="hint" style="margin:0 0 6px">These coffees auto-select a different drum after the change. The new pick is the genuinely oldest fill.</p>
+      <table><thead><tr><th>Coffee</th><th>Picks now</th><th>Picks after</th><th>Order now</th><th>Order after</th></tr></thead>
+      <tbody>${changed.map(x => `<tr>
+        <td>${esc(x.coffee)}</td>
+        <td class="mono">${esc(x.old_first.id)} <span class="hint">(${esc(x.old_first.fill_start||"?")})</span></td>
+        <td class="mono">${esc(x.new_first.id)} <span class="hint">(${esc(x.new_first.fill_start||"?")})</span></td>
+        <td class="mono hint">${x.old_order.map(esc).join(" &rarr; ")}</td>
+        <td class="mono hint">${x.new_order.map(esc).join(" &rarr; ")}</td>
+      </tr>`).join("")}</tbody></table>`);
+
+  status.textContent = `Done — ${ids.length} drums compared.`;
+}
+
+document.getElementById("again").addEventListener("click", run);
+run();
+</script>
+</body>
+</html>
