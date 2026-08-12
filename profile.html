@@ -118,6 +118,17 @@ async function run() {
 }
 
 // ── B: the new two-phase load, mirroring load_data() in roastery-traceability.html ──────────
+async function fetch_pages(build) {
+  const PAGE = 1000, out = [];
+  for (let page = 0; page < 25; page++) {
+    const { data, error } = await build().range(page * PAGE, page * PAGE + PAGE - 1);
+    if (error) { console.error("[profile] page fetch failed:", error.message); break; }
+    if (!data || !data.length) break;
+    out.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return out;
+}
 function chunk_list(arr, size) {
   const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out;
 }
@@ -173,7 +184,17 @@ async function run_new() {
     </div>`;
 }
 
-async function run_all() { await run(); await run_new(); }
+async function run_all() {
+  try { await run(); } catch (e) { show_error("out", e); }
+  try { await run_new(); } catch (e) { show_error("out2", e); }
+}
+function show_error(target_id, err) {
+  console.error(err);
+  const el = document.getElementById(target_id);
+  if (el) el.innerHTML = `<div class="warn" style="background:#fdf5f5;border-color:#f3d4d4">
+    <strong>This section failed:</strong> <span class="mono">${esc(err && err.message ? err.message : String(err))}</span>
+    <div style="margin-top:6px">Full stack in the browser console.</div></div>`;
+}
 document.getElementById("again").addEventListener("click", run_all);
 run_all();
 </script>
