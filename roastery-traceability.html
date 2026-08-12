@@ -333,13 +333,6 @@ async function render_qr(el, value, size=140) {
   new window.QRCode(el,{text:value,width:size,height:size,colorDark:"#1a1a1a",colorLight:"#fff",correctLevel:window.QRCode.CorrectLevel.M});
 }
 
-// Split an array into fixed-size chunks so a long .in(...) list can't overflow the request URL.
-function chunk_list(arr, size) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
 // Fetch EVERY row matching a query, paging past Supabase's 1000-row cap. `build` is a factory because a
 // query builder can't be reused across requests. In the normal case (under 1000 rows) this costs exactly
 // one round trip — the loop exits on the first short page — so there's no penalty for the safety.
@@ -377,18 +370,24 @@ function local_date_str(days_back) {
 // Consumer 2 needs the live-bucket list first, so the dispatch fetch stays in a second phase. Folding
 // that into a v_bucket_state view would collapse this to a single round trip.
 async function load_data() {
-  // ── PHASE 1: reference tables, buckets, and drum state from the view. One parallel batch.
-  // All page past the 1000-row cap; under 1000 rows that is still one round trip each. Each carries a
-  // deterministic tiebreaker on id, because paging without one can overlap or skip rows. Primary sorts
-  // are unchanged where downstream logic depends on them — dispatch_buckets must stay newest-scan-first.
+  // Seven independent reads in ONE parallel batch — one network round trip. Drum state comes from
+  // v_container_state and bucket location from v_bucket_state, so nothing here has to be fetched before
+  // something else can be derived. The dispatches query no longer depends on the bucket list.
+  //
+  // All of them page past the 1000-row cap; under 1000 rows that is still a single request each. Each
+  // carries a deterministic tiebreaker on id, because paging without one can overlap or skip rows.
+  const D_SELECT = "*, dispatch_lines(*)";
+  // One day of slack on the date bound so nothing near a midnight/UTC boundary can be missed. Extra rows
+  // are harmless — the Deliveries tab still filters to its own definition of "today".
+  const since = local_date_str(1);
   const [
     coffees_data,
     fp_codes_data,
     fp_assign_data,
     shop_mappings_data,
-    buckets_data,
+    bucket_state,
     container_state,
-    dispatch_buckets_data,
+    dispatch_rows,
   ] = await Promise.all([
     fetch_pages("coffees", () => supabaseClient.from("coffees")
       .select("id, name, retired_at").order("name")),
@@ -399,15 +398,18 @@ async function load_data() {
       .order("id", { ascending: true })),
     fetch_pages("shop_mappings", () => supabaseClient.from("shop_mappings")
       .select("parsed_name, master_name, shop_qr_id, kind").order("id", { ascending: true })),
-    // Only the columns this page reads — condition/filled_at/notes/label_printed_at are write-only here.
-    fetch_pages("buckets", () => supabaseClient.from("buckets")
-      .select("id, name, coffee, status, retired_at, fill_id, container_id")
+    // location and last_shop are derived in the view — see sql/v_bucket_state.sql. Same primary sort as
+    // the old direct buckets query, since the fill-suggestion ordering follows it.
+    fetch_pages("v_bucket_state", () => supabaseClient.from("v_bucket_state")
+      .select("id, name, coffee, status, retired_at, fill_id, container_id, location, last_shop")
       .order("created_at", { ascending: false }).order("id", { ascending: true })),
     fetch_pages("v_container_state", () => supabaseClient.from("v_container_state")
       .select("*").order("id", { ascending: true })),
-    fetch_pages("dispatch_buckets", () => supabaseClient.from("dispatch_buckets")
-      .select("bucket_id, dispatch_id, scanned_at")
-      .order("scanned_at", { ascending: false }).order("id", { ascending: true })),
+    // Only what the Deliveries tab, the badges and the pending-per-container/shop lookups read:
+    // anything unconfirmed at any age, plus the last day. Bucket location no longer needs dispatches.
+    fetch_pages("dispatches:pending+recent", () =>
+      supabaseClient.from("dispatches").select(D_SELECT)
+        .or(`confirmed_at.is.null,date.gte.${since}`).order("id", { ascending: true })),
   ]);
 
   // Load all coffees + FPs (incl. retired) — used for historical lookups so dispatches that reference
@@ -441,8 +443,8 @@ async function load_data() {
   }));
   state.shop_mappings = shop_mappings_data || [];
 
-  // Load buckets with their lifecycle state
-  state.buckets = buckets_data || [];
+  // Buckets, with location ('filled' | 'empty' | 'in_transit' | 'at_shop') and last_shop already derived.
+  state.buckets = bucket_state || [];
 
   // Drum state straight from the view. PostgREST can serialise numeric as a string, so the kg fields are
   // coerced once here and every consumer downstream can treat them as numbers.
@@ -461,52 +463,10 @@ async function load_data() {
     remaining: as_kg(c.remaining),
   }));
 
-  // ── PHASE 2: only the dispatches the two consumers above need, derived from the bucket list.
-  // Any bucket holding coffee or out at a shop, retired or not. Retired ones aren't shown in the Buckets
-  // tab today, but excluding them here would make _bucket_to_dispatch quietly incomplete for any future
-  // consumer — and including them costs a handful of ids.
-  const live_bucket_ids = new Set(
-    buckets_data.filter(b => b.status === "filled" || b.status === "dispatched").map(b => b.id)
-  );
-  const live_dispatch_ids = [...new Set(
-    dispatch_buckets_data.filter(db => live_bucket_ids.has(db.bucket_id)).map(db => db.dispatch_id).filter(Boolean)
-  )];
-
-  const D_SELECT = "*, dispatch_lines(*)";
-  // One day of slack on the date bound so nothing near a midnight/UTC boundary can be missed. Extra rows
-  // are harmless — the Deliveries tab still filters to its own definition of "today".
-  const since = local_date_str(1);
-  // Both page past the 1000-row cap, so neither can silently truncate as history builds up.
-  // .order("id") makes the paging deterministic — without it, pages can overlap or skip rows.
-  const batches = await Promise.all([
-    // (1) pending + recent, for the Deliveries tab, badges and the pending-per-container/shop lookups
-    fetch_pages("dispatches:pending+recent", () =>
-      supabaseClient.from("dispatches").select(D_SELECT)
-        .or(`confirmed_at.is.null,date.gte.${since}`).order("id", { ascending: true })),
-    // (2) the dispatches live buckets went out on, at any age — drives at-shop vs in-transit
-    ...chunk_list(live_dispatch_ids, 100).map((ids, n) =>
-      fetch_pages(`dispatches:live_buckets[${n}]`, () =>
-        supabaseClient.from("dispatches").select(D_SELECT)
-          .in("id", ids).order("id", { ascending: true }))),
-  ]);
-  const dispatch_by_id = new Map();
-  batches.forEach(rows => {
-    rows.forEach(d => { if (!dispatch_by_id.has(d.id)) dispatch_by_id.set(d.id, d); });
-  });
-  // Same newest-first order the single query used to return, so downstream ordering is unchanged.
-  state.dispatches = [...dispatch_by_id.values()]
+  // Newest-first, matching the order the original single dispatches query returned.
+  state.dispatches = (dispatch_rows || [])
     .sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.id||"").localeCompare(a.id||""))
     .map(d => ({ ...d, lines: d.dispatch_lines || [] }));
-
-  // Build a bucket_id → dispatch lookup so we can derive in-transit vs at-shop status
-  state._bucket_to_dispatch = {};
-  (dispatch_buckets_data || []).forEach(db => {
-    if (!state._bucket_to_dispatch[db.bucket_id]) {
-      const d = state.dispatches.find(x => x.id === db.dispatch_id);
-      if (d) state._bucket_to_dispatch[db.bucket_id] = d;
-    }
-  });
-
 }
 
 // New dispatch save with per-line container/fill tagging (FIFO mode)
@@ -1174,12 +1134,12 @@ function build_buckets_tab() {
   const empty_buckets  = all_buckets.filter(b => b.status === "empty");
   const dispatched_buckets = all_buckets.filter(b => b.status === "dispatched");
 
-  const bucket_to_dispatch = state._bucket_to_dispatch || {};
+  // location and last_shop come from v_bucket_state, so the in-transit / at-shop split no longer needs
+  // a client-side bucket→dispatch lookup.
   const in_transit_buckets = [], at_shop_buckets = [];
   dispatched_buckets.forEach(b => {
-    const d = bucket_to_dispatch[b.id];
-    if (d && d.confirmed_at) at_shop_buckets.push({ ...b, _shop: d.shop });
-    else in_transit_buckets.push({ ...b, _shop: d ? d.shop : null });
+    if (b.location === "at_shop") at_shop_buckets.push({ ...b, _shop: b.last_shop || null });
+    else                          in_transit_buckets.push({ ...b, _shop: b.last_shop || null });
   });
 
   const buckets_filled  = filled_buckets.length;

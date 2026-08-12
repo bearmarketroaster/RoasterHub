@@ -32,7 +32,7 @@
     <div id="status">Checking session…</div>
     <h2 style="font-size:15px;margin:18px 0 8px">A · OLD load — every dispatch, newest 1000 by date</h2>
     <div id="out"></div>
-    <h2 style="font-size:15px;margin:26px 0 8px">B · NEW load — working set, then only the dispatches consumers need</h2>
+    <h2 style="font-size:15px;margin:26px 0 8px">B · NEW load — one parallel batch, drum and bucket state from views</h2>
     <div id="out2"></div>
     <div id="verdict"></div>
   </div>
@@ -131,94 +131,45 @@ async function run_new() {
   const verdict = document.getElementById("verdict");
   out2.innerHTML = ""; verdict.innerHTML = "";
 
-  const t_all = performance.now();
-
-  // PHASE 1 — the working set
-  const t1 = performance.now();
-  const [
-    { data: coffees_data }, { data: fp_codes_data }, { data: fp_assign_data },
-    { data: shop_mappings_data }, { data: buckets_data }, { data: roast_sessions },
-    { data: container_rows }, { data: dispatch_buckets_data },
-  ] = await Promise.all([
-    supabaseClient.from("coffees").select("id, name, retired_at").order("name"),
-    supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
-    supabaseClient.from("fp_assignments").select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)"),
-    supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind"),
-    supabaseClient.from("buckets").select("id, name, coffee, status, retired_at, fill_id, container_id").order("created_at", { ascending: false }),
-    supabaseClient.from("roast_sessions").select("id, coffee, date, container_id, roasted_weight, fill_id").order("date", { ascending: false }),
-    supabaseClient.from("containers").select("id, status, status_changed_at, retired_at").is("retired_at", null),
-    supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false }),
-  ]);
-  const phase1_ms = Math.round(performance.now() - t1);
-  const phase1_kb = Math.round([coffees_data, fp_codes_data, fp_assign_data, shop_mappings_data,
-    buckets_data, roast_sessions, container_rows, dispatch_buckets_data]
-    .reduce((a, d) => a + JSON.stringify(d || []).length, 0) / 1024);
-
-  // derive the working set exactly as load_data does
-  const seen = {}, current_fills_set = new Set();
-  (roast_sessions || []).forEach(s => {
-    if (!s.container_id || seen[s.container_id]) return;
-    seen[s.container_id] = true;               // newest-first, so first seen = current fill
-    if (s.fill_id) current_fills_set.add(s.fill_id);
-  });
-  const current_fills = [...current_fills_set];
-  const live_bucket_ids = new Set((buckets_data || [])
-    .filter(b => b.status === "filled" || b.status === "dispatched").map(b => b.id));
-  const live_dispatch_ids = [...new Set((dispatch_buckets_data || [])
-    .filter(db => live_bucket_ids.has(db.bucket_id)).map(db => db.dispatch_id).filter(Boolean))];
-
-  // PHASE 2 — only the dispatches the consumers need
-  const D_SELECT = "*, dispatch_lines(*)";
+  const D = "*, dispatch_lines(*)";
   const since = local_date_str(1);
-  const t2 = performance.now();
-  async function fetch_pages(build) {
-    const PAGE = 1000, out = [];
-    for (let page = 0; page < 25; page++) {
-      const { data, error } = await build().range(page * PAGE, page * PAGE + PAGE - 1);
-      if (error || !data || !data.length) break;
-      out.push(...data);
-      if (data.length < PAGE) break;
-    }
-    return out;
-  }
-  const results = await Promise.all([
-    fetch_pages(() => supabaseClient.from("dispatches").select(D_SELECT).or(`confirmed_at.is.null,date.gte.${since}`).order("id", { ascending: true })),
-    ...chunk_list(current_fills, 50).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D_SELECT).in("fill_id", ids).order("id", { ascending: true }))),
-    ...chunk_list(live_dispatch_ids, 100).map(ids => fetch_pages(() => supabaseClient.from("dispatches").select(D_SELECT).in("id", ids).order("id", { ascending: true }))),
+  const t0 = performance.now();
+  const [coffees, fp_codes, fp_assign, shops, bstate, cstate, disp] = await Promise.all([
+    fetch_pages(() => supabaseClient.from("coffees").select("id, name, retired_at").order("name")),
+    fetch_pages(() => supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code")),
+    fetch_pages(() => supabaseClient.from("fp_assignments").select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)").order("id",{ascending:true})),
+    fetch_pages(() => supabaseClient.from("shop_mappings").select("parsed_name, master_name, shop_qr_id, kind").order("id",{ascending:true})),
+    fetch_pages(() => supabaseClient.from("v_bucket_state").select("id, name, coffee, status, retired_at, fill_id, container_id, location, last_shop").order("created_at",{ascending:false}).order("id",{ascending:true})),
+    fetch_pages(() => supabaseClient.from("v_container_state").select("*").order("id",{ascending:true})),
+    fetch_pages(() => supabaseClient.from("dispatches").select(D).or(`confirmed_at.is.null,date.gte.${since}`).order("id",{ascending:true})),
   ]);
-  const phase2_ms = Math.round(performance.now() - t2);
-  const by_id = new Map();
-  const capped2 = false;
-  results.forEach(rows => rows.forEach(d => { if (!by_id.has(d.id)) by_id.set(d.id, d); }));
-  const merged = [...by_id.values()];
-  const disp_kb = Math.round(JSON.stringify(merged).length / 1024);
-  const total_ms = Math.round(performance.now() - t_all);
-  const total_kb = phase1_kb + disp_kb;
+  const total_ms = Math.round(performance.now() - t0);
+
+  const rows = [
+    ["coffees", coffees], ["fp_codes", fp_codes], ["fp_assignments", fp_assign],
+    ["shop_mappings", shops], ["v_bucket_state", bstate], ["v_container_state", cstate],
+    ["dispatches (pending+recent)", disp],
+  ].map(([name, d]) => ({ name, rows: (d||[]).length, kb: Math.round(JSON.stringify(d||[]).length/1024) }))
+   .sort((a,b) => b.kb - a.kb);
+  const total_kb = rows.reduce((a,r) => a + r.kb, 0);
 
   out2.innerHTML = `
     <table>
-      <thead><tr><th>Step</th><th class="n">ms</th><th class="n">Rows</th><th class="n">KB</th></tr></thead>
-      <tbody>
-        <tr><td class="mono">phase 1 — working set (8 queries, parallel)</td><td class="n">${phase1_ms}</td><td class="n">—</td><td class="n">${phase1_kb}</td></tr>
-        <tr><td class="mono">phase 2 — dispatches (${results.length} queries, parallel)</td><td class="n">${phase2_ms}</td><td class="n ${capped2 ? "slow" : ""}">${merged.length}</td><td class="n">${disp_kb}</td></tr>
-      </tbody>
+      <thead><tr><th>Query</th><th class="n">Rows</th><th class="n">KB</th></tr></thead>
+      <tbody>${rows.map(r => `<tr><td class="mono">${esc(r.name)}</td><td class="n ${r.rows>=800?"slow":""}">${r.rows}</td><td class="n">${r.kb}</td></tr>`).join("")}</tbody>
     </table>
-    <div class="total">Total: ${total_ms} ms · ${total_kb} KB</div>
-    <div class="hint" style="margin:6px 0 0">
-      Derived working set: ${current_fills.length} current fill${current_fills.length===1?"":"s"},
-      ${live_bucket_ids.size} live bucket${live_bucket_ids.size===1?"":"s"},
-      ${live_dispatch_ids.length} dispatch${live_dispatch_ids.length===1?"":"es"} referenced by live buckets.
-    </div>
-    ${capped2 ? `<div class="warn"><strong>Row cap hit in phase 2</strong> — one of the filtered queries returned 1000 rows. Tell Claude.</div>` : ""}`;
+    <div class="total">One parallel batch, 7 queries: ${total_ms} ms &middot; ${total_kb} KB</div>
+    <div class="hint" style="margin:6px 0 0">No second phase — drum state and bucket location are computed by
+    v_container_state / v_bucket_state, so nothing has to be fetched before something else can be derived.</div>
+    ${rows.filter(r=>r.rows>=800).length ? `<div class="warn"><strong>Approaching the 1000-row cap:</strong> ${rows.filter(r=>r.rows>=800).map(r=>`${esc(r.name)} (${r.rows})`).join(", ")}. Paginated, so nothing is lost.</div>` : ""}`;
 
-  const old_kb = window.__old_total_kb || 0;
-  const old_rows = window.__old_disp_rows || 0;
+  const old_kb = window.__old_total_kb || 0, old_rows = window.__old_disp_rows || 0;
   verdict.innerHTML = `<div class="warn" style="background:#f0f7f2;border-color:#bfe0cb">
-      <strong>Old vs new:</strong> dispatch rows ${old_rows} → ${merged.length}
-      &nbsp;·&nbsp; total payload ${old_kb} KB → ${total_kb} KB
-      ${old_kb ? ` (${Math.round((1 - total_kb / old_kb) * 100)}% smaller)` : ""}
-      <div style="margin-top:6px">Section A above is the OLD query, kept for comparison — it will always
-      show 1000 rows. Section B is what the app actually does now.</div>
+      <strong>Old vs new:</strong> dispatch rows ${old_rows} &rarr; ${disp.length}
+      &nbsp;&middot;&nbsp; total payload ${old_kb} KB &rarr; ${total_kb} KB
+      ${old_kb ? ` (${Math.round((1 - total_kb/old_kb)*100)}% smaller)` : ""}
+      <div style="margin-top:6px">Section A above is the OLD single-fetch load, kept for comparison &mdash; it will
+      always show 1000 rows. Section B is what the app does now.</div>
     </div>`;
 }
 
