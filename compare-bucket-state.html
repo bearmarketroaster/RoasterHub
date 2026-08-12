@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>v_bucket_state — equivalence check</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<style>
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:#f4f2ed; color:#1a1a1a; margin:0; padding:24px; }
+  .wrap { max-width:1100px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:22px 0 8px; }
+  .hint { color:#666; font-size:13px; margin:0 0 18px; }
+  .card { background:#fff; border:1px solid #e8e6e1; border-radius:12px; padding:18px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:#666; border-bottom:1px solid #e8e6e1; padding:7px 5px; }
+  td { padding:7px 5px; border-bottom:1px solid #f0eee9; font-variant-numeric:tabular-nums; }
+  td.n { text-align:right; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  tr.bad { background:#fdf5f5; } tr.bad td { color:#dc2626; font-weight:700; }
+  .verdict { font-size:17px; font-weight:800; padding:14px; border-radius:10px; margin-bottom:14px; }
+  .ok { background:#f0f7f2; color:#15803d; border:1px solid #bfe0cb; }
+  .no { background:#fdf5f5; color:#dc2626; border:1px solid #f3d4d4; }
+  .warn { background:#fff7ed; border:1px solid #f5d9b8; border-radius:8px; padding:10px 12px; font-size:13px; margin-top:12px; }
+  button { background:#1a1a1a; color:#fff; border:0; border-radius:8px; padding:12px 20px; font-size:15px; font-weight:600; cursor:pointer; }
+  #status { font-size:14px; color:#666; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>v_bucket_state — equivalence check</h1>
+  <p class="hint">Compares what the app's current bucket logic decides against what the new view decides, for every bucket. Compares the <strong>outcome</strong> — which group a bucket lands in on the Buckets tab, and its shop label — not the intermediate lookup. Read-only, writes nothing. Nothing in the app uses this view yet.</p>
+  <div class="card">
+    <div id="status">Checking session…</div>
+    <div id="verdict"></div>
+    <div id="summary"></div>
+    <div id="out"></div>
+  </div>
+  <div class="card"><button id="again">Run again</button></div>
+</div>
+
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function chunk_list(a,n){ const o=[]; for(let i=0;i<a.length;i+=n) o.push(a.slice(i,i+n)); return o; }
+function local_date_str(back){ const d=new Date(); if(back) d.setDate(d.getDate()-back);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+async function fetch_pages(build){
+  const PAGE=1000, out=[];
+  for(let p=0;p<25;p++){
+    const {data,error}=await build().range(p*PAGE,p*PAGE+PAGE-1);
+    if(error){ console.error(error.message); break; }
+    if(!data||!data.length) break;
+    out.push(...data);
+    if(data.length<PAGE) break;
+  }
+  return out;
+}
+
+// ── The app's current logic, copied from load_data() + build_buckets_tab() ────
+async function js_bucket_state() {
+  const [buckets, dispatch_buckets] = await Promise.all([
+    fetch_pages(() => supabaseClient.from("buckets")
+      .select("id, name, coffee, status, retired_at, fill_id, container_id")
+      .order("created_at",{ascending:false}).order("id",{ascending:true})),
+    fetch_pages(() => supabaseClient.from("dispatch_buckets")
+      .select("bucket_id, dispatch_id, scanned_at")
+      .order("scanned_at",{ascending:false}).order("id",{ascending:true})),
+  ]);
+
+  const live_bucket_ids = new Set(
+    buckets.filter(b => b.status === "filled" || b.status === "dispatched").map(b => b.id)
+  );
+  const live_dispatch_ids = [...new Set(
+    dispatch_buckets.filter(db => live_bucket_ids.has(db.bucket_id)).map(db => db.dispatch_id).filter(Boolean)
+  )];
+
+  const D = "*, dispatch_lines(*)";
+  const since = local_date_str(1);
+  const batches = await Promise.all([
+    fetch_pages(() => supabaseClient.from("dispatches").select(D)
+      .or(`confirmed_at.is.null,date.gte.${since}`).order("id",{ascending:true})),
+    ...chunk_list(live_dispatch_ids,100).map(ids => fetch_pages(() =>
+      supabaseClient.from("dispatches").select(D).in("id",ids).order("id",{ascending:true}))),
+  ]);
+  const by_id = new Map();
+  batches.forEach(rows => rows.forEach(d => { if(!by_id.has(d.id)) by_id.set(d.id,d); }));
+  const dispatches = [...by_id.values()];
+
+  // _bucket_to_dispatch, exactly as load_data builds it
+  const b2d = {};
+  dispatch_buckets.forEach(db => {
+    if (!b2d[db.bucket_id]) {
+      const d = dispatches.find(x => x.id === db.dispatch_id);
+      if (d) b2d[db.bucket_id] = d;
+    }
+  });
+
+  // grouping, exactly as build_buckets_tab does it (retired buckets are excluded there)
+  const out = {};
+  buckets.forEach(b => {
+    if (b.retired_at) { out[b.id] = { group: "retired", shop: null }; return; }
+    if (b.status === "dispatched") {
+      const d = b2d[b.id];
+      if (d && d.confirmed_at) out[b.id] = { group: "at_shop",    shop: d.shop || null };
+      else                     out[b.id] = { group: "in_transit", shop: d ? (d.shop||null) : null };
+    } else {
+      out[b.id] = { group: b.status, shop: null };
+    }
+  });
+  return { map: out, buckets };
+}
+
+async function run() {
+  const status = document.getElementById("status");
+  const out = document.getElementById("out");
+  const verdict = document.getElementById("verdict");
+  const summary = document.getElementById("summary");
+  out.innerHTML = ""; verdict.innerHTML = ""; summary.innerHTML = "";
+
+  const { data:{ session } } = await supabaseClient.auth.getSession();
+  if (!session) { status.innerHTML = 'Not logged in — open <span class="mono">login.html</span> first, then reload.'; return; }
+  status.textContent = "Running both pipelines…";
+
+  const [{ map: js, buckets }, view_rows] = await Promise.all([
+    js_bucket_state(),
+    fetch_pages(() => supabaseClient.from("v_bucket_state")
+      .select("id, name, status, retired_at, container_id, location, last_shop")
+      .order("id",{ascending:true})),
+  ]);
+
+  if (!view_rows || !view_rows.length) {
+    status.textContent = "";
+    verdict.className = "verdict no";
+    verdict.textContent = "The view returned nothing — has sql/v_bucket_state.sql been run yet?";
+    return;
+  }
+
+  const view = {}; view_rows.forEach(r => { view[r.id] = r; });
+  const ids = [...new Set([...Object.keys(js), ...Object.keys(view)])].sort();
+
+  const rows = [];
+  let mismatch = 0, extra_shop = 0;
+  const tally = {};
+
+  ids.forEach(id => {
+    const a = js[id], v = view[id];
+    const b = buckets.find(x => x.id === id);
+    // view group, applying the same "retired buckets are not shown" rule the tab applies
+    const v_group = !v ? "missing" : (v.retired_at ? "retired" : v.location);
+    const a_group = a ? a.group : "missing";
+    const v_shop = v && !v.retired_at && v.location === "at_shop" || (v && v.location === "in_transit")
+      ? (v.last_shop || null) : null;
+    const a_shop = a ? a.shop : null;
+
+    tally[v_group] = (tally[v_group] || 0) + 1;
+
+    const group_same = a_group === v_group;
+    // A populated shop where the JS had none, on a bucket that isn't dispatched, is the
+    // documented extra-accuracy case — not a mismatch.
+    const shop_same = (a_shop || null) === (v_shop || null);
+    const informational = !shop_same && a_shop == null && v_shop != null && v_group !== "at_shop" && v_group !== "in_transit";
+    if (informational) extra_shop++;
+
+    const bad = !group_same || (!shop_same && !informational);
+    if (bad) mismatch++;
+    rows.push({
+      id, name: b ? (b.name || "") : "",
+      a_group, v_group, a_shop, v_shop, bad, informational,
+    });
+  });
+
+  const bad_rows = rows.filter(r => r.bad);
+  verdict.className = "verdict " + (mismatch === 0 ? "ok" : "no");
+  verdict.textContent = mismatch === 0
+    ? `EQUIVALENT — ${ids.length} buckets, every group and shop label matches. Safe to migrate.`
+    : `${mismatch} bucket(s) differ. Do NOT migrate — send this to Claude.`;
+
+  summary.innerHTML = `<p class="hint" style="margin:12px 0 0">View group tally: ${
+    Object.entries(tally).sort((a,b)=>b[1]-a[1]).map(([k,n])=>`<strong>${esc(k)}</strong> ${n}`).join(" &middot; ")
+  }</p>`;
+
+  out.innerHTML = `
+    <h2>${bad_rows.length ? "Differing buckets" : "All buckets"}</h2>
+    <table>
+      <thead><tr><th>Bucket</th><th>Name</th><th>group (app / view)</th><th>shop (app / view)</th></tr></thead>
+      <tbody>
+        ${(bad_rows.length ? bad_rows : rows).map(r => `<tr class="${r.bad?"bad":""}">
+          <td class="mono">${esc(r.id)}</td>
+          <td>${esc(r.name)}</td>
+          <td>${r.a_group === r.v_group ? esc(r.a_group) : `${esc(r.a_group)} / ${esc(r.v_group)}`}</td>
+          <td>${(r.a_shop||null) === (r.v_shop||null) ? esc(r.a_shop || "—") : `${esc(r.a_shop||"—")} / ${esc(r.v_shop||"—")}`}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+    ${extra_shop ? `<div class="warn"><strong>${extra_shop} bucket(s)</strong> have dispatch history in the view where the app had none — non-dispatched buckets whose past dispatch the app never fetched. Extra accuracy, not a mismatch; nothing reads it.</div>` : ""}`;
+  status.textContent = `Done — ${ids.length} buckets compared.`;
+}
+
+document.getElementById("again").addEventListener("click", run);
+run();
+</script>
+</body>
+</html>
