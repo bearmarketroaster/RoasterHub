@@ -158,26 +158,27 @@ async function load_data() {
   }));
   state.contract_delivered = drawn;
 
-  // Load active containers + their fills + dispatches, compute remaining for the staff picker
-  const [{ data: container_rows }, { data: roast_sessions }, { data: all_dispatches }, { data: all_buckets }] = await Promise.all([
-    supabaseClient.from("containers").select("id, name, status, retired_at").is("retired_at", null),
-    supabaseClient.from("roast_sessions").select("id, container_id, fill_id, coffee, date, roasted_weight").order("date", { ascending: false }),
-    supabaseClient.from("dispatches").select("id, shop, date, container_id, fill_id, dispatch_lines(kg, fill_id, container_id)"),
-    supabaseClient.from("buckets").select("id, container_id, fill_id, status"),
-  ]);
-  const containers = (container_rows || []).filter(c => c.status === "active" || c.status === "waiting");
-  containers.forEach(c => {
-    // Use the most-recent roast session for this container as its "current fill"
-    const latest_roast = (roast_sessions || []).find(s => s.container_id === c.id);
-    if (!latest_roast) { c.coffee = null; c.remaining = 0; return; }
-    c.coffee = latest_roast.coffee;
-    c.fill_id = latest_roast.fill_id;
-    // remaining = roasted - dispatched_kg (line-level) - held_in_buckets (5kg each)
-    const dispatched_kg = (all_dispatches || []).reduce((s, d) => s + (d.dispatch_lines || []).filter(l => l.fill_id === c.fill_id || (!l.fill_id && l.container_id === c.id)).reduce((ss, l) => ss + (Number(l.kg) || 0), 0), 0);
-    const held_in_buckets = (all_buckets || []).filter(b => b.fill_id === c.fill_id && b.status === "filled").length * 5;
-    c.remaining = Math.max(0, Number(latest_roast.roasted_weight || 0) - dispatched_kg - held_in_buckets);
-  });
-  state.containers = containers.filter(c => c.remaining > 0);
+  // Drum state comes from v_container_state — see sql/v_container_state.sql. That is the single definition
+  // of "remaining", shared with roastery-traceability.html, roaster.html and reports-packing.html, so the
+  // staff picker can no longer disagree with the packing screen about how much is in a drum.
+  //
+  // This replaced four queries (containers, roast_sessions, dispatches, buckets) and a local formula that
+  // had four defects: it counted only the NEWEST roast session's weight rather than the whole fill (a
+  // topped-up drum read low); it counted dispatch lines with a NULL fill_id against the drum; its
+  // dispatches fetch had no ORDER BY and no pagination, so it received an arbitrary 1000 of 1000+ rows
+  // and silently missed lines (reading high, differently on each load); and it matched buckets on fill_id
+  // without checking the container.
+  //
+  // Bounded by the number of physical drums, so a single unpaginated read is safe here — unlike the
+  // dispatches table this used to scan.
+  const { data: container_state } = await supabaseClient.from("v_container_state")
+    .select("id, coffee, fill_id, status, fill_start_date, remaining")
+    .in("status", ["active", "waiting"])
+    .order("id", { ascending: true });
+  const to_kg = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  state.containers = (container_state || [])
+    .map(c => ({ ...c, remaining: to_kg(c.remaining) }))
+    .filter(c => c.remaining > 0);
 
   // Load recent staff takeaways for display in the staff tab
   const { data: staff_disps } = await supabaseClient.from("dispatches").select("id, shop, date, total_kg, container_id, fill_id, dispatch_lines(*)").eq("shop", "Staff").order("date", { ascending: false }).limit(50);
@@ -758,10 +759,15 @@ function build_staff() {
   const s = state.ui.staff;
   // Coffees available = those that have an active container with stock
   const coffees_with_stock = [...new Set(state.containers.map(c => c.coffee).filter(Boolean))].sort();
-  // Containers matching the selected coffee, ordered oldest first (FIFO)
+  // Containers matching the selected coffee, oldest fill first (FIFO).
+  // This used to sort on fill_id, but fill_id is CONTAINER-YYYYMMDD-slug — so it ordered by drum name
+  // first and the date never got a look in: L01 filled today sorted ahead of XL04 filled last week.
+  // fill_start_date is the actual age of the fill, and top-up roasts don't reset it.
+  const FAR = "9999-12-31";
   const matching_containers = state.containers
     .filter(c => c.coffee === s.coffee)
-    .sort((a, b) => (a.fill_id || "").localeCompare(b.fill_id || ""));
+    .sort((a, b) => (a.fill_start_date || FAR).localeCompare(b.fill_start_date || FAR)
+                 || (a.id || "").localeCompare(b.id || ""));
   // Auto-select the oldest container if one isn't picked yet
   if (!s.container_id && matching_containers.length > 0) {
     s.container_id = matching_containers[0].id;
