@@ -111,6 +111,10 @@ const state = {
     pending_invoice_file: null,   // File object staged for upload after delivery saves
     pending_contract_file: null,  // File staged for upload after contract saves
     adj: { coffee: "", change_kg: "", reason: "", note: "" },   // no default: the kind must be chosen
+    // Attaching an invoice to an arrival that was logged before the invoice arrived.
+    // Only invoice_ref, the PDF and per-line price_per_kg are editable — the physical
+    // facts of a delivery are recorded on the day and not revised.
+    invoice_edit: null,        // { arrival_id, invoice_ref, prices: { line_id: value }, file, err, saving }
     staff: { coffee: "", container_id: "", bag_size: "200g", err: "", saving: false },
   },
 };
@@ -276,6 +280,53 @@ async function save_delivery() {
   }
   state.saving=false; state.ui.show_delivery_form=false; state.ui.delivery_err="";
   state.ui.delivery=new_delivery(); state.ui.pending_invoice_file=null;
+  await load_data(); render();
+}
+
+// Attach or update invoice detail on an arrival. Only invoice_ref, the PDF and per-line
+// price_per_kg are touched — the physical facts of the delivery stay as recorded on the day.
+// Applies the ref and PDF across every line of the arrival, since one invoice covers all of it.
+async function save_invoice_detail() {
+  const e = state.ui.invoice_edit;
+  if (!e) return;
+  const arrival = state.deliveries.find(d => d.id === e.arrival_id);
+  if (!arrival) { e.err = "That delivery is no longer loaded — reload and try again."; render(); return; }
+
+  const ref = (document.getElementById("inv-ref")?.value || "").trim();
+  if (!ref) { e.err = "Enter the invoice reference."; render(); return; }
+
+  e.saving = true; e.err = ""; render();
+
+  // Upload the PDF first: if it fails, nothing has been changed yet.
+  let invoice_path = arrival.invoice_path || null;
+  const file = document.getElementById("inv-file")?.files?.[0] || null;
+  if (file) {
+    const safe = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+    const path = `${e.arrival_id}/${safe}`;
+    const { error: up_err } = await supabaseClient.storage.from("invoices").upload(path, file, { upsert: true });
+    if (up_err) { e.saving = false; e.err = "Failed to upload the PDF: " + up_err.message; render(); return; }
+    invoice_path = path;
+  }
+
+  // Ref + PDF across the whole arrival.
+  const { error: ref_err } = await supabaseClient.from("green_deliveries")
+    .update({ invoice_ref: ref, invoice_path })
+    .eq("arrival_id", e.arrival_id);
+  if (ref_err) { e.saving = false; e.err = "Failed to save: " + ref_err.message; render(); return; }
+
+  // Prices are per coffee, so one update per changed line.
+  for (const item of arrival.items) {
+    const raw = e.prices[item.id];
+    if (raw === undefined || raw === "") continue;
+    const price = Number(raw);
+    if (!Number.isFinite(price) || price < 0) continue;
+    if (Number(item.price_per_kg ?? -1) === price) continue;      // unchanged
+    const { error: p_err } = await supabaseClient.from("green_deliveries")
+      .update({ price_per_kg: price }).eq("id", item.id);
+    if (p_err) { e.saving = false; e.err = "Failed to save a price: " + p_err.message; render(); return; }
+  }
+
+  state.ui.invoice_edit = null;
   await load_data(); render();
 }
 
@@ -570,6 +621,70 @@ function build_deliveries() {
       </div>
     </div>` : "";
 
+  // Invoice editor. Opens under the arrival it belongs to. Deliberately narrow: an invoice
+  // arriving weeks later tells you the reference and the price, not what physically turned up.
+  const invoice_editor_html = (d) => {
+    const e = state.ui.invoice_edit;
+    if (!e || e.arrival_id !== d.id) return "";
+    return `
+      <div style="border-top:1px solid #e8e6e1;margin-top:12px;padding-top:12px">
+        <div style="background:#faf9f7;border-radius:8px;padding:14px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:10px">Invoice detail</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+            <div><label class="lbl">Invoice / Ref No.</label>
+              <input id="inv-ref" value="${esc(e.invoice_ref||"")}" placeholder="e.g. INV-2026-042" /></div>
+            <div><label class="lbl">Invoice PDF${d.invoice_path?" (replaces current)":""}</label>
+              <input type="file" id="inv-file" accept="application/pdf" /></div>
+          </div>
+          <div class="lbl" style="margin-bottom:4px">Price per kg — from the invoice</div>
+          <div style="display:grid;gap:6px;margin-bottom:12px">
+            ${d.items.map(item => `
+              <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #f0eee9;border-radius:6px;padding:7px 10px">
+                <div style="flex:1;font-size:13px;font-weight:600">${esc(item.coffee)}
+                  <span class="hint" style="font-weight:400"> · ${Number(item.weight_kg).toFixed(1)}kg</span></div>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span class="hint">&euro;</span>
+                  <input type="number" step="0.01" min="0" class="inv-price" data-line="${esc(item.id)}"
+                         value="${e.prices[item.id] ?? (item.price_per_kg ?? "")}"
+                         style="width:92px;text-align:right" placeholder="0.00" />
+                  <span class="hint">/kg</span>
+                </div>
+              </div>`).join("")}
+          </div>
+          ${e.err?`<p class="err mb-8">${esc(e.err)}</p>`:""}
+          <div class="flex gap-8">
+            <button class="btn btn-dark btn-sm" id="inv-save" ${e.saving?"disabled":""}>${e.saving?"Saving…":"Save invoice detail"}</button>
+            <button class="btn btn-ghost btn-sm" id="inv-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+  };
+
+  // Arrivals with no invoice reference yet. The whole point of invoice_ref being nullable:
+  // stock is usable on arrival, and the outstanding invoices stay visible instead of forgotten.
+  const awaiting = state.deliveries.filter(d => d.awaiting_invoice);
+  const awaiting_html = awaiting.length ? `
+    <div class="card mb-16" style="border-left:3px solid #d97706">
+      <div class="flex-between mb-8">
+        <div style="font-weight:700;font-size:15px">&#9203; Awaiting Invoice</div>
+        <div class="hint" style="font-size:12px">${awaiting.length} deliver${awaiting.length!==1?"ies":"y"} &middot; ${awaiting.reduce((t,d)=>t+d.items.reduce((u,i)=>u+(Number(i.weight_kg)||0),0),0).toFixed(1)}kg</div>
+      </div>
+      <div style="display:grid;gap:6px">
+        ${awaiting.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).map(d => {
+          const days = Math.floor((Date.now() - new Date(d.date + "T00:00:00").getTime()) / 86400000);
+          return `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff7ed;border:1px solid #f5d9b8;border-radius:6px;padding:8px 12px;font-size:13px;gap:10px">
+            <div><span style="font-weight:600">${esc(d.supplier||"Unknown supplier")}</span>
+              <span class="hint"> &middot; ${esc(d.date)} &middot; ${d.items.map(i=>esc(i.coffee)).join(", ")}</span></div>
+            <div style="display:flex;align-items:center;gap:10px;white-space:nowrap">
+              <span style="font-weight:600">${d.items.reduce((u,i)=>u+(Number(i.weight_kg)||0),0).toFixed(1)}kg</span>
+              <span class="hint" style="color:${days>30?"#dc2626":"#d97706"}">${days}d</span>
+              <button class="btn btn-dark btn-sm" style="font-size:11px" data-edit-invoice="${esc(d.id)}">+ Add invoice</button>
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>` : "";
+
   const delivery_list = state.deliveries.map(d => {
     const total_kg    = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0), 0);
     const total_value = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0)*(Number(i.price_per_kg)||0), 0);
@@ -579,8 +694,10 @@ function build_deliveries() {
           <div class="flex-wrap">
             <span style="font-weight:700;font-size:15px">${esc(d.supplier||"Delivery")}</span>
             <span class="tag" style="background:#f4f2ed;color:#666">${d.date}</span>
-            ${d.invoice_ref?`<span class="mono hint">${esc(d.invoice_ref)}</span>`:""}
+            ${d.invoice_ref?`<span class="mono hint">${esc(d.invoice_ref)}</span>`
+              :`<span class="tag" style="background:#fff7ed;color:#d97706;font-weight:700">⏳ AWAITING INVOICE</span>`}
             ${d.invoice_path?`<button class="btn btn-ghost btn-sm" style="font-size:11px" data-download-invoice="${esc(d.invoice_path)}">📄 Download Invoice</button>`:""}
+            <button class="btn btn-ghost btn-sm" style="font-size:11px" data-edit-invoice="${esc(d.id)}">${d.invoice_ref?"✏️ Edit invoice":"+ Add invoice"}</button>
           </div>
           <div style="text-align:right">
             <div style="font-weight:700;font-size:16px">${total_kg.toFixed(1)}kg</div>
@@ -595,6 +712,7 @@ function build_deliveries() {
                 ${item.green_name?`<div style="font-size:12px;color:#666;margin-top:1px">🌱 ${esc(item.green_name)}</div>`:""}
                 ${item.origin?`<span class="hint"> · ${esc(item.origin)}</span>`:""}
                 ${item.lot_number?`<span class="hint"> · Lot <span class="mono">${esc(item.lot_number)}</span></span>`:""}
+                ${item.ico_number?`<span class="hint"> · ICO <span class="mono">${esc(item.ico_number)}</span></span>`:""}
               </div>
               <div style="text-align:right;white-space:nowrap">
                 <span style="font-weight:600">${Number(item.weight_kg).toFixed(1)}kg</span>
@@ -603,6 +721,7 @@ function build_deliveries() {
               </div>
             </div>`).join("")}
         </div>
+        ${invoice_editor_html(d)}
       </div>`;
   }).join("");
 
@@ -612,6 +731,7 @@ function build_deliveries() {
       <button class="btn btn-dark" id="toggle-delivery-form">+ Log Delivery</button>
     </div>
     ${form_html}
+    ${awaiting_html}
     ${state.deliveries.length===0&&!show_delivery_form
       ? `<div class="card empty"><div class="icon">📦</div>No deliveries logged yet.</div>`
       : delivery_list}`;
@@ -950,6 +1070,23 @@ function attach_listeners() {
   });
 
   // Download invoice
+  app.querySelectorAll("[data-edit-invoice]").forEach(btn => btn.addEventListener("click", () => {
+    const id = btn.dataset.editInvoice;
+    const d = state.deliveries.find(x => x.id === id);
+    state.ui.invoice_edit = state.ui.invoice_edit?.arrival_id === id ? null : {
+      arrival_id: id,
+      invoice_ref: d?.invoice_ref || "",
+      prices: {},
+      err: "", saving: false,
+    };
+    render();
+  }));
+  app.querySelector("#inv-cancel")?.addEventListener("click", () => { state.ui.invoice_edit = null; render(); });
+  app.querySelector("#inv-ref")?.addEventListener("input", e => { if (state.ui.invoice_edit) state.ui.invoice_edit.invoice_ref = e.target.value; });
+  app.querySelectorAll(".inv-price").forEach(inp => inp.addEventListener("input", () => {
+    if (state.ui.invoice_edit) state.ui.invoice_edit.prices[inp.dataset.line] = inp.value;
+  }));
+  app.querySelector("#inv-save")?.addEventListener("click", save_invoice_detail);
   app.querySelectorAll("[data-download-invoice]").forEach(btn => btn.addEventListener("click", () => {
     download_invoice(btn.dataset.downloadInvoice);
   }));
