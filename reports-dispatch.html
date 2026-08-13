@@ -216,18 +216,34 @@ function build_reports() {
   const s = state.summary;
   const first_date = s?.bounds?.first_date || today();
 
+  // Every control lives here, in one place, each row labelled. Nothing that changes what
+  // you see is hidden further down the page.
+  const group = (attr, current, opts) => `<div class="flex gap-6" style="flex-wrap:wrap">${
+    opts.map(([val, label]) => `<button class="btn btn-sm ${current===val?"btn-dark":"btn-ghost"}" style="color:${current===val?"#fff":"#1a1a1a"}" data-${attr}="${esc(val)}">${label}</button>`).join("")
+  }</div>`;
+  const row = (label, content) => `<div style="display:flex;gap:12px;align-items:baseline;padding:7px 0;border-top:1px solid #f0eee9">
+    <div style="width:96px;flex-shrink:0;font-size:12px;color:#666;font-weight:600;padding-top:3px">${label}</div>
+    <div style="flex:1">${content}</div></div>`;
+
   const controls = `
-    <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end">
-      <div><label class="lbl">From</label><input type="date" id="rep-from" value="${from}" style="width:160px" /></div>
-      <div><label class="lbl">To</label><input type="date" id="rep-to" value="${to}" style="width:160px" /></div>
-      <div class="flex gap-6" style="flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" data-range="today">Today</button>
-        <button class="btn btn-ghost btn-sm" data-range="7">7d</button>
-        <button class="btn btn-ghost btn-sm" data-range="30">30d</button>
-        <button class="btn btn-ghost btn-sm" data-range="90">90d</button>
-        <button class="btn btn-ghost btn-sm" data-range="all" data-first="${first_date}">All</button>
+    <div class="card mb-16">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;padding-bottom:9px">
+        <div style="width:96px;flex-shrink:0;font-size:12px;color:#666;font-weight:600">Period</div>
+        <div><label class="lbl">From</label><input type="date" id="rep-from" value="${from}" style="width:150px" /></div>
+        <div><label class="lbl">To</label><input type="date" id="rep-to" value="${to}" style="width:150px" /></div>
+        <div class="flex gap-6" style="flex-wrap:wrap;padding-bottom:1px">
+          <button class="btn btn-ghost btn-sm" data-range="today">Today</button>
+          <button class="btn btn-ghost btn-sm" data-range="7">7d</button>
+          <button class="btn btn-ghost btn-sm" data-range="30">30d</button>
+          <button class="btn btn-ghost btn-sm" data-range="90">90d</button>
+          <button class="btn btn-ghost btn-sm" data-range="all" data-first="${first_date}">All time</button>
+        </div>
       </div>
-    </div></div>`;
+      ${row("Channel", group("kind", kind, [["all","All"],["shop","🏪 Shops"],["wholesale","📦 Wholesale"],["online","🛒 Online"],["charity","❤️ Charity"],["samples","🎁 Samples"],["staff","👤 Staff"]]))}
+      ${row("Status",  group("status", status, [["all","All"],["in_transit","⏳ In transit"],["delivered","✓ Delivered"]]))}
+      ${row("Chart",   group("bucket", state.ui.bucket, [["auto","Auto"],["day","Day"],["week","Week"],["month","Month"]]))}
+      ${row("Break by", group("view", view, [["shops","🏪 Shop"],["coffees","☕ Coffee"]]))}
+    </div>`;
 
   if (state.err) return controls + `<div class="card empty"><div class="icon">⚠️</div>${esc(state.err)}</div>`;
   if (state.loading) return controls + `<div class="loading">Loading…</div>`;
@@ -261,15 +277,9 @@ function build_reports() {
   const series = s.series || [];
   const bucket_eff = s.range?.bucket || "week";
   const max_bar = Math.max(...series.map(x => kg(x.kg)), 1);
-  const BUCKETS = [["auto","Auto"],["day","Day"],["week","Week"],["month","Month"]];
-  const bucket_toggle = `<div class="flex gap-6" style="flex-wrap:wrap">${BUCKETS.map(([b,label]) =>
-    `<button class="btn btn-sm ${state.ui.bucket===b?"btn-dark":"btn-ghost"}" style="color:${state.ui.bucket===b?"#fff":"#1a1a1a"}" data-bucket="${b}">${label}${b==="auto"&&state.ui.bucket==="auto"?` · ${bucket_eff}`:""}</button>`).join("")}</div>`;
   const chart = series.length ? `
     <div class="card mb-16">
-      <div class="flex-between mb-12" style="flex-wrap:wrap;gap:10px">
-        <div style="font-weight:700;font-size:15px">📅 Volume by ${bucket_eff}</div>
-        ${bucket_toggle}
-      </div>
+      <div style="font-weight:700;font-size:15px;margin-bottom:12px">📅 Volume by ${bucket_eff}</div>
       <div class="chart-wrap" style="height:${series.length > 26 ? 90 : 110}px">
         ${series.map(x => `<div class="chart-col" title="${esc(x.label)} · ${kg(x.kg).toFixed(1)}kg · ${x.deliveries} deliver${x.deliveries!==1?"ies":"y"}">
           <div class="chart-val">${kg(x.kg).toFixed(0)}</div>
@@ -373,8 +383,6 @@ function build_reports() {
     </div>`;
   }).join("");
 
-  const tab = (attr, val, cur, label, small) => `<button class="btn ${small?"btn-sm ":""}${cur===val?"btn-dark":"btn-ghost"}" style="flex:1;color:${cur===val?"#fff":"#1a1a1a"}" data-${attr}="${val}">${label}</button>`;
-
   return controls + `
     <div class="grid-4 mb-16">${stats_html}</div>
     <p style="font-size:12px;color:#666;margin:-6px 0 16px">A delivery is one shop on one day — everything sent to a shop on the same date counts once, however many separate dispatches it was packed as.</p>
@@ -382,16 +390,7 @@ function build_reports() {
     ${channel_html ? `<div class="card mb-16"><div style="font-weight:700;margin-bottom:12px;font-size:15px">By Channel</div><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:10px">${channel_html}</div></div>` : ""}
     ${delivery_html}
     ${chart}
-    <div class="flex gap-8 mb-12">
-      ${tab("status","all",status,"All",true)}${tab("status","in_transit",status,"⏳ In Transit",true)}${tab("status","delivered",status,"✓ Delivered",true)}
-    </div>
-    <div class="flex gap-8 mb-16">
-      ${tab("view","shops",view,"🏪 By Shop")}${tab("view","coffees",view,"☕ By Coffee")}
-    </div>
-    <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
-      ${["all","shop","wholesale","online","charity","samples","staff"].map(k =>
-        `<button class="btn btn-sm ${kind===k?"btn-dark":"btn-ghost"}" style="color:${kind===k?"#fff":"#1a1a1a"}" data-kind="${k}">${k==="all"?"All channels":esc(k)}</button>`).join("")}
-    </div>
+    <div style="font-weight:700;font-size:15px;margin:20px 0 10px">${view==="shops"?"🏪 By shop":"☕ By coffee"}</div>
     ${(t.dispatches||0) === 0 ? `<div class="card empty"><div class="icon">📊</div>No data for this period.</div>` : ""}
     ${view==="shops" ? `<div style="display:grid;gap:10px">${shops_view}</div>` : `<div style="display:grid;gap:10px">${coffees_view}</div>`}`;
 }
