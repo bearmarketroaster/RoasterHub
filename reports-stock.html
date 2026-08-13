@@ -38,6 +38,10 @@
     .hint { color: #999; font-size: 13px; }
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
     .section-title { font-weight: 700; color: #1a1a1a; margin-bottom: 12px; font-size: 15px; }
+    .flex { display: flex; }
+    .flex-between { display: flex; justify-content: space-between; align-items: center; }
+    .gap-6 { gap: 6px; } .gap-8 { gap: 8px; } .gap-12 { gap: 12px; }
+    .mb-8 { margin-bottom: 8px; } .mb-12 { margin-bottom: 12px; }
     .supplier-card { border: 1px solid #e8e6e1; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
     .supplier-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
     .supplier-name { font-weight: 700; font-size: 15px; }
@@ -49,17 +53,6 @@
     .supplier-stat-label { font-size: 11px; color: #666; }
     .supplier-stat-val { font-weight: 700; color: #1a1a1a; }
     .supplier-coffees { margin-top: 8px; font-size: 12px; color: #666; }
-    .pill { display: inline-block; background: #f4f2ed; color: #1a1a1a; padding: 2px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px; font-size: 11px; border: 1px solid #e8e6e1; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; padding: 10px 8px; background: #f4f2ed; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid #e8e6e1; }
-    td { padding: 10px 8px; border-bottom: 1px solid #f0eee9; vertical-align: middle; }
-    tr:hover td { background: #fafaf8; }
-    .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
-    .filters select, .filters input { max-width: 220px; padding: 6px 10px; font-size: 13px; }
-    .invoice-link { background: #f4f2ed; color: #1a1a1a; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600; text-decoration: none; cursor: pointer; border: 1px solid #e8e6e1; transition: all 0.15s; }
-    .invoice-link:hover { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
-    @media (max-width: 600px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } .content { padding: 16px; } table { font-size: 12px; } th, td { padding: 8px 6px; } }
-  </style>
 </head>
 <body>
 <div id="app"></div>
@@ -71,95 +64,74 @@ supabaseClient.auth.getSession().then(({ data: { session } }) => {
 });
 
 const today = () => new Date().toISOString().split("T")[0];
-const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const kg1 = v => num(v).toFixed(1);
+const PALETTE = ["#1a1a1a", "#16a34a", "#d97706", "#7e57c2", "#2563eb", "#dc2626", "#0d9488", "#666"];
+const color_for = i => PALETTE[i % PALETTE.length];
 
+const KIND_LABEL = {
+  intake:     ["📦", "Intake",      "#16a34a"],
+  roast:      ["🔥", "Roasted",     "#1a1a1a"],
+  spill:      ["💧", "Spill / loss","#dc2626"],
+  sample:     ["🧪", "Sample",      "#7e57c2"],
+  correction: ["🔧", "Correction",  "#d97706"],
+  opening:    ["🏁", "Opening",     "#666"],
+};
+const kind_bits = k => KIND_LABEL[k] || ["📝", k || "—", "#666"];
+
+// ── DATA ─────────────────────────────────────────────────────────────────────
+// Every figure on this page is aggregated by report_green_summary() — see
+// sql/report_green.sql. The payload is the number of coffees and buckets, not the
+// number of movements, so the ledger can grow without this page changing shape or
+// hitting the 1000-row cap. Individual movements arrive from report_green_detail()
+// only when a coffee is expanded.
 const state = {
-  stock_adjustments: [],
-  deliveries: [],
+  data: null,
   loading: true,
-  ui: {
-    report_from: today(),
-    report_to: today(),
-    deliveries_supplier: "all",
-    deliveries_coffee: "all",
-  },
+  err: "",
+  ui: { from: today(), to: today(), coffee_id: null },
+  drill: {},   // coffee_id -> { loading, rows, total, kg, offset, err }
 };
 
 async function init() {
-  await load_data();
-  if (state.stock_adjustments.length || state.deliveries.length) {
-    const d = new Date(); d.setDate(d.getDate()-90);
-    state.ui.report_from = d.toISOString().split("T")[0];
-    state.ui.report_to = today();
-  }
+  const d = new Date(); d.setDate(d.getDate() - 30);
+  state.ui.from = d.toISOString().split("T")[0];
+  state.ui.to = today();
+  await load();
+}
+
+async function load() {
+  state.loading = true; state.err = ""; state.drill = {}; render();
+  const { from, to, coffee_id } = state.ui;
+  const { data, error } = await supabaseClient.rpc("report_green_summary", {
+    p_from: from, p_to: to, p_coffee_id: coffee_id,
+  });
+  if (error) { state.err = error.message; state.data = null; }
+  else state.data = data;
   state.loading = false;
   render();
 }
 
-async function load_data() {
-  // Green now lives in green_movements + green_deliveries, with the balance derived by
-  // v_green_stock. Mapped into the shapes this page already renders so only the source changed.
-  // Paginated: the ledger grows with every roast, and an unpaginated read silently truncates
-  // at 1000 rows — the bug that made the dispatch report wrong for months.
-  const fetch_pages = async (build) => {
-    const PAGE = 1000, out = [];
-    for (let p = 0; p < 25; p++) {
-      const { data, error } = await build().range(p * PAGE, p * PAGE + PAGE - 1);
-      if (error) { console.error("[reports-stock]", error.message); break; }
-      if (!data || !data.length) break;
-      out.push(...data);
-      if (data.length < PAGE) break;
-    }
-    return out;
-  };
-
-  const [movements, arrivals] = await Promise.all([
-    fetch_pages(() => supabaseClient.from("v_green_movements")
-      .select("*").order("occurred_on", { ascending: false }).order("id", { ascending: true })),
-    fetch_pages(() => supabaseClient.from("v_green_arrivals")
-      .select("*").order("arrived_on", { ascending: false }).order("arrival_id", { ascending: true })),
-  ]);
-
-  state.stock_adjustments = movements.map(m => ({
-    id: m.id, date: m.occurred_on, coffee: m.coffee, coffee_id: m.coffee_id,
-    change_kg: Number(m.change_kg) || 0,
-    // 'intake' is this schema's name for what used to be reason 'delivery'
-    reason: m.kind === "intake" ? "delivery" : m.kind,
-    note: m.note, auto: !m.is_editable,
-  }));
-
-  state.deliveries = (arrivals || []).map(a => ({
-    id: a.arrival_id, date: a.arrived_on, supplier: a.supplier,
-    invoice_ref: a.invoice_ref, invoice_path: a.invoice_path,
-    awaiting_invoice: !!a.awaiting_invoice,
-    items: (a.lines || []).map(l => ({
-      id: l.id, coffee: l.coffee, coffee_id: l.coffee_id, origin: l.origin,
-      green_name: l.green_name, lot_number: l.lot_number, ico_number: l.ico_number,
-      bags: l.bags, weight_kg: l.weight_kg, price_per_kg: l.price_per_kg,
-      contract_id: l.contract_id,
-    })),
-  }));
+async function load_detail(coffee_id) {
+  const d = state.drill[coffee_id];
+  d.loading = true; d.err = ""; render();
+  const { from, to } = state.ui;
+  const { data, error } = await supabaseClient.rpc("report_green_detail", {
+    p_from: from, p_to: to, p_coffee_id: coffee_id,
+    p_limit: 50, p_offset: d.offset || 0,
+  });
+  if (error) { d.err = error.message; d.rows = []; }
+  else {
+    d.rows = (d.offset ? (d.rows || []) : []).concat(data.rows || []);
+    d.total = data.total || 0;
+    d.kg = data.kg || 0;
+  }
+  d.loading = false;
+  render();
 }
 
-async function download_invoice(invoice_path) {
-  const { data, error } = await supabaseClient.storage.from("invoices").download(invoice_path);
-  if (error) { alert("Failed to download: " + error.message); return; }
-  const url = URL.createObjectURL(data);
-  window.open(url, "_blank");
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
-
-function days_since(date_str) {
-  if (!date_str) return null;
-  const ms = Date.now() - new Date(date_str).getTime();
-  return Math.floor(ms / (1000 * 60 * 60 * 24));
-}
-
-function avg(arr) {
-  if (arr.length === 0) return null;
-  return arr.reduce((a,b) => a+b, 0) / arr.length;
-}
-
+// ── RENDER ───────────────────────────────────────────────────────────────────
 function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
 
 function build_app() {
@@ -168,290 +140,282 @@ function build_app() {
       <div class="header-left">
         <button class="header-back" id="go-reports">← Reports</button>
         <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
-        <div><div class="header-title">🌱 Green Stock Movement</div><div class="header-sub">Bear Mrkt</div></div>
+        <div><div class="header-title">🌱 Green Stock</div><div class="header-sub">Bear Mrkt</div></div>
       </div>
       <button class="btn-logout" id="logout-btn">Log Out</button>
     </div>`;
-  if (state.loading) return header + `<div class="loading">Loading…</div>`;
-  return header + `<div class="content">${build_stock_report()}</div>`;
+  return header + `<div class="content">${build_report()}</div>`;
 }
 
-function build_stock_report() {
-  const { report_from, report_to } = state.ui;
-  if (state.stock_adjustments.length === 0 && state.deliveries.length === 0) {
-    return `<div class="card empty"><div class="icon">🌱</div>No stock movements recorded yet.</div>`;
-  }
-  const all_dates = [...state.stock_adjustments.map(a => a.date), ...state.deliveries.map(d => d.date)].filter(Boolean);
-  const first_date = all_dates.length ? all_dates.reduce((min, d) => d < min ? d : min) : today();
+function build_report() {
+  const { from, to, coffee_id } = state.ui;
+  const d = state.data;
+  const first_date = d?.bounds?.first_date || today();
 
-  const filtered_adj = state.stock_adjustments.filter(a => a.date >= report_from && a.date <= report_to);
-  const filtered_deliveries = state.deliveries.filter(d => d.date >= report_from && d.date <= report_to);
+  // All controls in one place at the top. Nothing further down changes what you see.
+  const coffee_opts = (d?.on_hand || []).map(c =>
+    `<option value="${c.coffee_id}" ${coffee_id === c.coffee_id ? "selected" : ""}>${esc(c.coffee)}</option>`).join("");
+  const controls = `
+    <div class="card mb-16">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;padding-bottom:9px">
+        <div style="width:78px;flex-shrink:0;font-size:12px;color:#666;font-weight:600">Period</div>
+        <div><label class="lbl">From</label><input type="date" id="g-from" value="${from}" style="width:150px" /></div>
+        <div><label class="lbl">To</label><input type="date" id="g-to" value="${to}" style="width:150px" /></div>
+        <div class="flex gap-6" style="flex-wrap:wrap;padding-bottom:1px">
+          <button class="btn btn-ghost btn-sm" data-range="7">7d</button>
+          <button class="btn btn-ghost btn-sm" data-range="30">30d</button>
+          <button class="btn btn-ghost btn-sm" data-range="90">90d</button>
+          <button class="btn btn-ghost btn-sm" data-range="month">This month</button>
+          <button class="btn btn-ghost btn-sm" data-range="all" data-first="${first_date}">All time</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;padding:7px 0;border-top:1px solid #f0eee9">
+        <div style="width:78px;flex-shrink:0;font-size:12px;color:#666;font-weight:600">Coffee</div>
+        <select id="g-coffee" style="max-width:280px">
+          <option value="">All coffees</option>${coffee_opts}
+        </select>
+      </div>
+    </div>`;
 
-  // Top summary
-  const total_in  = filtered_adj.filter(a => a.change_kg > 0).reduce((s,a) => s + a.change_kg, 0);
-  const total_out = filtered_adj.filter(a => a.change_kg < 0).reduce((s,a) => s + Math.abs(a.change_kg), 0);
-  const net       = total_in - total_out;
+  if (state.err)     return controls + `<div class="card empty"><div class="icon">⚠️</div>${esc(state.err)}</div>`;
+  if (state.loading) return controls + `<div class="loading">Loading…</div>`;
+  if (!d)            return controls + `<div class="card empty"><div class="icon">🌱</div>No stock movements recorded yet.</div>`;
 
-  // By reason
-  const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", opening:"🏁 Opening", other:"📝 Other" };
-  const by_reason = {};
-  filtered_adj.forEach(a => {
-    if (!by_reason[a.reason]) by_reason[a.reason] = { in:0, out:0, count:0 };
-    if (a.change_kg > 0) by_reason[a.reason].in  += a.change_kg;
-    else                 by_reason[a.reason].out += Math.abs(a.change_kg);
-    by_reason[a.reason].count++;
-  });
-  const reason_rows = Object.entries(by_reason).sort((a,b) => (b[1].in+b[1].out) - (a[1].in+a[1].out));
+  const t = d.totals || {};
 
-  // By coffee
-  const by_coffee = {};
-  filtered_adj.forEach(a => {
-    if (!by_coffee[a.coffee]) by_coffee[a.coffee] = { in:0, out:0, count:0 };
-    if (a.change_kg > 0) by_coffee[a.coffee].in  += a.change_kg;
-    else                 by_coffee[a.coffee].out += Math.abs(a.change_kg);
-    by_coffee[a.coffee].count++;
-  });
-  const coffee_rows = Object.entries(by_coffee).sort((a,b) => (b[1].in+b[1].out) - (a[1].in+a[1].out));
+  // ── the statement. Opening + In − Out = Closing, and it reconciles by construction.
+  const stmt_row = (label, value, opts = {}) => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;${opts.border?"border-top:1px solid #e8e6e1":""}">
+      <div style="font-size:${opts.big?15:14}px;font-weight:${opts.big?700:500};color:${opts.color||"#1a1a1a"}">${label}</div>
+      <div style="font-size:${opts.big?20:16}px;font-weight:${opts.big?800:600};color:${opts.color||"#1a1a1a"};font-variant-numeric:tabular-nums">${opts.sign||""}${kg1(value)}kg</div>
+    </div>`;
+  const statement = `
+    <div class="card mb-16">
+      <div class="section-title">Movement statement</div>
+      ${stmt_row("Opening — on hand at " + esc(from), t.opening)}
+      ${stmt_row("＋ In", t.in, { color: "#16a34a", sign: "+" })}
+      ${stmt_row("－ Out", t.out, { color: "#dc2626", sign: "−" })}
+      <div style="padding-left:16px;font-size:12px;color:#666;display:grid;gap:3px;margin:-4px 0 6px">
+        <div style="display:flex;justify-content:space-between"><span>🔥 Roasted</span><span>${kg1(t.roasted)}kg</span></div>
+        <div style="display:flex;justify-content:space-between"><span>💧 Loss — spill, samples, corrections</span><span>${kg1(t.loss)}kg</span></div>
+      </div>
+      ${stmt_row("Closing — on hand at " + esc(to), t.closing, { big: true, border: true })}
+      <div style="font-size:12px;color:#666;margin-top:8px">
+        ${kg1(t.opening)} + ${kg1(t.in)} − ${kg1(t.out)} = ${kg1(t.closing)}kg
+        ${Math.abs(num(t.opening) + num(t.in) - num(t.out) - num(t.closing)) < 0.005
+          ? ` · <span style="color:#16a34a;font-weight:600">balances</span>`
+          : ` · <span style="color:#dc2626;font-weight:700">does not balance — tell Claude</span>`}
+      </div>
+    </div>`;
 
-  const suppliers = build_supplier_stats(filtered_deliveries);
-  const coffee_cadence = build_coffee_cadence(filtered_deliveries);
+  // ── what's sitting there now, independent of the range
+  const on_hand = d.on_hand || [];
+  const total_on_hand = on_hand.reduce((a, c) => a + num(c.on_hand), 0);
+  const low = on_hand.filter(c => c.is_low && num(c.on_hand) > 0.005);
+  const negative = on_hand.filter(c => c.is_negative);
+  const on_hand_html = `
+    <div class="card mb-16">
+      <div class="flex-between mb-12">
+        <div class="section-title" style="margin:0">On hand now</div>
+        <div style="font-weight:800;font-size:18px">${kg1(total_on_hand)}kg</div>
+      </div>
+      ${negative.length ? `<div style="background:#fdf5f5;border:1px solid #f3d4d4;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px">
+        <strong style="color:#dc2626">Negative balance:</strong> ${negative.map(c => esc(c.coffee) + " " + kg1(c.on_hand) + "kg").join(", ")}.
+        A balance can only go negative if something wasn't logged.</div>` : ""}
+      <div style="display:grid;gap:5px">
+        ${on_hand.filter(c => num(c.on_hand) > 0.005 || c.is_negative).map((c, i) => {
+          const pct = total_on_hand > 0 ? Math.round((num(c.on_hand) / total_on_hand) * 100) : 0;
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <div style="width:10px;height:10px;border-radius:2px;background:${color_for(i)};flex-shrink:0"></div>
+            <div style="flex:1">${esc(c.coffee)}
+              ${c.is_low ? `<span class="tag" style="background:#fff7ed;color:#d97706;font-weight:700;font-size:10px;margin-left:4px">LOW</span>` : ""}</div>
+            ${c.last_intake_on ? `<span style="font-size:11px;color:#999">in ${esc(c.last_intake_on)}</span>` : ""}
+            <div style="font-weight:600;min-width:64px;text-align:right;font-variant-numeric:tabular-nums">${kg1(c.on_hand)}kg</div>
+            <div class="report-bar-track" style="background:#f0eee9;border-radius:3px;height:6px;width:70px">
+              <div style="background:${color_for(i)};border-radius:3px;height:6px;width:${pct}%"></div></div>
+            <div style="font-size:11px;color:#999;min-width:30px;text-align:right">${pct}%</div>
+          </div>`;
+        }).join("")}
+      </div>
+      ${low.length ? `<div style="font-size:12px;color:#d97706;margin-top:10px">⚠️ ${low.length} coffee${low.length!==1?"s":""} at or below reorder threshold.</div>` : ""}
+    </div>`;
 
-  const all_suppliers_list = [...new Set(state.deliveries.map(d => d.supplier).filter(Boolean))].sort();
-  const all_coffees_list = [...new Set(state.deliveries.flatMap(d => d.items.map(i => i.coffee)).filter(Boolean))].sort();
-  let deliveries_view = filtered_deliveries;
-  if (state.ui.deliveries_supplier !== "all") deliveries_view = deliveries_view.filter(d => d.supplier === state.ui.deliveries_supplier);
-  if (state.ui.deliveries_coffee !== "all")   deliveries_view = deliveries_view.filter(d => d.items.some(i => i.coffee === state.ui.deliveries_coffee));
+  // ── awaiting invoice
+  const pi = d.pending_invoice || {};
+  const pending_html = num(pi.count) > 0 ? `
+    <div class="card mb-16" style="border-left:3px solid #d97706">
+      <div class="flex-between">
+        <div><div style="font-weight:700;font-size:15px">⏳ Awaiting invoice</div>
+        <div style="font-size:12px;color:#666;margin-top:2px">${pi.count} deliver${num(pi.count)!==1?"ies":"y"} · ${kg1(pi.kg)}kg${pi.oldest_days!=null?` · oldest ${pi.oldest_days} days`:""}</div></div>
+        <a href="stock.html" class="btn btn-ghost btn-sm" style="text-decoration:none;font-size:12px">Go to Stock →</a>
+      </div>
+    </div>` : "";
 
-  const recent = filtered_adj.slice(0, 50);
-  const recent_html = recent.map(a => `
-    <div style="display:grid;grid-template-columns:auto 1fr auto auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #f0eee9;font-size:13px">
-      <span class="tag" style="background:${a.change_kg>0?"#e7f5ec":"#fdecea"};color:${a.change_kg>0?"#16a34a":"#dc2626"};min-width:70px;text-align:center;font-weight:600">${a.change_kg>0?"+":""}${Number(a.change_kg).toFixed(1)}kg</span>
-      <span style="font-weight:500">${esc(a.coffee)}</span>
-      <span style="color:#666">${esc(reason_labels[a.reason]||a.reason)}</span>
-      <span style="color:#666">${a.date}</span>
-      ${a.auto?'<span class="tag" style="background:#f4f2ed;color:#999;font-size:10px">auto</span>':'<span class="tag" style="background:#fff7ed;color:#d97706;font-size:10px;font-weight:600">MANUAL</span>'}
-    </div>`).join("");
+  // ── in / out over time. Bucketing is chosen server-side from the range span.
+  const series = d.series || [];
+  const bucket = d.range?.bucket || "week";
+  const max_bar = Math.max(...series.map(s => Math.max(num(s.in), num(s.out))), 1);
+  const chart = series.length ? `
+    <div class="card mb-16">
+      <div class="section-title">In and out by ${esc(bucket)}</div>
+      <div class="chart-wrap" style="display:flex;align-items:flex-end;gap:6px;height:120px;overflow-x:auto;padding-bottom:4px">
+        ${series.map(s => `<div style="display:flex;flex-direction:column;align-items:center;min-width:42px"
+             title="${esc(s.label)} · in ${kg1(s.in)}kg · out ${kg1(s.out)}kg">
+          <div style="display:flex;align-items:flex-end;gap:2px;height:92px">
+            <div style="width:13px;background:#16a34a;border-radius:2px 2px 0 0;height:${Math.round((num(s.in)/max_bar)*88)}px;min-height:${num(s.in)>0?2:0}px"></div>
+            <div style="width:13px;background:#dc2626;border-radius:2px 2px 0 0;height:${Math.round((num(s.out)/max_bar)*88)}px;min-height:${num(s.out)>0?2:0}px"></div>
+          </div>
+          <div style="font-size:9px;color:#999;margin-top:4px;text-align:center">${esc(series.length > 16 ? s.short : s.label)}</div>
+        </div>`).join("")}
+      </div>
+      <div style="font-size:12px;color:#666;margin-top:8px">
+        <span style="color:#16a34a;font-weight:600">■ in</span> ·
+        <span style="color:#dc2626;font-weight:600">■ out</span> ·
+        ${series.length} ${esc(bucket)}${series.length!==1?"s":""}
+        ${series.filter(s => num(s.in) === 0 && num(s.out) === 0).length
+          ? ` · ${series.filter(s => num(s.in) === 0 && num(s.out) === 0).length} with no movement` : ""}
+        ${bucket === "week" ? " · weeks run Monday to Sunday" : ""}
+      </div>
+    </div>` : "";
 
+  // ── by movement kind
+  const kinds = (d.kinds || []).slice().sort((a, b) => Math.abs(num(b.kg)) - Math.abs(num(a.kg)));
+  const max_kind = Math.max(...kinds.map(k => Math.abs(num(k.kg))), 1);
+  const kinds_html = kinds.length ? `
+    <div class="card mb-16">
+      <div class="section-title">By movement type</div>
+      <div style="display:grid;gap:6px">
+        ${kinds.map(k => { const [icon, label, colour] = kind_bits(k.kind);
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <div style="width:18px">${icon}</div>
+            <div style="flex:1">${esc(label)}<span style="color:#999;font-size:11px"> · ${k.movements} entr${k.movements!==1?"ies":"y"}</span></div>
+            <div style="font-weight:600;min-width:74px;text-align:right;color:${num(k.kg)<0?"#dc2626":"#16a34a"};font-variant-numeric:tabular-nums">${num(k.kg)>0?"+":""}${kg1(k.kg)}kg</div>
+            <div style="background:#f0eee9;border-radius:3px;height:6px;width:80px">
+              <div style="background:${colour};border-radius:3px;height:6px;width:${Math.round((Math.abs(num(k.kg))/max_kind)*100)}%"></div></div>
+          </div>`; }).join("")}
+      </div>
+    </div>` : "";
+
+  // ── per coffee, expanding into its movements
+  const coffees = d.coffees || [];
+  const th = "text-align:right;padding:7px 6px;background:#f4f2ed;font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.5px;font-weight:700;border-bottom:1px solid #e8e6e1";
+  const td = "padding:8px 6px;border-bottom:1px solid #f0eee9;text-align:right;font-variant-numeric:tabular-nums";
+  const per_coffee = coffees.length ? `
+    <div class="card mb-16">
+      <div class="section-title">Per coffee</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr>
+            <th style="${th};text-align:left">Coffee</th>
+            <th style="${th}">Opening</th><th style="${th}">In</th><th style="${th}">Out</th>
+            <th style="${th}">Roasted</th><th style="${th}">Loss</th><th style="${th}">Closing</th><th style="${th}"></th>
+          </tr></thead>
+          <tbody>
+            ${coffees.map(c => {
+              const open = !!state.drill[c.coffee_id];
+              return `<tr>
+                <td style="padding:8px 6px;border-bottom:1px solid #f0eee9;font-weight:600">${esc(c.coffee)}</td>
+                <td style="${td}">${kg1(c.opening)}</td>
+                <td style="${td};color:${num(c.in)>0?"#16a34a":"#999"}">${num(c.in)>0?"+":""}${kg1(c.in)}</td>
+                <td style="${td};color:${num(c.out)>0?"#dc2626":"#999"}">${num(c.out)>0?"−":""}${kg1(c.out)}</td>
+                <td style="${td};color:#666">${kg1(c.roasted)}</td>
+                <td style="${td};color:${num(c.loss)>0?"#d97706":"#999"}">${kg1(c.loss)}</td>
+                <td style="${td};font-weight:700">${kg1(c.closing)}</td>
+                <td style="${td}"><button class="btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap" data-drill="${c.coffee_id}">${open?"Hide":`${c.movements} ▾`}</button></td>
+              </tr>
+              ${open ? `<tr><td colspan="8" style="padding:0 6px 12px;border-bottom:1px solid #f0eee9">${drill_html(c.coffee_id)}</td></tr>` : ""}`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>` : `<div class="card empty"><div class="icon">🌱</div>No movements in this period.</div>`;
+
+  // ── intake by supplier
+  const sup = d.suppliers || [];
+  const supplier_html = sup.length ? `
+    <div class="card mb-16">
+      <div class="section-title">Intake by supplier</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr><th style="${th};text-align:left">Supplier</th><th style="${th}">Arrivals</th>
+            <th style="${th}">kg</th><th style="${th}">Avg €/kg</th><th style="${th}">Cost</th></tr></thead>
+          <tbody>
+            ${sup.map(s => `<tr>
+              <td style="padding:8px 6px;border-bottom:1px solid #f0eee9;font-weight:600">${esc(s.supplier)}</td>
+              <td style="${td}">${s.arrivals}</td>
+              <td style="${td}">${kg1(s.kg)}</td>
+              <td style="${td}">${s.avg_price != null ? "€" + num(s.avg_price).toFixed(2) : "—"}</td>
+              <td style="${td}">${num(s.cost) > 0 ? "€" + num(s.cost).toFixed(2) : "—"}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>` : "";
+
+  return controls + statement + pending_html + on_hand_html + chart + kinds_html + per_coffee + supplier_html;
+}
+
+// ── DRILL-DOWN ───────────────────────────────────────────────────────────────
+function drill_html(coffee_id) {
+  const d = state.drill[coffee_id];
+  if (!d) return "";
+  if (d.loading && !(d.rows || []).length) return `<div style="padding:10px;font-size:13px;color:#999">Loading movements…</div>`;
+  if (d.err) return `<div style="padding:10px;font-size:13px;color:#dc2626">${esc(d.err)}</div>`;
+  if (!(d.rows || []).length) return `<div style="padding:10px;font-size:13px;color:#999">No movements.</div>`;
   return `
-    <div class="card mb-16"><div class="flex gap-12" style="flex-wrap:wrap;align-items:flex-end">
-      <div><label class="lbl">From</label><input type="date" id="report-from" value="${report_from}" style="width:160px" /></div>
-      <div><label class="lbl">To</label><input type="date" id="report-to" value="${report_to}" style="width:160px" /></div>
-      <div class="flex gap-6">
-        <button class="btn btn-ghost btn-sm" data-report-range="30">30d</button>
-        <button class="btn btn-ghost btn-sm" data-report-range="90">90d</button>
-        <button class="btn btn-ghost btn-sm" data-report-range="all" data-first="${first_date}">All</button>
+    <div style="background:#faf9f7;border:1px solid #f0eee9;border-radius:8px;padding:10px">
+      <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:8px">
+        Movements · showing ${d.rows.length} of ${d.total} · net ${kg1(d.kg)}kg
       </div>
-    </div></div>
-
-    <div class="grid-4 mb-16">
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📥</div><div style="font-size:22px;font-weight:700;color:#16a34a">+${total_in.toFixed(1)}kg</div><div style="font-size:11px;color:#666;margin-top:2px">Stock In</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📤</div><div style="font-size:22px;font-weight:700;color:#dc2626">-${total_out.toFixed(1)}kg</div><div style="font-size:11px;color:#666;margin-top:2px">Stock Out</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">⚖️</div><div style="font-size:22px;font-weight:700;color:${net>=0?"#1a1a1a":"#dc2626"}">${net>=0?"+":""}${net.toFixed(1)}kg</div><div style="font-size:11px;color:#666;margin-top:2px">Net Change</div></div>
-      <div class="card" style="text-align:center;padding:14px 10px"><div style="font-size:24px;margin-bottom:4px">📦</div><div style="font-size:22px;font-weight:700;color:#1a1a1a">${filtered_deliveries.length}</div><div style="font-size:11px;color:#666;margin-top:2px">Deliveries</div></div>
-    </div>
-
-    <div class="card mb-16">
-      <div class="section-title">Per-Supplier Scorecard</div>
-      ${suppliers.length === 0 ? '<p class="hint">No deliveries in this range.</p>' : suppliers.map(s => `
-        <div class="supplier-card">
-          <div class="supplier-header">
-            <div class="supplier-name">${esc(s.supplier)}</div>
-            <span class="supplier-flag supplier-flag-${s.flag}">${s.flag === "active" ? "● Active" : s.flag === "watch" ? "● Watch" : "● Stale"}</span>
-          </div>
-          <div class="supplier-stats">
-            <div><div class="supplier-stat-label">Deliveries</div><div class="supplier-stat-val">${s.delivery_count}</div></div>
-            <div><div class="supplier-stat-label">Total kg</div><div class="supplier-stat-val">${s.total_kg.toFixed(1)}kg</div></div>
-            <div><div class="supplier-stat-label">Avg / Delivery</div><div class="supplier-stat-val">${s.avg_kg.toFixed(1)}kg</div></div>
-            <div><div class="supplier-stat-label">Last Delivery</div><div class="supplier-stat-val">${s.last_date || "—"}</div></div>
-            <div><div class="supplier-stat-label">Days Since</div><div class="supplier-stat-val">${s.days_since !== null ? s.days_since + "d" : "—"}</div></div>
-          </div>
-          ${s.coffees.length > 0 ? `<div class="supplier-coffees">Coffees: ${s.coffees.map(c => `<span class="pill">${esc(c)}</span>`).join("")}</div>` : ""}
-        </div>`).join("")}
-    </div>
-
-    <div class="card mb-16">
-      <div class="section-title">Per-Coffee Cadence</div>
-      ${coffee_cadence.length === 0 ? '<p class="hint">No deliveries in this range.</p>' : `
-        <div style="overflow-x:auto">
-          <table>
-            <thead>
-              <tr>
-                <th>Coffee</th>
-                <th>Suppliers</th>
-                <th>Deliveries</th>
-                <th>Total kg</th>
-                <th>Avg Gap</th>
-                <th>Last Delivery</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${coffee_cadence.map(c => `
-                <tr>
-                  <td style="font-weight:600">${esc(c.coffee)}</td>
-                  <td>${c.suppliers.map(s => `<span class="pill">${esc(s)}</span>`).join("")}</td>
-                  <td style="text-align:center">${c.delivery_count}</td>
-                  <td>${c.total_kg.toFixed(1)}kg</td>
-                  <td>${c.avg_gap_days !== null ? c.avg_gap_days.toFixed(0) + "d" : "—"}</td>
-                  <td>${c.last_date || "—"}</td>
-                </tr>`).join("")}
-            </tbody>
-          </table>
-        </div>`}
-    </div>
-
-    <div class="card mb-16">
-      <div class="section-title">Delivery Activity (${deliveries_view.length})</div>
-      <div class="filters">
-        <select id="filter-supplier">
-          <option value="all">All suppliers</option>
-          ${all_suppliers_list.map(s => `<option value="${esc(s)}" ${state.ui.deliveries_supplier===s?"selected":""}>${esc(s)}</option>`).join("")}
-        </select>
-        <select id="filter-coffee">
-          <option value="all">All coffees</option>
-          ${all_coffees_list.map(c => `<option value="${esc(c)}" ${state.ui.deliveries_coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
-        </select>
+      <div style="display:grid;gap:4px">
+        ${d.rows.map(r => { const [icon, label, colour] = kind_bits(r.kind);
+          return `<div style="display:flex;align-items:baseline;gap:8px;background:#fff;border:1px solid #f0eee9;border-radius:6px;padding:7px 10px;font-size:12px">
+            <span style="width:16px">${icon}</span>
+            <span style="width:82px;color:#666">${esc(r.date)}</span>
+            <span style="width:88px;font-weight:600;color:${colour}">${esc(label)}</span>
+            <span style="flex:1;color:#555">${esc(r.note || "")}
+              ${r.supplier?`<span style="color:#999"> · ${esc(r.supplier)}</span>`:""}
+              ${r.ico_number?`<span style="color:#999"> · ICO ${esc(r.ico_number)}</span>`:""}
+              ${r.invoice_ref?`<span style="color:#999"> · ${esc(r.invoice_ref)}</span>`:""}
+              ${r.price_per_kg?`<span style="color:#999"> · €${num(r.price_per_kg).toFixed(2)}/kg</span>`:""}</span>
+            <span style="font-weight:700;white-space:nowrap;color:${num(r.kg)<0?"#dc2626":"#16a34a"};font-variant-numeric:tabular-nums">${num(r.kg)>0?"+":""}${kg1(r.kg)}kg</span>
+          </div>`; }).join("")}
       </div>
-      ${deliveries_view.length === 0 ? '<p class="hint">No deliveries match.</p>' : `
-        <div style="overflow-x:auto">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Supplier</th>
-                <th>Coffees</th>
-                <th>Total kg</th>
-                <th>Invoice</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${deliveries_view.map(d => {
-                const items = d.items || [];
-                const total_kg = items.reduce((s, i) => s + (Number(i.weight_kg) || 0), 0);
-                const coffees_in_delivery = [...new Set(items.map(i => i.coffee).filter(Boolean))];
-                return `
-                  <tr>
-                    <td>${d.date}</td>
-                    <td style="font-weight:600">${esc(d.supplier || "—")}</td>
-                    <td>${coffees_in_delivery.map(c => `<span class="pill">${esc(c)}</span>`).join("") || '<span class="hint">—</span>'}</td>
-                    <td>${total_kg.toFixed(1)}kg</td>
-                    <td>${d.invoice_path ? `<button class="invoice-link" data-invoice="${esc(d.invoice_path)}">📄 ${esc(d.invoice_ref || "View")}</button>` : (d.invoice_ref ? esc(d.invoice_ref) : '<span class="hint">—</span>')}</td>
-                  </tr>`;
-              }).join("")}
-            </tbody>
-          </table>
-        </div>`}
-    </div>
-
-    <div class="card mb-16">
-      <div class="section-title">By Reason</div>
-      ${reason_rows.length===0?'<p class="hint">No movements in this range.</p>':reason_rows.map(([r,d]) => `
-        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0eee9;font-size:13px">
-          <span style="font-weight:500">${esc(reason_labels[r]||r)}</span>
-          <span style="color:#16a34a;font-weight:600">+${d.in.toFixed(1)}kg</span>
-          <span style="color:#dc2626;font-weight:600">-${d.out.toFixed(1)}kg</span>
-          <span style="color:#666;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
-        </div>`).join("")}
-    </div>
-
-    <div class="card mb-16">
-      <div class="section-title">By Coffee</div>
-      ${coffee_rows.length===0?'<p class="hint">No movements in this range.</p>':coffee_rows.map(([c,d]) => `
-        <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid #f0eee9;font-size:13px">
-          <span style="font-weight:500">${esc(c)}</span>
-          <span style="color:#16a34a;font-weight:600">+${d.in.toFixed(1)}kg</span>
-          <span style="color:#dc2626;font-weight:600">-${d.out.toFixed(1)}kg</span>
-          <span style="color:#666;font-size:12px">${d.count} ${d.count===1?"entry":"entries"}</span>
-        </div>`).join("")}
-    </div>
-
-    <div class="card">
-      <div class="section-title">Recent Movements ${recent.length<filtered_adj.length?`<span class="hint" style="font-weight:400;font-size:12px">(latest 50 of ${filtered_adj.length})</span>`:""}</div>
-      ${recent_html||'<p class="hint">No movements in this range.</p>'}
+      ${d.total > d.rows.length ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px;font-size:11px" data-drill-more="${coffee_id}">Load 50 more</button>` : ""}
     </div>`;
 }
 
-function build_supplier_stats(deliveries) {
-  const map = {};
-  deliveries.forEach(d => {
-    if (!d.supplier) return;
-    if (!map[d.supplier]) map[d.supplier] = { supplier: d.supplier, deliveries: [], total_kg: 0, coffees: new Set() };
-    map[d.supplier].deliveries.push(d);
-    (d.items || []).forEach(i => {
-      map[d.supplier].total_kg += Number(i.weight_kg) || 0;
-      if (i.coffee) map[d.supplier].coffees.add(i.coffee);
-    });
-  });
-  return Object.values(map).map(s => {
-    const delivery_count = s.deliveries.length;
-    const avg_kg = delivery_count > 0 ? s.total_kg / delivery_count : 0;
-    const last_date = s.deliveries.reduce((max, d) => (!max || d.date > max) ? d.date : max, null);
-    const ds = days_since(last_date);
-    let flag;
-    if (ds === null) flag = "stale";
-    else if (ds <= 60) flag = "active";
-    else if (ds <= 120) flag = "watch";
-    else flag = "stale";
-    return {
-      supplier: s.supplier,
-      delivery_count,
-      total_kg: s.total_kg,
-      avg_kg,
-      last_date,
-      days_since: ds,
-      coffees: [...s.coffees].sort(),
-      flag,
-    };
-  }).sort((a, b) => {
-    const flag_rank = { active: 0, watch: 1, stale: 2 };
-    return flag_rank[a.flag] - flag_rank[b.flag] || b.total_kg - a.total_kg;
-  });
-}
-
-function build_coffee_cadence(deliveries) {
-  const map = {};
-  deliveries.forEach(d => {
-    (d.items || []).forEach(i => {
-      if (!i.coffee) return;
-      if (!map[i.coffee]) map[i.coffee] = { coffee: i.coffee, dates: [], total_kg: 0, suppliers: new Set() };
-      map[i.coffee].dates.push(d.date);
-      map[i.coffee].total_kg += Number(i.weight_kg) || 0;
-      if (d.supplier) map[i.coffee].suppliers.add(d.supplier);
-    });
-  });
-  return Object.values(map).map(c => {
-    const dates_sorted = [...new Set(c.dates)].sort();
-    let gaps = [];
-    for (let i = 1; i < dates_sorted.length; i++) {
-      const ms = new Date(dates_sorted[i]).getTime() - new Date(dates_sorted[i-1]).getTime();
-      gaps.push(ms / (1000 * 60 * 60 * 24));
-    }
-    return {
-      coffee: c.coffee,
-      delivery_count: c.dates.length,
-      total_kg: c.total_kg,
-      avg_gap_days: gaps.length > 0 ? avg(gaps) : null,
-      last_date: dates_sorted[dates_sorted.length - 1] || null,
-      suppliers: [...c.suppliers].sort(),
-    };
-  }).sort((a, b) => b.total_kg - a.total_kg);
-}
-
+// ── LISTENERS ────────────────────────────────────────────────────────────────
 function attach_listeners() {
   const app = document.getElementById("app");
-  app.querySelector("#go-reports")?.addEventListener("click", () => window.location.href="reports.html");
-  app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
-  app.querySelector("#report-from")?.addEventListener("change", e => { state.ui.report_from=e.target.value; render(); });
-  app.querySelector("#report-to")?.addEventListener("change", e => { state.ui.report_to=e.target.value; render(); });
-  app.querySelectorAll("[data-report-range]").forEach(btn => btn.addEventListener("click", () => {
-    const range = btn.dataset.reportRange, d = new Date();
-    if (range==="all") { state.ui.report_from = btn.dataset.first || today(); }
-    else { d.setDate(d.getDate()-Number(range)); state.ui.report_from = d.toISOString().split("T")[0]; }
-    state.ui.report_to = today();
-    render();
+  app.querySelector("#go-reports")?.addEventListener("click", () => window.location.href = "reports.html");
+  app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; });
+  app.querySelector("#g-from")?.addEventListener("change", e => { state.ui.from = e.target.value; load(); });
+  app.querySelector("#g-to")?.addEventListener("change", e => { state.ui.to = e.target.value; load(); });
+  app.querySelector("#g-coffee")?.addEventListener("change", e => {
+    state.ui.coffee_id = e.target.value ? Number(e.target.value) : null;
+    load();
+  });
+  app.querySelectorAll("[data-range]").forEach(btn => btn.addEventListener("click", () => {
+    const r = btn.dataset.range, dt = new Date();
+    if (r === "all")        state.ui.from = btn.dataset.first || today();
+    else if (r === "month") state.ui.from = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-01`;
+    else { dt.setDate(dt.getDate() - Number(r)); state.ui.from = dt.toISOString().split("T")[0]; }
+    state.ui.to = today();
+    load();
   }));
-  app.querySelector("#filter-supplier")?.addEventListener("change", e => { state.ui.deliveries_supplier = e.target.value; render(); });
-  app.querySelector("#filter-coffee")?.addEventListener("change", e => { state.ui.deliveries_coffee = e.target.value; render(); });
-  app.querySelectorAll("[data-invoice]").forEach(btn => btn.addEventListener("click", () => download_invoice(btn.dataset.invoice)));
+  app.querySelectorAll("[data-drill]").forEach(btn => btn.addEventListener("click", () => {
+    const id = Number(btn.dataset.drill);
+    if (state.drill[id]) { delete state.drill[id]; render(); return; }
+    state.drill[id] = { loading: true, rows: [], total: 0, kg: 0, offset: 0 };
+    load_detail(id);
+  }));
+  app.querySelectorAll("[data-drill-more]").forEach(btn => btn.addEventListener("click", () => {
+    const id = Number(btn.dataset.drillMore), dd = state.drill[id];
+    if (!dd) return;
+    dd.offset = (dd.rows || []).length;
+    load_detail(id);
+  }));
 }
 </script>
 </body>
