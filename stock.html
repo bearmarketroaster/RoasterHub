@@ -110,7 +110,7 @@ const state = {
     contract: new_contract(),
     pending_invoice_file: null,   // File object staged for upload after delivery saves
     pending_contract_file: null,  // File staged for upload after contract saves
-    adj: { coffee: "", change_kg: "", reason: "roast", note: "" },
+    adj: { coffee: "", change_kg: "", reason: "", note: "" },   // no default: the kind must be chosen
     staff: { coffee: "", container_id: "", bag_size: "200g", err: "", saving: false },
   },
 };
@@ -126,7 +126,7 @@ function new_delivery() {
   return { date: today(), supplier: "", invoice_ref: "", due_date: "", items: [new_delivery_item()] };
 }
 function new_delivery_item() {
-  return { coffee:"", green_name:"", origin:"", lot_number:"", bags:"", weight_kg:"", price_per_kg:"", contract_id:"" };
+  return { coffee:"", green_name:"", origin:"", lot_number:"", ico_number:"", bags:"", weight_kg:"", price_per_kg:"", contract_id:"" };
 }
 function new_contract() {
   return { supplier:"", coffee_id:"", bag_count:"", low_bag_threshold:"100" };
@@ -140,14 +140,45 @@ async function load_data() {
   state.coffees = (coffees_data || []).map(c => c.name);
   state.coffees_obj = coffees_data || [];
 
-  const { data: stock_items } = await supabaseClient.from("stock_items").select("*").order("coffee");
-  state.stock_items = stock_items || [];
+  // Green now lives in green_deliveries + green_movements, with the balance DERIVED by
+  // v_green_stock rather than stored. See sql/green_schema.sql. These are mapped into the
+  // same shapes the page already renders, so only the data source changed, not the UI.
+  const [{ data: gstock }, { data: arrivals }, { data: movements }] = await Promise.all([
+    supabaseClient.from("v_green_stock").select("*").order("coffee"),
+    supabaseClient.from("v_green_arrivals").select("*").order("arrived_on", { ascending: false }),
+    supabaseClient.from("v_green_movements").select("*").order("occurred_on", { ascending: false }).limit(500),
+  ]);
 
-  const { data: deliveries } = await supabaseClient.from("stock_deliveries").select("*, stock_delivery_items(*)").order("date", { ascending: false });
-  state.deliveries = (deliveries||[]).map(d => ({ ...d, items: d.stock_delivery_items||[] }));
+  state.stock_items = (gstock || []).filter(r => !r.retired_at).map(r => ({
+    id: `GS-${r.coffee_id}`,                       // synthetic; nothing writes back via this
+    coffee: r.coffee,
+    coffee_id: r.coffee_id,
+    origin: null,
+    current_kg: Number(r.on_hand_kg) || 0,
+    low_stock_threshold: Number(r.low_stock_threshold) || LOW_STOCK_KG,
+    is_negative: !!r.is_negative,                  // a negative balance means something wasn't logged
+    last_intake_on: r.last_intake_on,
+  }));
 
-  const { data: adjustments } = await supabaseClient.from("stock_adjustments").select("*").order("date", { ascending: false });
-  state.adjustments = adjustments || [];
+  state.deliveries = (arrivals || []).map(a => ({
+    id: a.arrival_id,
+    date: a.arrived_on,
+    supplier: a.supplier,
+    invoice_ref: a.invoice_ref,
+    invoice_path: a.invoice_path,
+    awaiting_invoice: !!a.awaiting_invoice,
+    items: (a.lines || []).map(l => ({
+      id: l.id, coffee: l.coffee, coffee_id: l.coffee_id, origin: l.origin, green_name: l.green_name,
+      lot_number: l.lot_number, ico_number: l.ico_number, bags: l.bags,
+      weight_kg: l.weight_kg, price_per_kg: l.price_per_kg, contract_id: l.contract_id,
+    })),
+  }));
+
+  state.adjustments = (movements || []).map(m => ({
+    id: m.id, date: m.occurred_on, coffee: m.coffee, coffee_id: m.coffee_id,
+    change_kg: Number(m.change_kg) || 0, reason: m.kind, note: m.note,
+    auto: !m.is_editable, is_editable: !!m.is_editable,
+  }));
 
   // Green contracts + live drawdown (bags delivered against each contract).
   const { data: contracts } = await supabaseClient.from("green_contracts").select("*").order("created_at", { ascending: false });
@@ -204,34 +235,44 @@ async function save_delivery() {
     invoice_path = path;
   }
 
-  const { error: del_err } = await supabaseClient.from("stock_deliveries").insert({
-    id: delivery_id, date: d.date, supplier: d.supplier||null,
-    invoice_ref: d.invoice_ref||null, invoice_path,
-  });
-  if (del_err) { state.ui.delivery_err="Failed to save delivery."; state.saving=false; render(); return; }
-
-  await supabaseClient.from("stock_delivery_items").insert(valid_items.map((item,i) => ({
-    id: `${delivery_id}-I${i+1}`, delivery_id,
-    coffee: item.coffee,
+  // One green_deliveries row per coffee, sharing an arrival_id so a multi-coffee delivery
+  // stays one arrival. Invoice fields are nullable — log the arrival now, attach the invoice
+  // when the supplier sends it. Deliveries with none show in Awaiting Invoice.
+  const arrival_id = `ARR-${delivery_id}`;
+  const delivery_rows = valid_items.map((item, i) => ({
+    id: `${delivery_id}-I${i+1}`,
+    arrival_id,
     coffee_id: coffee_id_by_name(item.coffee),
-    green_name: item.green_name||null,
-    origin: item.origin||null,
-    lot_number: item.lot_number||null,
-    bags: Number(item.bags)||null,
+    supplier: d.supplier || null,
+    origin: item.origin || null,
+    green_name: item.green_name || null,
+    lot_number: item.lot_number || null,
+    ico_number: item.ico_number || null,
+    bags: Number(item.bags) || null,
     weight_kg: Number(item.weight_kg),
-    price_per_kg: Number(item.price_per_kg)||null,
-    contract_id: item.contract_id||null,
-  })));
+    arrived_on: d.date,
+    contract_id: item.contract_id || null,
+    invoice_ref: d.invoice_ref || null,
+    invoice_path,
+    price_per_kg: Number(item.price_per_kg) || null,
+  }));
+  const { error: del_err } = await supabaseClient.from("green_deliveries").insert(delivery_rows);
+  if (del_err) { state.ui.delivery_err="Failed to save delivery: "+del_err.message; state.saving=false; render(); return; }
 
-  for (const item of valid_items) {
-    const cid = coffee_id_by_name(item.coffee);
-    const existing = state.stock_items.find(s => s.coffee_id === cid);
-    if (existing) {
-      await supabaseClient.from("stock_items").update({ current_kg: existing.current_kg+Number(item.weight_kg), origin: item.origin||existing.origin }).eq("id", existing.id);
-    } else {
-      await supabaseClient.from("stock_items").insert({ id: gen_id("STK"), coffee: item.coffee, coffee_id: cid, origin: item.origin||null, current_kg: Number(item.weight_kg), low_stock_threshold: LOW_STOCK_KG });
-    }
-    await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: d.date, coffee: item.coffee, coffee_id: cid, change_kg: Number(item.weight_kg), reason: "delivery", note: `Delivery ${delivery_id}${d.invoice_ref?" · "+d.invoice_ref:""}`, auto: true });
+  // The intake movements. One batch insert — no stored balance to update afterwards.
+  const { error: mv_err } = await supabaseClient.from("green_movements").insert(delivery_rows.map(r => ({
+    id: `GM-IN-${r.id}`,
+    coffee_id: r.coffee_id,
+    delivery_id: r.id,
+    occurred_on: r.arrived_on,
+    change_kg: r.weight_kg,
+    kind: "intake",
+    note: `Delivery ${arrival_id}${d.invoice_ref ? " · invoice " + d.invoice_ref : " · invoice pending"}`,
+  })));
+  if (mv_err) {
+    // The delivery rows exist but the stock didn't move — say so rather than silently under-counting.
+    state.ui.delivery_err = "Delivery saved but the stock movement failed: " + mv_err.message;
+    state.saving=false; render(); return;
   }
   state.saving=false; state.ui.show_delivery_form=false; state.ui.delivery_err="";
   state.ui.delivery=new_delivery(); state.ui.pending_invoice_file=null;
@@ -267,23 +308,30 @@ async function save_adjustment() {
       state.saving=false; render(); return;
     }
   }
-  const adj_cid = coffee_id_by_name(coffee);
-  const { error } = await supabaseClient.from("stock_adjustments").insert({ id: gen_id("ADJ"), date: today(), coffee, coffee_id: adj_cid, change_kg, reason, note: note||null, auto: false });
-  if (error) { state.ui.adj_err="Failed to save adjustment."; state.saving=false; render(); return; }
-  const existing = state.stock_items.find(s => s.coffee_id === adj_cid);
-  if (existing) {
-    await supabaseClient.from("stock_items").update({ current_kg: Math.max(0, existing.current_kg+change_kg) }).eq("id", existing.id);
-  } else {
-    await supabaseClient.from("stock_items").insert({ id: gen_id("STK"), coffee, coffee_id: adj_cid, current_kg: Math.max(0,change_kg), low_stock_threshold: LOW_STOCK_KG });
+  if (!reason) { state.ui.adj_err="Please choose what kind of movement this is."; state.saving=false; render(); return; }
+  // Direction has to match the kind — green_movements_direction rejects a positive spill or a
+  // negative intake. Catching it here gives a useful message instead of a constraint error.
+  if ((reason === "spill" || reason === "sample") && change_kg > 0) {
+    state.ui.adj_err = `A ${reason} takes stock out — enter a negative value, or use Stock Correction to add.`;
+    state.saving=false; render(); return;
   }
-  state.saving=false; state.ui.adj={ coffee:"", change_kg:"", reason:"roast", note:"" }; state.ui.show_adj_form=false; state.ui.adj_err="";
+  const adj_cid = coffee_id_by_name(coffee);
+  // One row. The balance is the sum of green_movements, so there is nothing else to update.
+  const { error } = await supabaseClient.from("green_movements").insert({
+    id: gen_id("GM"), coffee_id: adj_cid, occurred_on: today(),
+    change_kg, kind: reason, note: note || null,
+  });
+  if (error) { state.ui.adj_err="Failed to save adjustment: "+error.message; state.saving=false; render(); return; }
+  state.saving=false; state.ui.adj={ coffee:"", change_kg:"", reason:"", note:"" }; state.ui.show_adj_form=false; state.ui.adj_err="";
   await load_data(); render();
 }
 
 async function set_threshold(coffee, value) {
   const item = state.stock_items.find(s => s.coffee===coffee);
   if (!item) return;
-  await supabaseClient.from("stock_items").update({ low_stock_threshold: value }).eq("id", item.id);
+  await supabaseClient.from("green_coffee_settings")
+    .upsert({ coffee_id: item.coffee_id, low_stock_threshold: value, updated_at: new Date().toISOString() },
+            { onConflict: "coffee_id" });
   await load_data(); render();
 }
 
@@ -373,22 +421,19 @@ async function save_quick_stock() {
 
   state.ui.quick_saving = true; state.ui.quick_err = ""; state.ui.quick_ok = ""; render();
 
-  // One batch of ledger corrections...
-  await supabaseClient.from("stock_adjustments").insert(changes.map(ch => ({
-    id: gen_id("ADJ"), date: today(), coffee: coffee_name_by_id(ch.cid), coffee_id: ch.cid,
-    change_kg: ch.delta, reason: "correction", note: "Quick stock set", auto: false,
+  // One correction movement per changed coffee, carrying the delta. There is no stock level to
+  // set afterwards — writing the delta IS setting the level, because the balance is the sum.
+  // The counted figure goes in the note so a variance can be traced back later.
+  const { error: qc_err } = await supabaseClient.from("green_movements").insert(changes.map(ch => ({
+    id: gen_id("GM"), coffee_id: ch.cid, occurred_on: today(),
+    change_kg: ch.delta, kind: "correction",
+    note: `Quick stock set to ${ch.target}kg (was ${Number(ch.existing ? ch.existing.current_kg : 0).toFixed(2)}kg)`,
   })));
-
-  // ...then set each stock level (new coffees get a row created).
-  const new_rows = [];
-  for (const ch of changes) {
-    if (ch.existing) {
-      await supabaseClient.from("stock_items").update({ current_kg: ch.target }).eq("id", ch.existing.id);
-    } else {
-      new_rows.push({ id: gen_id("STK"), coffee: coffee_name_by_id(ch.cid), coffee_id: ch.cid, current_kg: ch.target, low_stock_threshold: LOW_STOCK_KG });
-    }
+  if (qc_err) {
+    state.ui.quick_saving = false;
+    state.ui.quick_err = "Failed to save: " + qc_err.message;
+    render(); return;
   }
-  if (new_rows.length) await supabaseClient.from("stock_items").insert(new_rows);
 
   state.ui.quick_saving = false;
   state.ui.quick_ok = `Saved ${changes.length} change${changes.length>1?"s":""}.`;
@@ -587,7 +632,8 @@ function build_delivery_item_row(item, i) {
         </div>
         <div><label class="lbl">Green Name</label><input class="item-green-name" data-idx="${i}" value="${esc(item.green_name||"")}" placeholder="e.g. Ethiopia Yirgacheffe Kochere Gr.1" /></div>
         <div><label class="lbl">Origin / Country</label><input class="item-origin" data-idx="${i}" value="${esc(item.origin)}" placeholder="e.g. Ethiopia" /></div>
-        <div><label class="lbl">ICO / Lot No.</label><input class="item-lot" data-idx="${i}" value="${esc(item.lot_number)}" placeholder="e.g. 002/4600/0524" /></div>
+        <div><label class="lbl">Lot No.</label><input class="item-lot" data-idx="${i}" value="${esc(item.lot_number)}" placeholder="e.g. LOT-4600" /></div>
+        <div><label class="lbl">ICO No.</label><input class="item-ico" data-idx="${i}" value="${esc(item.ico_number||"")}" placeholder="e.g. 002/4600/0524" title="From the invoice — the traceability reference" /></div>
         <div><label class="lbl">No. of Bags</label><input type="number" class="item-bags" data-idx="${i}" value="${item.bags}" placeholder="0" /></div>
         <div><label class="lbl">Total Weight (kg) *</label><input type="number" class="item-weight" data-idx="${i}" value="${item.weight_kg}" placeholder="0.0" step="0.1" /></div>
         <div><label class="lbl">Price per kg (€)</label><input type="number" class="item-price" data-idx="${i}" value="${item.price_per_kg}" placeholder="0.00" step="0.01" /></div>
@@ -715,13 +761,12 @@ function build_adjustments() {
             ${state.coffees.map(c=>`<option value="${esc(c)}" ${adj.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
           </select>
         </div>
-        <div><label class="lbl">Reason</label>
+        <div><label class="lbl">Movement type *</label>
           <select id="adj-reason">
-            <option value="roast" ${adj.reason==="roast"?"selected":""}>Roast (manual)</option>
-            <option value="spill" ${adj.reason==="spill"?"selected":""}>Spill / Loss</option>
-            <option value="sample" ${adj.reason==="sample"?"selected":""}>Sample</option>
-            <option value="correction" ${adj.reason==="correction"?"selected":""}>Stock Correction</option>
-            <option value="other" ${adj.reason==="other"?"selected":""}>Other</option>
+            <option value="" ${!adj.reason?"selected":""}>— Select —</option>
+            <option value="correction" ${adj.reason==="correction"?"selected":""}>Stock correction (+ or −)</option>
+            <option value="spill" ${adj.reason==="spill"?"selected":""}>Spill / loss (−)</option>
+            <option value="sample" ${adj.reason==="sample"?"selected":""}>Sample / cupping (−)</option>
           </select>
         </div>
         <div><label class="lbl">Change (kg) — use negative to deduct *</label><input type="text" id="adj-kg" value="${adj.change_kg}" placeholder="e.g. -2.5 or +10" inputmode="decimal" /></div>
@@ -920,7 +965,7 @@ function attach_listeners() {
     el.addEventListener("change", e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; });
   });
   sync(".item-coffee","coffee"); sync(".item-green-name","green_name"); sync(".item-origin","origin");
-  sync(".item-lot","lot_number"); sync(".item-bags","bags"); sync(".item-weight","weight_kg"); sync(".item-price","price_per_kg");
+  sync(".item-lot","lot_number"); sync(".item-ico","ico_number"); sync(".item-bags","bags"); sync(".item-weight","weight_kg"); sync(".item-price","price_per_kg");
   sync(".item-contract","contract_id");
 
   app.querySelector("#save-delivery")?.addEventListener("click", () => {
@@ -928,6 +973,7 @@ function attach_listeners() {
     app.querySelectorAll(".item-green-name").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].green_name=el.value; });
     app.querySelectorAll(".item-origin").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].origin=el.value; });
     app.querySelectorAll(".item-lot").forEach(el        => { state.ui.delivery.items[Number(el.dataset.idx)].lot_number=el.value; });
+    app.querySelectorAll(".item-ico").forEach(el        => { state.ui.delivery.items[Number(el.dataset.idx)].ico_number=el.value; });
     app.querySelectorAll(".item-bags").forEach(el       => { state.ui.delivery.items[Number(el.dataset.idx)].bags=el.value; });
     app.querySelectorAll(".item-weight").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].weight_kg=el.value; });
     app.querySelectorAll(".item-price").forEach(el      => { state.ui.delivery.items[Number(el.dataset.idx)].price_per_kg=el.value; });
