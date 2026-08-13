@@ -73,7 +73,7 @@ const state = {
   summary: null,
   loading: true,
   err: "",
-  ui: { from: today(), to: today(), status: "all", kind: "all", view: "shops" },
+  ui: { from: today(), to: today(), status: "all", kind: "all", view: "shops", bucket: "auto" },
   drill: {},   // "shop:Blackrock" | "coffee:Dark Horse" -> { loading, rows, total, offset, err }
 };
 
@@ -86,9 +86,9 @@ async function init() {
 
 async function load_summary() {
   state.loading = true; state.err = ""; state.drill = {}; render();
-  const { from, to, status, kind } = state.ui;
+  const { from, to, status, kind, bucket } = state.ui;
   const { data, error } = await supabaseClient.rpc("report_dispatch_summary", {
-    p_from: from, p_to: to, p_status: status, p_kind: kind,
+    p_from: from, p_to: to, p_status: status, p_kind: kind, p_bucket: bucket,
   });
   if (error) { state.err = error.message; state.summary = null; }
   else state.summary = data;
@@ -256,10 +256,38 @@ function build_reports() {
       <div style="font-size:11px;color:#666;margin-top:2px">${total_kg>0?((kg(ch[k])/total_kg)*100).toFixed(0):0}% of total</div>
     </div>`).join("");
 
-  // weekly chart
-  const weeks = s.weeks || [];
-  const max_week = Math.max(...weeks.map(w => kg(w.kg)), 1);
-  const weekly_chart = weeks.length > 1 ? `<div class="card mb-16"><div style="font-weight:700;margin-bottom:14px;font-size:15px">📅 Weekly Dispatch Volume (kg)</div><div class="chart-wrap">${weeks.map(w => `<div class="chart-col"><div class="chart-val">${kg(w.kg).toFixed(0)}</div><div class="chart-bar" style="height:${Math.round((kg(w.kg)/max_week)*90)}px"></div><div class="chart-lbl">${esc(String(w.week).slice(5))}</div></div>`).join("")}</div></div>` : "";
+  // volume over time. Granularity is chosen server-side from the range span unless overridden —
+  // days for a short range, Monday-anchored weeks for a month or two, months beyond that.
+  const series = s.series || [];
+  const bucket_eff = s.range?.bucket || "week";
+  const max_bar = Math.max(...series.map(x => kg(x.kg)), 1);
+  const BUCKETS = [["auto","Auto"],["day","Day"],["week","Week"],["month","Month"]];
+  const bucket_toggle = `<div class="flex gap-6" style="flex-wrap:wrap">${BUCKETS.map(([b,label]) =>
+    `<button class="btn btn-sm ${state.ui.bucket===b?"btn-dark":"btn-ghost"}" style="color:${state.ui.bucket===b?"#fff":"#1a1a1a"}" data-bucket="${b}">${label}${b==="auto"&&state.ui.bucket==="auto"?` · ${bucket_eff}`:""}</button>`).join("")}</div>`;
+  const chart = series.length ? `
+    <div class="card mb-16">
+      <div class="flex-between mb-12" style="flex-wrap:wrap;gap:10px">
+        <div style="font-weight:700;font-size:15px">📅 Volume by ${bucket_eff}</div>
+        ${bucket_toggle}
+      </div>
+      <div class="chart-wrap" style="height:${series.length > 26 ? 90 : 110}px">
+        ${series.map(x => `<div class="chart-col" title="${esc(x.label)} · ${kg(x.kg).toFixed(1)}kg · ${x.deliveries} deliver${x.deliveries!==1?"ies":"y"}">
+          <div class="chart-val">${kg(x.kg).toFixed(0)}</div>
+          <div class="chart-bar" style="height:${Math.round((kg(x.kg)/max_bar)*90)}px"></div>
+          <div class="chart-lbl">${esc(series.length > 16 ? x.short : x.label)}</div>
+        </div>`).join("")}
+      </div>
+      <div style="font-size:12px;color:#666;margin-top:10px">
+        ${series.length} ${bucket_eff}${series.length!==1?"s":""} ·
+        peak ${kg(Math.max(...series.map(x => kg(x.kg)))).toFixed(1)}kg ·
+        average ${(series.reduce((a,x)=>a+kg(x.kg),0)/series.length).toFixed(1)}kg per ${bucket_eff}
+        ${series.filter(x => kg(x.kg) === 0).length ? ` · ${series.filter(x => kg(x.kg) === 0).length} with no deliveries` : ""}
+        ${bucket_eff==="week" ? " · weeks run Monday to Sunday" : ""}
+      </div>
+      ${state.ui.bucket !== "auto" && state.ui.bucket !== bucket_eff
+        ? `<div style="font-size:12px;color:#d97706;margin-top:6px">Too many bars for ${esc(state.ui.bucket)} over this range — showing ${esc(bucket_eff)}s instead.</div>`
+        : ""}
+    </div>` : "";
 
   // delivery timing
   const dv = s.delivery || [];
@@ -353,7 +381,7 @@ function build_reports() {
     ${flagged_html}
     ${channel_html ? `<div class="card mb-16"><div style="font-weight:700;margin-bottom:12px;font-size:15px">By Channel</div><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:10px">${channel_html}</div></div>` : ""}
     ${delivery_html}
-    ${weekly_chart}
+    ${chart}
     <div class="flex gap-8 mb-12">
       ${tab("status","all",status,"All",true)}${tab("status","in_transit",status,"⏳ In Transit",true)}${tab("status","delivered",status,"✓ Delivered",true)}
     </div>
@@ -385,6 +413,7 @@ function attach_listeners() {
   // status / kind change the server-side filter, so they refetch. view is client-side only.
   app.querySelectorAll("[data-status]").forEach(b => b.addEventListener("click", () => { state.ui.status = b.dataset.status; load_summary(); }));
   app.querySelectorAll("[data-kind]").forEach(b => b.addEventListener("click", () => { state.ui.kind = b.dataset.kind; load_summary(); }));
+  app.querySelectorAll("[data-bucket]").forEach(b => b.addEventListener("click", () => { state.ui.bucket = b.dataset.bucket; load_summary(); }));
   app.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => { state.ui.view = b.dataset.view; render(); }));
   app.querySelectorAll("[data-drill]").forEach(b => b.addEventListener("click", () => {
     const key = b.dataset.drill;
