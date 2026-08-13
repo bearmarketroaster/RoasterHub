@@ -1567,6 +1567,7 @@ function build_shops_section() {
   const kind_badge = (kind) => {
     if (kind === "online")    return '<span style="background:#fff7ed;color:#d97706;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">ONLINE</span>';
     if (kind === "wholesale") return '<span style="background:#f0e9f7;color:#7e57c2;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">WHOLESALE</span>';
+    if (kind === "charity")   return '<span style="background:#fdecea;color:#dc2626;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">CHARITY</span>';
     return "";
   };
 
@@ -1577,7 +1578,10 @@ function build_shops_section() {
         <div>
           <div style="font-weight:700;font-size:14px">${esc(s.master_name)}${kind_badge(s.kind)}</div>
           ${!has_qr
-            ? `<div style="font-size:11px;color:#666;margin-top:2px">${s.kind === "wholesale" ? "Wholesale customer — auto-confirmed on dispatch, no QR" : "Online — auto-confirmed on dispatch, no QR"}</div>`
+            ? `<div style="font-size:11px;color:#666;margin-top:2px">${
+                  s.kind === "wholesale" ? "Wholesale customer — auto-confirmed on dispatch, no QR"
+                : s.kind === "charity"   ? "Charity — auto-confirmed on dispatch, no QR"
+                :                          "Online — auto-confirmed on dispatch, no QR"}</div>`
             : s.shop_qr_id
             ? `<div style="font-size:11px;color:#666;font-family:monospace;margin-top:2px">${esc(s.shop_qr_id)}</div>`
             : '<div style="font-size:11px;color:#dc2626;margin-top:2px">No QR yet</div>'}
@@ -1594,6 +1598,10 @@ function build_shops_section() {
   const shops_list = entries.filter(e => e.kind === "shop");
   const wholesale_list = entries.filter(e => e.kind === "wholesale");
   const online_list = entries.filter(e => e.kind === "online");
+  const charity_list = entries.filter(e => e.kind === "charity");
+  // Anything with an unrecognised kind would otherwise be invisible here, so it gets its own group.
+  const KNOWN_KINDS = ["shop", "wholesale", "online", "charity"];
+  const other_list = entries.filter(e => !KNOWN_KINDS.includes(e.kind || "shop"));
 
   const group = (title, list) => list.length === 0 ? "" : `
     <div class="section-label" style="margin-top:14px">${title} (${list.length})</div>
@@ -1603,12 +1611,14 @@ function build_shops_section() {
 
   const body = open ? `
     <div class="section-body">
-      <p class="hint mb-12">Three types of destinations: <strong>Shops</strong> (Bearmarket — QR-confirmed on delivery), <strong>Wholesale</strong> (third-party customers — auto-confirmed at pack), <strong>Online</strong> (web orders — auto-confirmed at pack).</p>
+      <p class="hint mb-12">Destination types: <strong>Shops</strong> (Bearmarket — QR-confirmed on delivery), <strong>Wholesale</strong> (third-party customers), <strong>Online</strong> (web orders), <strong>Charity</strong> (donations). Only Shops get a QR; the rest auto-confirm at pack time.</p>
 
       ${entries.length === 0 ? '<div class="card-white" style="padding:14px 12px;font-size:13px;color:#999;font-style:italic">Nothing here yet — add an entry below.</div>' : ""}
       ${group("Shops", shops_list)}
       ${group("Wholesale", wholesale_list)}
       ${group("Online", online_list)}
+      ${group("Charity", charity_list)}
+      ${group("Other", other_list)}
 
       <div class="section-label" style="margin-top:16px">Add New</div>
       <div class="card">
@@ -1619,11 +1629,12 @@ function build_shops_section() {
               <option value="shop"      ${selected_kind==="shop"?"selected":""}>Shop</option>
               <option value="wholesale" ${selected_kind==="wholesale"?"selected":""}>Wholesale</option>
               <option value="online"    ${selected_kind==="online"?"selected":""}>Online</option>
+              <option value="charity"   ${selected_kind==="charity"?"selected":""}>Charity</option>
             </select>
           </div>
           <button class="btn btn-dark btn-sm" id="add-shop-mapping">+ Add</button>
         </div>
-        <p class="hint" style="font-size:12px;margin-top:8px">Shops get an auto-generated QR for delivery confirmation. Wholesale and Online auto-confirm at pack time.</p>
+        <p class="hint" style="font-size:12px;margin-top:8px">Shops get an auto-generated QR for delivery confirmation. Wholesale, Online and Charity auto-confirm at pack time.</p>
         ${shop_err ? `<p style="color:#dc2626;font-size:12px;margin-top:4px">${esc(shop_err)}</p>` : ""}
       </div>
     </div>` : "";
