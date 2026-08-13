@@ -73,7 +73,7 @@ const state = {
   summary: null,
   loading: true,
   err: "",
-  ui: { from: today(), to: today(), status: "all", kind: "all", view: "shops", bucket: "auto" },
+  ui: { from: today(), to: today(), kind: "all", view: "shops" },
   drill: {},   // "shop:Blackrock" | "coffee:Dark Horse" -> { loading, rows, total, offset, err }
 };
 
@@ -86,9 +86,12 @@ async function init() {
 
 async function load_summary() {
   state.loading = true; state.err = ""; state.drill = {}; render();
-  const { from, to, status, kind, bucket } = state.ui;
+  const { from, to, kind } = state.ui;
+  // p_bucket defaults to 'auto' server-side: day for a short range, Monday-anchored weeks
+  // for a month or two, months beyond that. Granularity follows the range, so there's no
+  // separate control for it.
   const { data, error } = await supabaseClient.rpc("report_dispatch_summary", {
-    p_from: from, p_to: to, p_status: status, p_kind: kind, p_bucket: bucket,
+    p_from: from, p_to: to, p_kind: kind,
   });
   if (error) { state.err = error.message; state.summary = null; }
   else state.summary = data;
@@ -101,12 +104,12 @@ async function load_detail(key) {
   const [type, ...rest] = key.split(":");
   const value = rest.join(":");
   d.loading = true; d.err = ""; render();
-  const { from, to, status, kind } = state.ui;
+  const { from, to, kind } = state.ui;
   const { data, error } = await supabaseClient.rpc("report_dispatch_detail", {
     p_from: from, p_to: to,
     p_shop:   type === "shop"   ? value : null,
     p_coffee: type === "coffee" ? value : null,
-    p_status: status, p_kind: kind,
+    p_kind: kind,
     p_limit: 50, p_offset: d.offset || 0,
   });
   if (error) { d.err = error.message; d.rows = []; }
@@ -178,8 +181,6 @@ function drill_html(key) {
             <div style="font-size:11px;color:#666;margin-top:2px">
               ${r.parts > 1 ? `<span title="Separate dispatches merged into one delivery">${r.parts} dispatches combined</span> · ` : ""}
               <span style="font-family:ui-monospace,Menlo,monospace">${(r.dispatch_ids||[]).map(esc).join(", ")}</span>
-              ${r.confirmed ? " · ✓ confirmed" : ` · ⏳ ${r.parts > 1 ? "not all parts confirmed" : "in transit"}`}
-              ${r.auto ? ' · <span style="color:#999">auto-accepted</span>' : ""}
               ${r.flagged_parts ? ` · <span style="color:#dc2626">🚩 ${r.flagged_parts} flagged</span>` : ""}
             </div>
             ${(r.lines||[]).length ? `<div style="display:grid;gap:2px;margin-top:6px">${r.lines.map(l =>
@@ -212,7 +213,7 @@ function build_app() {
 }
 
 function build_reports() {
-  const { from, to, status, kind, view } = state.ui;
+  const { from, to, kind, view } = state.ui;
   const s = state.summary;
   const first_date = s?.bounds?.first_date || today();
 
@@ -240,8 +241,6 @@ function build_reports() {
         </div>
       </div>
       ${row("Channel", group("kind", kind, [["all","All"],["shop","🏪 Shops"],["wholesale","📦 Wholesale"],["online","🛒 Online"],["charity","❤️ Charity"],["samples","🎁 Samples"],["staff","👤 Staff"]]))}
-      ${row("Status",  group("status", status, [["all","All"],["in_transit","⏳ In transit"],["delivered","✓ Delivered"]]))}
-      ${row("Chart",   group("bucket", state.ui.bucket, [["auto","Auto"],["day","Day"],["week","Week"],["month","Month"]]))}
       ${row("Break by", group("view", view, [["shops","🏪 Shop"],["coffees","☕ Coffee"]]))}
     </div>`;
 
@@ -252,10 +251,9 @@ function build_reports() {
   const t = s.totals || {};
   const total_kg = kg(t.kg);
   const flagged = s.flagged || [];
-  const total_label = status === "in_transit" ? "In Transit" : status === "delivered" ? "Delivered" : "Total Dispatched";
 
   const stats_html = [
-    { label: total_label, value: `${total_kg.toFixed(1)}kg`, icon: "⚖️" },
+    { label: "Total Dispatched", value: `${total_kg.toFixed(1)}kg`, icon: "⚖️" },
     { label: "Deliveries", value: t.dispatches || 0, icon: "🚚" },
     { label: "Shops Served", value: t.shops || 0, icon: "🏪" },
     { label: "Coffees", value: t.coffees || 0, icon: "☕" },
@@ -272,8 +270,8 @@ function build_reports() {
       <div style="font-size:11px;color:#666;margin-top:2px">${total_kg>0?((kg(ch[k])/total_kg)*100).toFixed(0):0}% of total</div>
     </div>`).join("");
 
-  // volume over time. Granularity is chosen server-side from the range span unless overridden —
-  // days for a short range, Monday-anchored weeks for a month or two, months beyond that.
+  // Volume over time. Granularity is derived server-side from the range span, so it needs no
+  // control of its own — the chart title states which one is in use.
   const series = s.series || [];
   const bucket_eff = s.range?.bucket || "week";
   const max_bar = Math.max(...series.map(x => kg(x.kg)), 1);
@@ -294,29 +292,6 @@ function build_reports() {
         ${series.filter(x => kg(x.kg) === 0).length ? ` · ${series.filter(x => kg(x.kg) === 0).length} with no deliveries` : ""}
         ${bucket_eff==="week" ? " · weeks run Monday to Sunday" : ""}
       </div>
-      ${state.ui.bucket !== "auto" && state.ui.bucket !== bucket_eff
-        ? `<div style="font-size:12px;color:#d97706;margin-top:6px">Too many bars for ${esc(state.ui.bucket)} over this range — showing ${esc(bucket_eff)}s instead.</div>`
-        : ""}
-    </div>` : "";
-
-  // delivery timing
-  const dv = s.delivery || [];
-  const th = 'text-align:right;padding:8px;background:#f4f2ed;font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700;border-bottom:1px solid #e8e6e1';
-  const td = 'padding:8px;border-bottom:1px solid #f0eee9;text-align:right';
-  const delivery_html = dv.length ? `
-    <div class="card mb-16">
-      <div style="font-weight:700;margin-bottom:6px;font-size:15px">Time to Delivery</div>
-      <div style="font-size:12px;color:#666;margin-bottom:12px">Days between packing and shop QR confirmation. Slowest first. Auto-accepted deliveries are excluded — they'd measure the cron, not the shop.</div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
-        <thead><tr><th style="${th};text-align:left">Shop</th><th style="${th}">Deliveries</th><th style="${th}">Avg Days</th><th style="${th}">Median</th><th style="${th}">Slowest</th></tr></thead>
-        <tbody>${dv.map(r => `<tr>
-          <td style="padding:8px;border-bottom:1px solid #f0eee9;font-weight:600">${esc(r.shop)}</td>
-          <td style="${td}">${r.count}</td>
-          <td style="${td};font-weight:600;color:${r.avg_days>5?'#dc2626':r.avg_days>2?'#d97706':'#16a34a'}">${kg(r.avg_days).toFixed(1)}d</td>
-          <td style="${td}">${kg(r.med_days).toFixed(1)}d</td>
-          <td style="${td};color:#666">${kg(r.max_days).toFixed(1)}d</td>
-        </tr>`).join("")}</tbody>
-      </table></div>
     </div>` : "";
 
   // flagged
@@ -388,7 +363,6 @@ function build_reports() {
     <p style="font-size:12px;color:#666;margin:-6px 0 16px">A delivery is one shop on one day — everything sent to a shop on the same date counts once, however many separate dispatches it was packed as.</p>
     ${flagged_html}
     ${channel_html ? `<div class="card mb-16"><div style="font-weight:700;margin-bottom:12px;font-size:15px">By Channel</div><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:10px">${channel_html}</div></div>` : ""}
-    ${delivery_html}
     ${chart}
     <div style="font-weight:700;font-size:15px;margin:20px 0 10px">${view==="shops"?"🏪 By shop":"☕ By coffee"}</div>
     ${(t.dispatches||0) === 0 ? `<div class="card empty"><div class="icon">📊</div>No data for this period.</div>` : ""}
@@ -409,10 +383,8 @@ function attach_listeners() {
     state.ui.to = today();
     load_summary();
   }));
-  // status / kind change the server-side filter, so they refetch. view is client-side only.
-  app.querySelectorAll("[data-status]").forEach(b => b.addEventListener("click", () => { state.ui.status = b.dataset.status; load_summary(); }));
+  // kind and bucket change the server-side aggregation, so they refetch. view is client-side only.
   app.querySelectorAll("[data-kind]").forEach(b => b.addEventListener("click", () => { state.ui.kind = b.dataset.kind; load_summary(); }));
-  app.querySelectorAll("[data-bucket]").forEach(b => b.addEventListener("click", () => { state.ui.bucket = b.dataset.bucket; load_summary(); }));
   app.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => { state.ui.view = b.dataset.view; render(); }));
   app.querySelectorAll("[data-drill]").forEach(b => b.addEventListener("click", () => {
     const key = b.dataset.drill;
