@@ -170,15 +170,22 @@ async function save_session() {
   await supabaseClient.from("roast_batches").insert(batches);
 
   if (total_green > 0) {
-    await supabaseClient.from("stock_adjustments").insert({
-      id: `ADJ-${id}`, date: s.date, coffee: s.coffee, coffee_id, change_kg: -total_green,
-      reason: s.is_test ? "sample" : "roast",
-      note: s.is_test ? `Auto-deducted from test roast ${id}` : `Auto-deducted from roast session ${id}`,
-      auto: true, roast_session_id: id,
+    // ONE row. The balance is derived from green_movements, so there is no stored figure to
+    // keep in step — which is what used to allow the ledger and the balance to diverge.
+    // A test roast is a 'sample', not a 'roast': the green is consumed but no batch was produced.
+    // green_movements_one_per_roast means a retried save can't double-deduct.
+    const { error: gm_err } = await supabaseClient.from("green_movements").insert({
+      id: `GM-${id}`,
+      coffee_id,
+      occurred_on: s.date,
+      change_kg: -total_green,
+      kind: s.is_test ? "sample" : "roast",
+      roast_session_id: id,
+      note: s.is_test ? `Test roast ${id}` : `Roast session ${id}`,
     });
-    const { data: stock_item } = await supabaseClient.from("stock_items").select("id, current_kg").eq("coffee_id", coffee_id).maybeSingle();
-    if (stock_item) {
-      await supabaseClient.from("stock_items").update({ current_kg: Math.max(0, stock_item.current_kg - total_green) }).eq("id", stock_item.id);
+    if (gm_err && gm_err.code !== "23505") {   // 23505 = already recorded, safe to ignore
+      alert("Roast saved, but the green deduction failed: " + gm_err.message
+            + "\n\nAdjust the stock manually in the Stock module.");
     }
   }
 
@@ -506,13 +513,19 @@ function attach_listeners() {
     // Validate green stock availability
     const total_green = state.session.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
     if (total_green > 0) {
-      const { data: stock_item } = await supabaseClient.from("stock_items").select("current_kg").eq("coffee_id", state.coffee_id_by_name?.[state.session.coffee] ?? -1).maybeSingle();
-      if (!stock_item) {
+      // Balance comes from v_green_stock — the sum of green_movements, not a stored figure.
+      // See sql/green_schema.sql. This guard is the reason the balance is allowed to go
+      // negative in the view: the check happens here, so the view doesn't have to lie.
+      const coffee_id = state.coffee_id_by_name?.[state.session.coffee] ?? -1;
+      const { data: gs } = await supabaseClient.from("v_green_stock")
+        .select("on_hand_kg").eq("coffee_id", coffee_id).maybeSingle();
+      const on_hand = gs ? Number(gs.on_hand_kg) || 0 : null;
+      if (on_hand === null) {
         err_el.textContent = `No green stock found for ${state.session.coffee}. Log a delivery in the Stock module before roasting.`;
         err_el.style.display = "block"; return;
       }
-      if (stock_item.current_kg < total_green) {
-        err_el.textContent = `Not enough green stock — need ${total_green.toFixed(1)}kg of ${state.session.coffee}, only ${stock_item.current_kg.toFixed(1)}kg available. Update your stock before roasting.`;
+      if (on_hand < total_green) {
+        err_el.textContent = `Not enough green stock — need ${total_green.toFixed(1)}kg of ${state.session.coffee}, only ${on_hand.toFixed(1)}kg available. Update your stock before roasting.`;
         err_el.style.display = "block"; return;
       }
     }
