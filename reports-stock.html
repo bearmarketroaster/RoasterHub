@@ -97,12 +97,48 @@ async function init() {
 }
 
 async function load_data() {
-  const [{ data: adjustments }, { data: deliveries }] = await Promise.all([
-    supabaseClient.from("stock_adjustments").select("*").order("date", { ascending: false }),
-    supabaseClient.from("stock_deliveries").select("*, stock_delivery_items(*)").order("date", { ascending: false }),
+  // Green now lives in green_movements + green_deliveries, with the balance derived by
+  // v_green_stock. Mapped into the shapes this page already renders so only the source changed.
+  // Paginated: the ledger grows with every roast, and an unpaginated read silently truncates
+  // at 1000 rows — the bug that made the dispatch report wrong for months.
+  const fetch_pages = async (build) => {
+    const PAGE = 1000, out = [];
+    for (let p = 0; p < 25; p++) {
+      const { data, error } = await build().range(p * PAGE, p * PAGE + PAGE - 1);
+      if (error) { console.error("[reports-stock]", error.message); break; }
+      if (!data || !data.length) break;
+      out.push(...data);
+      if (data.length < PAGE) break;
+    }
+    return out;
+  };
+
+  const [movements, arrivals] = await Promise.all([
+    fetch_pages(() => supabaseClient.from("v_green_movements")
+      .select("*").order("occurred_on", { ascending: false }).order("id", { ascending: true })),
+    fetch_pages(() => supabaseClient.from("v_green_arrivals")
+      .select("*").order("arrived_on", { ascending: false }).order("arrival_id", { ascending: true })),
   ]);
-  state.stock_adjustments = adjustments || [];
-  state.deliveries = (deliveries || []).map(d => ({ ...d, items: d.stock_delivery_items || [] }));
+
+  state.stock_adjustments = movements.map(m => ({
+    id: m.id, date: m.occurred_on, coffee: m.coffee, coffee_id: m.coffee_id,
+    change_kg: Number(m.change_kg) || 0,
+    // 'intake' is this schema's name for what used to be reason 'delivery'
+    reason: m.kind === "intake" ? "delivery" : m.kind,
+    note: m.note, auto: !m.is_editable,
+  }));
+
+  state.deliveries = (arrivals || []).map(a => ({
+    id: a.arrival_id, date: a.arrived_on, supplier: a.supplier,
+    invoice_ref: a.invoice_ref, invoice_path: a.invoice_path,
+    awaiting_invoice: !!a.awaiting_invoice,
+    items: (a.lines || []).map(l => ({
+      id: l.id, coffee: l.coffee, coffee_id: l.coffee_id, origin: l.origin,
+      green_name: l.green_name, lot_number: l.lot_number, ico_number: l.ico_number,
+      bags: l.bags, weight_kg: l.weight_kg, price_per_kg: l.price_per_kg,
+      contract_id: l.contract_id,
+    })),
+  }));
 }
 
 async function download_invoice(invoice_path) {
@@ -157,7 +193,7 @@ function build_stock_report() {
   const net       = total_in - total_out;
 
   // By reason
-  const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", other:"📝 Other" };
+  const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", opening:"🏁 Opening", other:"📝 Other" };
   const by_reason = {};
   filtered_adj.forEach(a => {
     if (!by_reason[a.reason]) by_reason[a.reason] = { in:0, out:0, count:0 };

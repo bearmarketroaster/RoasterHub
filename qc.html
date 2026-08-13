@@ -97,34 +97,19 @@ const state = {
 })();
 
 async function load() {
-  // Pull in-stock greens directly from the stock_items table (the same source stock.html uses).
-  // This is the canonical "current_kg per coffee" — no need to recompute it here.
-  const { data: stock_items } = await supabaseClient
-    .from("stock_items")
-    .select("coffee, current_kg")
+  // In-stock greens from v_green_stock — the sum of green_movements, not a stored figure.
+  // last_intake_on is already computed there, so the separate deliveries query this used to
+  // need for "most recent first" sorting is gone.
+  const { data: green } = await supabaseClient
+    .from("v_green_stock")
+    .select("coffee, coffee_id, on_hand_kg, last_intake_on, retired_at")
     .order("coffee");
 
-  // Also load the deliveries to get the latest delivery date per coffee — for sorting "most recent first"
-  const { data: deliveries } = await supabaseClient
-    .from("stock_deliveries")
-    .select("date, stock_delivery_items(coffee)")
-    .order("date", { ascending: false });
-
-  // Map: coffee → latest delivery date
-  const latest_delivery = {};
-  (deliveries || []).forEach(d => {
-    (d.stock_delivery_items || []).forEach(it => {
-      if (!it.coffee) return;
-      if (!latest_delivery[it.coffee] || d.date > latest_delivery[it.coffee]) {
-        latest_delivery[it.coffee] = d.date;
-      }
-    });
-  });
-
-  // In-stock greens: positive current_kg only, sorted by most recent delivery first
-  state.in_stock_greens = (stock_items || [])
-    .filter(s => (Number(s.current_kg) || 0) > 0.05)
-    .map(s => ({ coffee: s.coffee, coffee_id: s.coffee_id, remaining: Number(s.current_kg), latest_in: latest_delivery[s.coffee] || null }))
+  state.in_stock_greens = (green || [])
+    .filter(g => !g.retired_at && (Number(g.on_hand_kg) || 0) > 0.05)
+    .map(g => ({ coffee: g.coffee, coffee_id: g.coffee_id,
+                 remaining: Number(g.on_hand_kg) || 0,
+                 latest_in: g.last_intake_on || null }))
     .sort((a, b) => (b.latest_in || "").localeCompare(a.latest_in || ""));
 
   // Load all QC entries

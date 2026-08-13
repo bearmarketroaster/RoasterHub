@@ -221,7 +221,13 @@ async function load() {
     fetch_all("buckets", "id, name, coffee, fill_id, status, retired_at, created_at", "created_at"),
     supabaseClient.from("coffees").select("name").then(r => r.data || []),
     supabaseClient.from("fp_codes").select("fp_code, coffees(name)").then(r => r.data || []),
-    supabaseClient.from("stock_items").select("coffee, coffee_id, current_kg, low_stock_threshold").then(r => r.data || []),
+    // Green on hand comes from v_green_stock — the sum of green_movements, not a stored figure.
+    // Aliased to the old column names so the reorder logic below is untouched.
+    supabaseClient.from("v_green_stock").select("coffee, coffee_id, on_hand_kg, low_stock_threshold, retired_at")
+      .then(r => (r.data || []).filter(x => !x.retired_at)
+        .map(x => ({ coffee: x.coffee, coffee_id: x.coffee_id,
+                     current_kg: Number(x.on_hand_kg) || 0,
+                     low_stock_threshold: Number(x.low_stock_threshold) || GREEN_LOW_KG }))),
   ]);
 
   const conts = (containers || []).filter(c => !c.retired_at);
