@@ -159,14 +159,14 @@ const bar_row = (label, val, total, ci) => `
 function drill_html(key) {
   const d = state.drill[key];
   if (!d) return "";
-  if (d.loading) return `<div style="padding:12px;font-size:13px;color:#999">Loading dispatches…</div>`;
+  if (d.loading) return `<div style="padding:12px;font-size:13px;color:#999">Loading deliveries…</div>`;
   if (d.err) return `<div style="padding:12px;font-size:13px;color:#dc2626">${esc(d.err)}</div>`;
-  if (!d.rows || !d.rows.length) return `<div style="padding:12px;font-size:13px;color:#999">No dispatches.</div>`;
+  if (!d.rows || !d.rows.length) return `<div style="padding:12px;font-size:13px;color:#999">No deliveries.</div>`;
   const shown = (d.offset || 0) + d.rows.length;
   return `
     <div style="border-top:1px solid #e8e6e1;margin-top:12px;padding-top:12px">
       <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:8px">
-        Dispatches · showing ${shown} of ${d.total}
+        Deliveries · showing ${shown} of ${d.total}
       </div>
       <div style="display:grid;gap:6px">
         ${d.rows.map(r => `
@@ -176,9 +176,11 @@ function drill_html(key) {
               <div style="font-size:13px;font-weight:700">${kg(r.kg).toFixed(2)}kg</div>
             </div>
             <div style="font-size:11px;color:#666;margin-top:2px">
-              <span style="font-family:ui-monospace,Menlo,monospace">${esc(r.id)}</span>
-              ${r.confirmed_at ? " · ✓ confirmed" : " · ⏳ in transit"}
-              ${r.reported_at ? ' · <span style="color:#dc2626">🚩 flagged</span>' : ""}
+              ${r.parts > 1 ? `<span title="Separate dispatches merged into one delivery">${r.parts} dispatches combined</span> · ` : ""}
+              <span style="font-family:ui-monospace,Menlo,monospace">${(r.dispatch_ids||[]).map(esc).join(", ")}</span>
+              ${r.confirmed ? " · ✓ confirmed" : ` · ⏳ ${r.parts > 1 ? "not all parts confirmed" : "in transit"}`}
+              ${r.auto ? ' · <span style="color:#999">auto-accepted</span>' : ""}
+              ${r.flagged_parts ? ` · <span style="color:#dc2626">🚩 ${r.flagged_parts} flagged</span>` : ""}
             </div>
             ${(r.lines||[]).length ? `<div style="display:grid;gap:2px;margin-top:6px">${r.lines.map(l =>
               `<div style="display:flex;gap:8px;font-size:12px;color:#555">
@@ -238,7 +240,7 @@ function build_reports() {
 
   const stats_html = [
     { label: total_label, value: `${total_kg.toFixed(1)}kg`, icon: "⚖️" },
-    { label: "Dispatches", value: t.dispatches || 0, icon: "🚚" },
+    { label: "Deliveries", value: t.dispatches || 0, icon: "🚚" },
     { label: "Shops Served", value: t.shops || 0, icon: "🏪" },
     { label: "Coffees", value: t.coffees || 0, icon: "☕" },
     ...(flagged.length ? [{ label: "Flagged", value: flagged.length, icon: "🚩", color: "#dc2626" }] : []),
@@ -310,12 +312,12 @@ function build_reports() {
     return `<div class="card">
       <div class="flex-between mb-10">
         <div><div style="font-weight:700;font-size:15px">${esc(sh.shop)}${kind_badge_html(sh.kind)}</div>
-        <div style="font-size:12px;color:#666;margin-top:2px">${sh.dispatches} dispatch${sh.dispatches!==1?"es":""} · Last: ${esc(sh.last_date)}${sh.flagged?` · <span style="color:#dc2626">${sh.flagged} flagged</span>`:""}</div></div>
+        <div style="font-size:12px;color:#666;margin-top:2px">${sh.dispatches} deliver${sh.dispatches!==1?"ies":"y"} · Last: ${esc(sh.last_date)}${sh.flagged?` · <span style="color:#dc2626">${sh.flagged} flagged</span>`:""}</div></div>
         <div style="text-align:right"><div style="font-weight:700;font-size:18px">${kg(sh.kg).toFixed(1)}kg</div></div>
       </div>
       <div class="stock-track mb-12"><div style="background:#1a1a1a;border-radius:4px;height:8px;width:${Math.round((kg(sh.kg)/max_shop)*100)}%;transition:width 0.4s"></div></div>
       <div style="display:grid;gap:6px">${coffee_rows}</div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:10px" data-drill="${esc(key)}">${open?"Hide dispatches":"View dispatches →"}</button>
+      <button class="btn btn-ghost btn-sm" style="margin-top:10px" data-drill="${esc(key)}">${open?"Hide deliveries":"View deliveries →"}</button>
       ${open ? drill_html(key) : ""}
     </div>`;
   }).join("");
@@ -332,13 +334,13 @@ function build_reports() {
     return `<div class="card">
       <div class="flex-between mb-10">
         <div><div style="font-weight:700;font-size:15px">${esc(c.coffee)}</div>
-        <div style="font-size:12px;color:#666;margin-top:2px">${c.dispatches} dispatch${c.dispatches!==1?"es":""} · ${shop_entries.length} destination${shop_entries.length!==1?"s":""}</div></div>
+        <div style="font-size:12px;color:#666;margin-top:2px">${c.dispatches} deliver${c.dispatches!==1?"ies":"y"} · ${shop_entries.length} destination${shop_entries.length!==1?"s":""}</div></div>
         <div style="font-weight:700;font-size:18px">${kg(c.kg).toFixed(1)}kg</div>
       </div>
       ${size_summary ? `<div style="margin-bottom:10px">${size_summary}</div>` : ""}
       <div class="stock-track mb-12"><div style="background:${color_for(ci)};border-radius:4px;height:8px;width:${Math.round((kg(c.kg)/max_coffee)*100)}%;transition:width 0.4s"></div></div>
       <div style="display:grid;gap:6px">${shop_entries.map(([shop, v], si) => bar_row(shop, v, kg(c.kg), si)).join("")}</div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:10px" data-drill="${esc(key)}">${open?"Hide dispatches":"View dispatches →"}</button>
+      <button class="btn btn-ghost btn-sm" style="margin-top:10px" data-drill="${esc(key)}">${open?"Hide deliveries":"View deliveries →"}</button>
       ${open ? drill_html(key) : ""}
     </div>`;
   }).join("");
@@ -347,6 +349,7 @@ function build_reports() {
 
   return controls + `
     <div class="grid-4 mb-16">${stats_html}</div>
+    <p style="font-size:12px;color:#666;margin:-6px 0 16px">A delivery is one shop on one day — everything sent to a shop on the same date counts once, however many separate dispatches it was packed as.</p>
     ${flagged_html}
     ${channel_html ? `<div class="card mb-16"><div style="font-weight:700;margin-bottom:12px;font-size:15px">By Channel</div><div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:10px">${channel_html}</div></div>` : ""}
     ${delivery_html}
