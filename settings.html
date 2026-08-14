@@ -119,6 +119,10 @@ const state = {
   open_section: "coffees",
   active_tab: "catalogue",   // catalogue | operations | people
   ui: {
+    // Held in state because render() rebuilds the DOM: an input read only at button-click
+    // loses whatever was typed the moment anything re-renders.
+    range_prefix: "", range_from: "", range_to: "",
+    restore_name: "", restore_code: "", qr_test: "",
     open_coffee: null,
     new_coffee_name: "",
     coffee_err: "",
@@ -877,9 +881,9 @@ function build_bucket_restore_section() {
     <div class="card">
       <p class="hint mb-12">Re-create lost buckets with their exact ID so the labels work again. Type the bucket's name from the sticker, then scan its QR — already-existing buckets are skipped.</p>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <input id="bucket-restore-name" type="text" placeholder="1. Name on the sticker (e.g. Shop Bucket 3)" autocomplete="off" style="font-size:14px;padding:10px 12px" />
+        <input id="bucket-restore-name" type="text" value="${esc(state.ui.restore_name||"")}" placeholder="1. Name on the sticker (e.g. Shop Bucket 3)" autocomplete="off" style="font-size:14px;padding:10px 12px" />
         <div style="display:flex;gap:8px">
-          <input id="bucket-restore-input" type="text" placeholder="2. Scan the QR (BKT-…)" autocomplete="off" style="flex:1;font-size:14px;padding:10px 12px" />
+          <input id="bucket-restore-input" type="text" value="${esc(state.ui.restore_code||"")}" placeholder="2. Scan the QR (BKT-…)" autocomplete="off" style="flex:1;font-size:14px;padding:10px 12px" />
           <button class="btn btn-dark btn-sm" id="bucket-restore-btn">Restore</button>
         </div>
       </div>
@@ -908,7 +912,7 @@ function build_qr_tester_section() {
     <div class="card">
       <p class="hint mb-12">Scan a label (or type its code) to check what it is — handy for damaged or half-torn labels, to confirm it still reads and identify what to reprint. Recognises bag-label codes (FPxxxx), bucket QRs (BKT-xxxx), shop QRs (SHOP-…) and container IDs.</p>
       <div style="display:flex;gap:8px">
-        <input id="qr-test-input" type="text" placeholder="Scan or type a code…" autocomplete="off" style="flex:1;font-size:14px;padding:10px 12px" />
+        <input id="qr-test-input" type="text" value="${esc(state.ui.qr_test||"")}" placeholder="Scan or type a code…" autocomplete="off" style="flex:1;font-size:14px;padding:10px 12px" />
         <button class="btn btn-dark btn-sm" id="qr-test-btn">Test</button>
       </div>
       ${result_html}
@@ -966,9 +970,9 @@ function build_buckets_section() {
         </div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#fcfbf9;border-bottom:1px solid #f0eee9;font-size:13px">
           <span style="color:#666;font-weight:600">🖨️ Print range:</span>
-          <input id="range-prefix" type="text" placeholder="name has… (e.g. White)" style="font-size:12px;padding:5px 8px;width:140px" />
-          <span style="color:#666">#</span><input id="range-from" type="number" min="1" placeholder="from" style="font-size:12px;padding:5px 8px;width:60px" />
-          <span style="color:#666">–</span><input id="range-to" type="number" min="1" placeholder="to" style="font-size:12px;padding:5px 8px;width:60px" />
+          <input id="range-prefix" type="text" value="${esc(state.ui.range_prefix||"")}" placeholder="name has… (e.g. White)" style="font-size:12px;padding:5px 8px;width:140px" />
+          <span style="color:#666">#</span><input id="range-from" type="number" min="1" value="${esc(state.ui.range_from||"")}" placeholder="from" style="font-size:12px;padding:5px 8px;width:60px" />
+          <span style="color:#666">–</span><input id="range-to" type="number" min="1" value="${esc(state.ui.range_to||"")}" placeholder="to" style="font-size:12px;padding:5px 8px;width:60px" />
           <button class="btn btn-amber btn-sm" id="print-range-btn">Print these</button>
         </div>
         ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#999;font-style:italic">No buckets in this view.</div>' : buckets_html}
@@ -1847,11 +1851,18 @@ function attach_listeners() {
   }));
 
   // ── Buckets
+  [["#range-prefix","range_prefix"],["#range-from","range_from"],["#range-to","range_to"],
+   ["#bucket-restore-name","restore_name"],["#bucket-restore-input","restore_code"],
+   ["#qr-test-input","qr_test"]].forEach(([sel, key]) => {
+    const el = app.querySelector(sel);
+    if (el) el.addEventListener("input", () => { state.ui[key] = el.value; });
+  });
   app.querySelector("#bucket-count")?.addEventListener("input", e => { state.ui.bucket_count = e.target.value; });
   app.querySelector("#bucket-prefix")?.addEventListener("input", e => { state.ui.bucket_prefix = e.target.value; });
   app.querySelector("#print-range-btn")?.addEventListener("click", () => {
-    const pre = (document.getElementById("range-prefix")?.value||"").trim().toLowerCase();
-    const fromV = document.getElementById("range-from")?.value, toV = document.getElementById("range-to")?.value;
+    const pre = (document.getElementById("range-prefix")?.value ?? state.ui.range_prefix ?? "").trim().toLowerCase();
+    const fromV = document.getElementById("range-from")?.value ?? state.ui.range_from;
+    const toV   = document.getElementById("range-to")?.value   ?? state.ui.range_to;
     const from = (fromV===""||fromV==null) ? null : parseInt(fromV,10);
     const to   = (toV===""||toV==null) ? null : parseInt(toV,10);
     const num = b => { const m = String(b.name||b.id||"").match(/(\d+)\s*$/); return m ? parseInt(m[1],10) : null; };
@@ -1867,11 +1878,11 @@ function attach_listeners() {
     const p = document.getElementById("bucket-prefix")?.value;
     generate_buckets(n, p);
   });
-  app.querySelector("#qr-test-btn")?.addEventListener("click", () => { test_qr(document.getElementById("qr-test-input")?.value); });
+  app.querySelector("#qr-test-btn")?.addEventListener("click", () => { test_qr(document.getElementById("qr-test-input")?.value ?? state.ui.qr_test); });
   app.querySelector("#qr-test-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); test_qr(e.target.value); } });
   app.querySelector("#bucket-restore-name")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); document.getElementById("bucket-restore-input")?.focus(); } });
-  app.querySelector("#bucket-restore-btn")?.addEventListener("click", () => restore_bucket(document.getElementById("bucket-restore-input")?.value, document.getElementById("bucket-restore-name")?.value));
-  app.querySelector("#bucket-restore-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); restore_bucket(e.target.value, document.getElementById("bucket-restore-name")?.value); } });
+  app.querySelector("#bucket-restore-btn")?.addEventListener("click", () => restore_bucket(document.getElementById("bucket-restore-input")?.value ?? state.ui.restore_code, document.getElementById("bucket-restore-name")?.value ?? state.ui.restore_name));
+  app.querySelector("#bucket-restore-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); restore_bucket(e.target.value, document.getElementById("bucket-restore-name")?.value ?? state.ui.restore_name); } });
   app.querySelector("#bucket-restore-clear")?.addEventListener("click", () => { state.restore_log = []; render(); });
   app.querySelectorAll("[data-bucket-filter]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.bucket_filter = btn.dataset.bucketFilter;
