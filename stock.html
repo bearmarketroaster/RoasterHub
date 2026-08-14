@@ -322,14 +322,16 @@ async function save_invoice_detail() {
   const arrival = state.deliveries.find(d => d.id === e.arrival_id);
   if (!arrival) { e.err = "That delivery is no longer loaded — reload and try again."; render(); return; }
 
-  const ref = (document.getElementById("inv-ref")?.value || "").trim();
+  const ref = (document.getElementById("inv-ref")?.value || e.invoice_ref || "").trim();
   if (!ref) { e.err = "Enter the invoice reference."; render(); return; }
 
   e.saving = true; e.err = ""; render();
 
   // Upload the PDF first: if it fails, nothing has been changed yet.
   let invoice_path = arrival.invoice_path || null;
-  const file = document.getElementById("inv-file")?.files?.[0] || null;
+  // Staged in state when chosen. A file input cannot be repopulated after a re-render, so
+  // reading it back off the DOM here silently loses the file the moment anything re-renders.
+  const file = e.file || null;
   if (file) {
     const safe = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
     const path = `${e.arrival_id}/${safe}`;
@@ -709,7 +711,9 @@ function build_deliveries() {
             <div><label class="lbl">Invoice / Ref No.</label>
               <input id="inv-ref" value="${esc(e.invoice_ref||"")}" placeholder="e.g. INV-2026-042" /></div>
             <div><label class="lbl">Invoice PDF${d.invoice_path?" (replaces current)":""}</label>
-              <input type="file" id="inv-file" accept="application/pdf" /></div>
+              <input type="file" id="inv-file" accept="application/pdf" />
+              ${e.file?`<div style="font-size:11px;color:#16a34a;margin-top:3px">📎 ${esc(e.file.name)} ready to upload
+                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" id="inv-file-clear">remove</button></div>`:""}</div>
           </div>
           <div class="lbl" style="margin-bottom:4px">Price per kg — from the invoice</div>
           <div style="display:grid;gap:6px;margin-bottom:12px">
@@ -1174,6 +1178,7 @@ function attach_listeners() {
       arrival_id: id,
       invoice_ref: d?.invoice_ref || "",
       prices: {},
+      file: null,                 // staged PDF, held here so a re-render can't drop it
       err: "", saving: false,
     };
     render();
@@ -1182,6 +1187,12 @@ function attach_listeners() {
   app.querySelector("#inv-ref")?.addEventListener("input", e => { if (state.ui.invoice_edit) state.ui.invoice_edit.invoice_ref = e.target.value; });
   // Re-render on blur so the "also covers…" hint appears once a known reference is typed.
   app.querySelector("#inv-ref")?.addEventListener("blur", () => { if (state.ui.invoice_edit) render(); });
+  app.querySelector("#inv-file")?.addEventListener("change", ev => {
+    if (state.ui.invoice_edit) { state.ui.invoice_edit.file = ev.target.files?.[0] || null; render(); }
+  });
+  app.querySelector("#inv-file-clear")?.addEventListener("click", () => {
+    if (state.ui.invoice_edit) { state.ui.invoice_edit.file = null; render(); }
+  });
   app.querySelectorAll(".inv-price").forEach(inp => inp.addEventListener("input", () => {
     if (state.ui.invoice_edit) state.ui.invoice_edit.prices[inp.dataset.line] = inp.value;
   }));
