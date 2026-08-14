@@ -1161,6 +1161,7 @@ function attach_listeners() {
     if (g("del-date"))     state.ui.delivery.date        = g("del-date").value     || state.ui.delivery.date;
     if (g("del-supplier")) state.ui.delivery.supplier    = g("del-supplier").value;
     if (g("del-invoice"))  state.ui.delivery.invoice_ref = g("del-invoice").value;
+    if (g("del-due-date")) state.ui.delivery.due_date    = g("del-due-date").value;
   };
   app.querySelector("#del-invoice-pdf")?.addEventListener("change", e => {
     const file = e.target.files?.[0];
@@ -1219,7 +1220,7 @@ function attach_listeners() {
   }));
   // Delivery header: date, supplier, invoice ref. These were only read when Save was clicked,
   // so any render() before that silently wiped them — attaching a PDF, or adding a coffee line.
-  [["#del-date","date"],["#del-supplier","supplier"],["#del-invoice","invoice_ref"]].forEach(([sel, field]) => {
+  [["#del-date","date"],["#del-supplier","supplier"],["#del-invoice","invoice_ref"],["#del-due-date","due_date"]].forEach(([sel, field]) => {
     const el = app.querySelector(sel);
     if (!el) return;
     el.addEventListener("input",  () => { state.ui.delivery[field] = el.value; });

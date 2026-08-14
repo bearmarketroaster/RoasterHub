@@ -98,8 +98,7 @@ supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
 const state = {
   view:           "home",
   roast_sessions: [],
-  coffees:        [],      // ACTIVE coffee names only — this is the picker list
-  retired_coffees: new Set(), // names of retired coffees, for labelling a carried-over value
+  coffees:        [],
   containers:     [],
   loading:        true,
   saving:         false,
@@ -125,25 +124,10 @@ function gen_session_id() {
 function yield_pct(green, roasted) { if (!Number(green)||!Number(roasted)) return null; return Math.round((Number(roasted)/Number(green))*100); }
 function yield_class(pct) { if (pct===null) return "hint"; if (pct>=80&&pct<=90) return "yield-good"; if (pct>=75) return "yield-warn"; return "yield-bad"; }
 
-// Coffee picker options. Retired coffees are excluded, but a value the form already carries
-// stays selectable and labelled — dropping it would make the select fall back to the first
-// option and silently rewrite the coffee on save.
-function coffee_options(selected) {
-  const names = [...state.coffees];
-  if (selected && !names.includes(selected)) names.push(selected);
-  return names.map(c =>
-    `<option value="${esc(c)}" ${selected===c?"selected":""}>${esc(c)}${state.retired_coffees.has(c)?" (retired)":""}</option>`
-  ).join("");
-}
-
 async function load_data() {
-  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name, retired_at").order("name");
-  // coffee_id_by_name must cover EVERY coffee, retired included: a roast started from an older
-  // plan item can legitimately carry a coffee that has since been retired, and the insert needs
-  // its id. Only the picker list is filtered.
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
+  state.coffees = (coffees_data || []).map(c => c.name);
   state.coffee_id_by_name = Object.fromEntries((coffees_data || []).map(c => [c.name, c.id]));
-  state.coffees         = (coffees_data || []).filter(c => !c.retired_at).map(c => c.name);
-  state.retired_coffees = new Set((coffees_data || []).filter(c => c.retired_at).map(c => c.name));
 
   // Load containers list (non-retired) so the user can pick from a dropdown
   const { data: containers_data } = await supabaseClient.from("containers").select("id, name, status, retired_at, empty_kg").order("id");
@@ -330,7 +314,7 @@ function build_step1() {
         <div><label class="lbl">Coffee to Roast *</label>
           <select id="s1-coffee">
             <option value="">— Select coffee —</option>
-            ${coffee_options(s.coffee)}
+            ${state.coffees.map(c=>`<option value="${esc(c)}" ${s.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Roast Date *</label><input type="date" id="s1-date" value="${s.date}" /></div>
@@ -492,7 +476,19 @@ function attach_listeners() {
   app.querySelector("#history-back")?.addEventListener("click", () => { state.view="home"; render(); });
   app.querySelector("#cancel-new")?.addEventListener("click", () => { if (state.from_plan_id) { window.location.href="roaster.html"; return; } state.view="home"; state.from_plan_id=null; state.ui.step=1; state.ui.gross_weight=""; render(); });
 
+  // Step 1: sync on input. The Test-roast toggle re-renders, and these fields were only read
+  // when Next was clicked, so toggling it wiped anything already typed.
+  app.querySelector("#s1-coffee")?.addEventListener("change", e => { state.session.coffee = e.target.value; });
+  app.querySelector("#s1-date")?.addEventListener("change",   e => { state.session.date = e.target.value; });
+  app.querySelector("#s1-container")?.addEventListener("change", e => { state.session.container_id = e.target.value.trim(); });
+  app.querySelector("#s1-count")?.addEventListener("input",   e => { state.session.batch_count = Number(e.target.value) || 0; });
+
   app.querySelector("#s1-is-test")?.addEventListener("change", e => {
+    // Capture anything typed but not yet synced before the re-render below rebuilds the inputs.
+    const g = id => document.getElementById(id);
+    if (g("s1-coffee"))    state.session.coffee = g("s1-coffee").value;
+    if (g("s1-date"))      state.session.date = g("s1-date").value || state.session.date;
+    if (g("s1-count"))     state.session.batch_count = Number(g("s1-count").value) || state.session.batch_count;
     state.session.is_test = e.target.checked;
     if (e.target.checked) {
       state.session.container_id = "";
@@ -506,7 +502,7 @@ function attach_listeners() {
     const coffee = document.getElementById("s1-coffee")?.value;
     const date = document.getElementById("s1-date")?.value;
     const container = document.getElementById("s1-container")?.value.trim() || "";
-    const count = state.session.is_test ? 1 : (Number(document.getElementById("s1-count")?.value)||0);
+    const count = state.session.is_test ? 1 : (Number(document.getElementById("s1-count")?.value) || state.session.batch_count || 0);
     const err_el = document.getElementById("s1-err");
     if (!coffee) { err_el.textContent="Please select a coffee."; err_el.style.display="block"; return; }
     if (!state.session.is_test && !container) { err_el.textContent="Please select a container."; err_el.style.display="block"; return; }

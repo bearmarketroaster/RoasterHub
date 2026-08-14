@@ -1388,6 +1388,7 @@ const packing_state = {
   // Shop-picker section collapse state, keyed by kind. All sections start collapsed — the point of the
   // accordion is to keep a long destination list short, so nothing is expanded until it's tapped.
   shop_groups_open: {},
+  custom_shop_draft: "",     // held so expanding a section can't clear a typed destination
 };
 
 function reset_packing_state() {
@@ -1403,6 +1404,7 @@ function reset_packing_state() {
   packing_state.batch = null;
   packing_state.batch_err = "";
   packing_state.shop_groups_open = {};
+  packing_state.custom_shop_draft = "";
 }
 
 // Compute totals from scanned items + buckets
@@ -1983,7 +1985,7 @@ function build_packing_page(container, fill) {
     ${group("charity", "Charity", charity_only, "#16a34a", "CHARITY")}
     <div style="background:#fff7ed;border-radius:8px;padding:14px;margin-top:18px;margin-bottom:14px">
       <label class="lbl" style="font-size:14px">${tr("Or type a custom destination","Або введіть інше місце")}</label>
-      <input id="pack-shop-custom" placeholder="e.g. Stillorgan" style="font-size:16px;padding:12px 14px" />
+      <input id="pack-shop-custom" placeholder="e.g. Stillorgan" value="${esc(ps.custom_shop_draft||"")}" style="font-size:16px;padding:12px 14px" />
       <button class="btn btn-dark mt-8" id="pack-shop-custom-go" style="width:100%;padding:12px;font-size:15px">${tr("Use this →","Використати →")}</button>
     </div>
     ${ps.err?`<p class="err" style="text-align:center;margin-bottom:12px">${esc(ps.err)}</p>`:""}
@@ -2316,12 +2318,17 @@ function attach_listeners() {
     render();
   }));
   app.querySelector("#pack-shop-custom-go")?.addEventListener("click", () => {
-    const v = document.getElementById("pack-shop-custom")?.value.trim();
+    const v = (document.getElementById("pack-shop-custom")?.value || packing_state.custom_shop_draft || "").trim();
     if (!v) { packing_state.err = "Please enter or pick a shop."; render(); return; }
     packing_state.shop = v;
     packing_state.err = "";
     packing_state.step = "scan";
     render();
+  });
+  // Typed value held in state: expanding a destination section re-renders, which would
+  // otherwise clear whatever had been typed into the custom box.
+  app.querySelector("#pack-shop-custom")?.addEventListener("input", e => {
+    packing_state.custom_shop_draft = e.target.value;
   });
   app.querySelector("#pack-shop-custom")?.addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); app.querySelector("#pack-shop-custom-go")?.click(); }
