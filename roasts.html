@@ -98,7 +98,8 @@ supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
 const state = {
   view:           "home",
   roast_sessions: [],
-  coffees:        [],
+  coffees:        [],      // ACTIVE coffee names only — this is the picker list
+  retired_coffees: new Set(), // names of retired coffees, for labelling a carried-over value
   containers:     [],
   loading:        true,
   saving:         false,
@@ -124,10 +125,25 @@ function gen_session_id() {
 function yield_pct(green, roasted) { if (!Number(green)||!Number(roasted)) return null; return Math.round((Number(roasted)/Number(green))*100); }
 function yield_class(pct) { if (pct===null) return "hint"; if (pct>=80&&pct<=90) return "yield-good"; if (pct>=75) return "yield-warn"; return "yield-bad"; }
 
+// Coffee picker options. Retired coffees are excluded, but a value the form already carries
+// stays selectable and labelled — dropping it would make the select fall back to the first
+// option and silently rewrite the coffee on save.
+function coffee_options(selected) {
+  const names = [...state.coffees];
+  if (selected && !names.includes(selected)) names.push(selected);
+  return names.map(c =>
+    `<option value="${esc(c)}" ${selected===c?"selected":""}>${esc(c)}${state.retired_coffees.has(c)?" (retired)":""}</option>`
+  ).join("");
+}
+
 async function load_data() {
-  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
-  state.coffees = (coffees_data || []).map(c => c.name);
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name, retired_at").order("name");
+  // coffee_id_by_name must cover EVERY coffee, retired included: a roast started from an older
+  // plan item can legitimately carry a coffee that has since been retired, and the insert needs
+  // its id. Only the picker list is filtered.
   state.coffee_id_by_name = Object.fromEntries((coffees_data || []).map(c => [c.name, c.id]));
+  state.coffees         = (coffees_data || []).filter(c => !c.retired_at).map(c => c.name);
+  state.retired_coffees = new Set((coffees_data || []).filter(c => c.retired_at).map(c => c.name));
 
   // Load containers list (non-retired) so the user can pick from a dropdown
   const { data: containers_data } = await supabaseClient.from("containers").select("id, name, status, retired_at, empty_kg").order("id");
@@ -314,7 +330,7 @@ function build_step1() {
         <div><label class="lbl">Coffee to Roast *</label>
           <select id="s1-coffee">
             <option value="">— Select coffee —</option>
-            ${state.coffees.map(c=>`<option value="${esc(c)}" ${s.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+            ${coffee_options(s.coffee)}
           </select>
         </div>
         <div><label class="lbl">Roast Date *</label><input type="date" id="s1-date" value="${s.date}" /></div>

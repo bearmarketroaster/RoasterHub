@@ -82,9 +82,13 @@ const LOW_STOCK_KG = 20;
 
 const state = {
   tab: 0,
-  coffees: [],
-  coffees_obj: [],        // [{id, name}] for the contract green-coffee picker
+  coffees: [],            // ACTIVE coffee names — the delivery / adjustment pickers
+  coffees_obj: [],        // ALL coffees [{id, name, retired_at}] — lookups resolve history through this
+  coffees_obj_active: [], // active only — the contract picker and Quick Count
+  retired_ids: new Set(), // coffee_ids of retired coffees, for splitting history into the retired sections
+  retired_names: new Set(),
   stock_items: [],
+  stock_items_retired: [],// retired coffees whose balance is NOT zero — an anomaly worth seeing
   deliveries: [],
   adjustments: [],
   contracts: [],          // green_contracts rows
@@ -136,13 +140,56 @@ function new_contract() {
   return { supplier:"", coffee_id:"", bag_count:"", low_bag_threshold:"100" };
 }
 function coffee_name_by_id(id) { const c = state.coffees_obj.find(x => x.id === id); return c ? c.name : "—"; }
+function coffee_is_retired(id) { return state.retired_ids.has(id); }
+// Collapsed "Retired" block. History for a retired coffee is kept — the ledger has to keep
+// reconciling — but folded away so it isn't in the way of coffee still in use.
+function retired_section(label, count, inner, note) {
+  if (!count) return "";
+  return `
+    <details style="margin-top:20px">
+      <summary style="cursor:pointer;list-style:none;padding:10px 14px;background:#f4f2ed;border:1px solid #e8e6e1;border-radius:8px;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#666">
+        &#128451; Retired &middot; ${esc(label)} <span style="font-weight:600;letter-spacing:0">(${count})</span>
+      </summary>
+      <div style="padding-top:12px">
+        ${note?`<p class="hint mb-8" style="font-size:12px">${esc(note)}</p>`:""}
+        ${inner}
+      </div>
+    </details>`;
+}
+// Picker options keyed by NAME (delivery lines, adjustments). Retired coffees are excluded, but a
+// value the row already carries stays selectable and labelled — dropping it would make the select
+// fall back to the first option and silently rewrite the coffee on the next save.
+function coffee_name_options(selected) {
+  const names = [...state.coffees];
+  if (selected && !names.includes(selected)) names.push(selected);
+  return names.map(n =>
+    `<option value="${esc(n)}" ${selected===n?"selected":""}>${esc(n)}${state.retired_names.has(n)?" (retired)":""}</option>`
+  ).join("");
+}
+// Picker options keyed by ID (contracts). Same rule.
+function coffee_id_options(selected_id) {
+  const list = [...state.coffees_obj_active];
+  if (selected_id && !list.some(c => String(c.id) === String(selected_id))) {
+    const kept = state.coffees_obj.find(c => String(c.id) === String(selected_id));
+    if (kept) list.push(kept);
+  }
+  return list.map(c =>
+    `<option value="${c.id}" ${String(selected_id)===String(c.id)?"selected":""}>${esc(c.name)}${coffee_is_retired(c.id)?" (retired)":""}</option>`
+  ).join("");
+}
 function coffee_id_by_name(name) { const c = state.coffees_obj.find(x => x.name === name); return c ? c.id : null; }
 function contract_remaining(c) { return Number(c.bag_count||0) - Number(state.contract_delivered[c.id]||0); }
 
 async function load_data() {
-  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
-  state.coffees = (coffees_data || []).map(c => c.name);
-  state.coffees_obj = coffees_data || [];
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name, retired_at").order("name");
+  // coffees_obj stays COMPLETE. coffee_name_by_id() resolves historical arrivals, movements and
+  // contracts through it, so filtering it would render every past record belonging to a retired
+  // coffee as "—". The active lists below are what the pickers read.
+  state.coffees_obj        = coffees_data || [];
+  state.coffees_obj_active = (coffees_data || []).filter(c => !c.retired_at);
+  state.coffees            = state.coffees_obj_active.map(c => c.name);
+  state.retired_ids        = new Set((coffees_data || []).filter(c => c.retired_at).map(c => c.id));
+  state.retired_names      = new Set((coffees_data || []).filter(c => c.retired_at).map(c => c.name));
 
   // Green now lives in green_deliveries + green_movements, with the balance DERIVED by
   // v_green_stock rather than stored. See sql/green_schema.sql. These are mapped into the
@@ -153,7 +200,7 @@ async function load_data() {
     supabaseClient.from("v_green_movements").select("*").order("occurred_on", { ascending: false }).limit(500),
   ]);
 
-  state.stock_items = (gstock || []).filter(r => !r.retired_at).map(r => ({
+  const map_stock_row = (r) => ({
     id: `GS-${r.coffee_id}`,                       // synthetic; nothing writes back via this
     coffee: r.coffee,
     coffee_id: r.coffee_id,
@@ -162,7 +209,14 @@ async function load_data() {
     low_stock_threshold: Number(r.low_stock_threshold) || LOW_STOCK_KG,
     is_negative: !!r.is_negative,                  // a negative balance means something wasn't logged
     last_intake_on: r.last_intake_on,
-  }));
+  });
+  state.stock_items = (gstock || []).filter(r => !r.retired_at).map(map_stock_row);
+  // A retired coffee is expected to read zero. If it doesn't, that kg is real and still counted by
+  // v_green_stock and the reports — hiding it would make this page disagree with the ledger, which
+  // is the failure mode the derived-view architecture exists to prevent. So surface it instead.
+  state.stock_items_retired = (gstock || [])
+    .filter(r => r.retired_at && Math.abs(Number(r.on_hand_kg) || 0) > 0.05)
+    .map(map_stock_row);
 
   state.deliveries = (arrivals || []).map(a => ({
     id: a.arrival_id,
@@ -517,7 +571,9 @@ function build_app() {
 
 function build_quick_stock() {
   const open = state.ui.show_quick_stock;
-  const rows = state.coffees_obj.map(c => {
+  // Active coffees only. Quick Count is a stocktake tool for coffee on the shelf; a retired
+  // coffee is finished with and would just be a row in the way.
+  const rows = state.coffees_obj_active.map(c => {
     const item = state.stock_items.find(s => s.coffee_id === c.id);
     const cur = item ? Number(item.current_kg) : 0;
     return `
@@ -583,7 +639,33 @@ function build_green_stock() {
           <button class="btn btn-ghost btn-sm" data-set-threshold="${esc(item.coffee)}" data-threshold="${threshold}">Set Alert Level</button>
         </div>
       </div>`;
-  }).join("")}`;
+  }).join("")}${build_retired_stock()}`;
+}
+
+// Retired coffees are expected to sit at zero. Any that don't are still counted by v_green_stock
+// and by the reports, so they are shown rather than hidden — otherwise this page and the ledger
+// quietly disagree about how much green is on site.
+function build_retired_stock() {
+  const items = state.stock_items_retired;
+  if (!items.length) return "";
+  const inner = items.map(item => `
+    <div class="stock-card" style="border-left:4px solid #d97706;opacity:.9">
+      <div class="flex-between mb-8">
+        <div class="flex-wrap">
+          <span style="font-weight:700;font-size:15px">${esc(item.coffee)}</span>
+          <span class="tag" style="background:#fff7ed;color:#d97706">Retired &middot; balance not zero</span>
+        </div>
+        <span style="font-size:22px;font-weight:700;color:${item.current_kg<0?"#dc2626":"#d97706"}">${item.current_kg.toFixed(1)}kg</span>
+      </div>
+      <div class="hint mt-4">${item.current_kg<0
+        ? "Negative balance — something was roasted or dispatched without being logged."
+        : "Still on hand. Adjust it down if the coffee is gone, or restore the coffee in Settings if it isn't."}</div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" data-adj-coffee="${esc(item.coffee)}">± Adjust</button>
+      </div>
+    </div>`).join("");
+  return retired_section("still carrying a balance", items.length, inner,
+    "These coffees are retired but their green balance isn't zero, so the figure above excludes them while the reports still count it.");
 }
 
 function build_deliveries() {
@@ -685,7 +767,9 @@ function build_deliveries() {
       </div>
     </div>` : "";
 
-  const delivery_list = state.deliveries.map(d => {
+  const arrival_all_retired = (d) =>
+    (d.items || []).length > 0 && d.items.every(i => coffee_is_retired(i.coffee_id));
+  const render_arrival = (d) => {
     const total_kg    = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0), 0);
     const total_value = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0)*(Number(i.price_per_kg)||0), 0);
     return `
@@ -723,7 +807,12 @@ function build_deliveries() {
         </div>
         ${invoice_editor_html(d)}
       </div>`;
-  }).join("");
+  };
+  const live_arrivals    = state.deliveries.filter(d => !arrival_all_retired(d));
+  const retired_arrivals = state.deliveries.filter(arrival_all_retired);
+  const delivery_list    = live_arrivals.map(render_arrival).join("")
+    + retired_section("deliveries", retired_arrivals.length, retired_arrivals.map(render_arrival).join(""),
+        "Arrivals where every line is a retired coffee. Kept so the green ledger still reconciles.");
 
   return `
     <div class="flex-between mb-16">
@@ -747,7 +836,7 @@ function build_delivery_item_row(item, i) {
         <div><label class="lbl">Master Coffee Name *</label>
           <select class="item-coffee" data-idx="${i}">
             <option value="">— Select —</option>
-            ${state.coffees.map(c=>`<option value="${esc(c)}" ${item.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+            ${coffee_name_options(item.coffee)}
           </select>
         </div>
         <div><label class="lbl">Green Name</label><input class="item-green-name" data-idx="${i}" value="${esc(item.green_name||"")}" placeholder="e.g. Ethiopia Yirgacheffe Kochere Gr.1" /></div>
@@ -760,7 +849,8 @@ function build_delivery_item_row(item, i) {
         <div><label class="lbl">From Contract?</label>
           <select class="item-contract" data-idx="${i}">
             <option value="">— Spot (no contract) —</option>
-            ${state.contracts.map(co=>`<option value="${esc(co.id)}" ${item.contract_id===co.id?"selected":""}>${esc(co.supplier)} · ${esc(coffee_name_by_id(co.coffee_id))} · ${contract_remaining(co)} bags left</option>`).join("")}
+            ${state.contracts.filter(co => !coffee_is_retired(co.coffee_id) || item.contract_id===co.id)
+                .map(co=>`<option value="${esc(co.id)}" ${item.contract_id===co.id?"selected":""}>${esc(co.supplier)} · ${esc(coffee_name_by_id(co.coffee_id))}${coffee_is_retired(co.coffee_id)?" (retired)":""} · ${contract_remaining(co)} bags left</option>`).join("")}
           </select>
         </div>
       </div>
@@ -779,7 +869,7 @@ function build_contracts() {
         <div><label class="lbl">Green Coffee *</label>
           <select id="con-coffee">
             <option value="">— Select —</option>
-            ${state.coffees_obj.map(c=>`<option value="${c.id}" ${String(contract.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
+            ${coffee_id_options(contract.coffee_id)}
           </select>
         </div>
         <div><label class="lbl">Total Bags *</label><input type="number" id="con-bags" value="${esc(contract.bag_count)}" placeholder="e.g. 275" /></div>
@@ -801,7 +891,7 @@ function build_contracts() {
       </div>
     </div>` : "";
 
-  const rows = state.contracts.map(c => {
+  const render_contract = (c) => {
     const total = Number(c.bag_count||0);
     const delivered = Number(state.contract_delivered[c.id]||0);
     const remaining = total - delivered;
@@ -825,7 +915,12 @@ function build_contracts() {
           </div>
         </div>
       </div>`;
-  }).join("");
+  };
+  const live_contracts    = state.contracts.filter(c => !coffee_is_retired(c.coffee_id));
+  const retired_contracts = state.contracts.filter(c => coffee_is_retired(c.coffee_id));
+  const rows = live_contracts.map(render_contract).join("")
+    + retired_section("contracts", retired_contracts.length, retired_contracts.map(render_contract).join(""),
+        "Contracts against a retired coffee. Any bags still showing as outstanding are a live commitment.");
 
   return `
     <div class="flex-between mb-16">
@@ -878,7 +973,7 @@ function build_adjustments() {
         <div><label class="lbl">Coffee *</label>
           <select id="adj-coffee">
             <option value="">— Select coffee —</option>
-            ${state.coffees.map(c=>`<option value="${esc(c)}" ${adj.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+            ${coffee_name_options(adj.coffee)}
           </select>
         </div>
         <div><label class="lbl">Movement type *</label>
@@ -899,7 +994,7 @@ function build_adjustments() {
       </div>
     </div>` : "";
   const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", other:"📝 Other" };
-  const adj_list = state.adjustments.map(a => {
+  const render_movement = (a) => {
     const is_pos = a.change_kg>0;
     return `
       <div class="adj-row">
@@ -910,14 +1005,23 @@ function build_adjustments() {
         <span class="hint" style="white-space:nowrap">${a.date}</span>
         ${a.auto?`<span class="tag" style="background:#f4f2ed;color:#999;font-size:10px">auto</span>`:`<span class="tag" style="background:#fff7ed;color:#d97706;font-size:10px;font-weight:600">MANUAL</span>`}
       </div>`;
-  }).join("");
+  };
+  const live_moves    = state.adjustments.filter(a => !coffee_is_retired(a.coffee_id));
+  const retired_moves = state.adjustments.filter(a => coffee_is_retired(a.coffee_id));
+  const adj_list = live_moves.map(render_movement).join("");
+  const retired_moves_html = retired_section("movements", retired_moves.length,
+    `<div class="card">${retired_moves.map(render_movement).join("")}</div>`,
+    "Ledger movements for retired coffees. Kept so the green balance still adds up.");
   return `
     <div class="flex-between mb-16">
       <h2>Adjustments</h2>
       <button class="btn btn-dark" id="toggle-adj-form">± New Adjustment</button>
     </div>
     ${form_html}
-    ${state.adjustments.length===0&&!show_adj_form?`<div class="card empty"><div class="icon">⚖️</div>No adjustments yet.</div>`:`<div class="card">${adj_list||`<div class="hint" style="padding:8px 0">No adjustments yet.</div>`}</div>`}`;
+    ${state.adjustments.length===0&&!show_adj_form
+      ? `<div class="card empty"><div class="icon">⚖️</div>No adjustments yet.</div>`
+      : `<div class="card">${adj_list||`<div class="hint" style="padding:8px 0">No movements for coffees in use.</div>`}</div>`}
+    ${retired_moves_html}`;
 }
 
 function build_staff() {

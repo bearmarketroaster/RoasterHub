@@ -103,6 +103,8 @@
     .wl-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
     .wl-badge.done { background: #16a34a; color: #fff; }
     .wl-badge.skip { background: #999; color: #fff; }
+    .wl-badge.retd { background: #6b7280; color: #fff; }
+    .wl-coffee.retd { text-decoration: line-through; color: #6b7280; }
     .wl-act { display: flex; align-items: center; gap: 6px; }
     .wl-start { background: #16a34a; color: #fff; text-decoration: none; font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
     .wl-skip { background: #fff; border: 1px solid #ddd; font-size: 12px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
@@ -184,7 +186,8 @@ const state = {
   empty_drums: [],          // [{ id, name, prefix }]
   empty_buckets: [],        // [{ id, name, prefix }]
   green_order: [],          // green stock to reorder: [{ coffee, current_kg, threshold, status }]
-  coffees: [],              // [name]
+  coffees: [],              // [name] — ACTIVE coffees only
+  retired_coffees: new Set(), // names of retired coffees: excluded from the priority list, flagged in the plan
   plan_items: [],           // persistent roast_plan rows for today: {id, container_id, coffee, coffee_id, batches, seq, status, roast_session_id}
   selected_coffee: null,    // coffee picked for tap-to-assign
 };
@@ -219,7 +222,7 @@ async function load() {
     fetch_all("roast_sessions", "id, container_id, coffee, fill_id, roasted_weight, date, is_test, roast_batches(green_weight)", "date"),
     fetch_all("dispatches", "id, date, shop, dispatch_lines(*)", "date"),
     fetch_all("buckets", "id, name, coffee, fill_id, status, retired_at, created_at", "created_at"),
-    supabaseClient.from("coffees").select("name").then(r => r.data || []),
+    supabaseClient.from("coffees").select("name, retired_at").then(r => r.data || []),
     supabaseClient.from("fp_codes").select("fp_code, coffees(name)").then(r => r.data || []),
     // Green on hand comes from v_green_stock — the sum of green_movements, not a stored figure.
     // Aliased to the old column names so the reorder logic below is untouched.
@@ -231,6 +234,11 @@ async function load() {
   ]);
 
   const conts = (containers || []).filter(c => !c.retired_at);
+  // Retired coffees are finished with and must not be suggested for roasting. Note that fpmap,
+  // fillmap and usage below stay UNFILTERED on purpose: they attribute historical dispatch lines,
+  // and filtering them would understate the usage figures of coffees that are still live. Only
+  // the final list of names rendered gets filtered — see roast_rows().
+  state.retired_coffees = new Set((coffees || []).filter(c => c.retired_at).map(c => c.name));
   const sess = sessions || [];
   const fpmap = {}; (fp_codes || []).forEach(f => { if (f.fp_code && f.coffees) fpmap[f.fp_code] = f.coffees.name; });
   const fillmap = {}; sess.forEach(s => { if (s.fill_id && s.coffee && !fillmap[s.fill_id]) fillmap[s.fill_id] = s.coffee; });
@@ -330,7 +338,12 @@ async function load() {
 
 // Build the per-coffee "what to roast" rows, sorted by urgency.
 function roast_rows() {
-  const names = [...new Set([...state.coffees, ...Object.keys(state.on_hand), ...Object.keys(state.usage)])].filter(Boolean);
+  // on_hand and usage are keyed off historical roast and dispatch rows, so a coffee retired
+  // last week still has volume in the trailing window. Without this filter it renders as OUT
+  // with a suggested batch count — the page would tell the roaster to roast a discontinued coffee.
+  const names = [...new Set([...state.coffees, ...Object.keys(state.on_hand), ...Object.keys(state.usage)])]
+    .filter(Boolean)
+    .filter(n => !state.retired_coffees.has(n));
   const rows = names.map(coffee => {
     const on_hand = state.on_hand[coffee] || 0;
     const total = state.usage[coffee] || 0;
@@ -420,13 +433,16 @@ function render() {
     const g = state.green_per_roast[it.coffee];
     const mx = max_for(it.container_id);
     const done = it.status === "done", skip = it.status === "skipped";
+    // A coffee retired after the plan was built: flag it rather than dropping the row, so the
+    // roaster can see why it is no longer to be roasted instead of the item silently vanishing.
+    const retd = state.retired_coffees.has(it.coffee);
     return `<div class="wl ${it.status}">
       <div class="wl-ord">
         <button class="wl-mv" data-move="${it.id}|-1" ${idx===0?"disabled":""}>▲</button>
         <button class="wl-mv" data-move="${it.id}|1" ${idx===items.length-1?"disabled":""}>▼</button>
       </div>
       <div class="wl-body">
-        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee">${esc(it.coffee)}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""}</div>
+        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee ${retd?"retd":""}">${esc(it.coffee)}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""}${retd?`<span class="wl-badge retd">retired</span>`:""}</div>
         <div class="wl-sub">${(done||skip)?`${it.batches} batch${it.batches!=1?"es":""}`:`<span class="stepper"><button data-pbatch="${it.id}|-1">−</button><span>${it.batches}</span><button data-pbatch="${it.id}|1">+</button> <span class="slot-max">/ ${mx} batches</span></span>`}${g>0?` · ≈ ${kg(g*it.batches)} green`:""}</div>
       </div>
       <div class="wl-act">
