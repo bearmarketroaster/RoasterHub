@@ -82,13 +82,9 @@ const LOW_STOCK_KG = 20;
 
 const state = {
   tab: 0,
-  coffees: [],            // ACTIVE coffee names — the delivery / adjustment pickers
-  coffees_obj: [],        // ALL coffees [{id, name, retired_at}] — lookups resolve history through this
-  coffees_obj_active: [], // active only — the contract picker and Quick Count
-  retired_ids: new Set(), // coffee_ids of retired coffees, for splitting history into the retired sections
-  retired_names: new Set(),
+  coffees: [],
+  coffees_obj: [],        // [{id, name}] for the contract green-coffee picker
   stock_items: [],
-  stock_items_retired: [],// retired coffees whose balance is NOT zero — an anomaly worth seeing
   deliveries: [],
   adjustments: [],
   contracts: [],          // green_contracts rows
@@ -140,56 +136,13 @@ function new_contract() {
   return { supplier:"", coffee_id:"", bag_count:"", low_bag_threshold:"100" };
 }
 function coffee_name_by_id(id) { const c = state.coffees_obj.find(x => x.id === id); return c ? c.name : "—"; }
-function coffee_is_retired(id) { return state.retired_ids.has(id); }
-// Collapsed "Retired" block. History for a retired coffee is kept — the ledger has to keep
-// reconciling — but folded away so it isn't in the way of coffee still in use.
-function retired_section(label, count, inner, note) {
-  if (!count) return "";
-  return `
-    <details style="margin-top:20px">
-      <summary style="cursor:pointer;list-style:none;padding:10px 14px;background:#f4f2ed;border:1px solid #e8e6e1;border-radius:8px;font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#666">
-        &#128451; Retired &middot; ${esc(label)} <span style="font-weight:600;letter-spacing:0">(${count})</span>
-      </summary>
-      <div style="padding-top:12px">
-        ${note?`<p class="hint mb-8" style="font-size:12px">${esc(note)}</p>`:""}
-        ${inner}
-      </div>
-    </details>`;
-}
-// Picker options keyed by NAME (delivery lines, adjustments). Retired coffees are excluded, but a
-// value the row already carries stays selectable and labelled — dropping it would make the select
-// fall back to the first option and silently rewrite the coffee on the next save.
-function coffee_name_options(selected) {
-  const names = [...state.coffees];
-  if (selected && !names.includes(selected)) names.push(selected);
-  return names.map(n =>
-    `<option value="${esc(n)}" ${selected===n?"selected":""}>${esc(n)}${state.retired_names.has(n)?" (retired)":""}</option>`
-  ).join("");
-}
-// Picker options keyed by ID (contracts). Same rule.
-function coffee_id_options(selected_id) {
-  const list = [...state.coffees_obj_active];
-  if (selected_id && !list.some(c => String(c.id) === String(selected_id))) {
-    const kept = state.coffees_obj.find(c => String(c.id) === String(selected_id));
-    if (kept) list.push(kept);
-  }
-  return list.map(c =>
-    `<option value="${c.id}" ${String(selected_id)===String(c.id)?"selected":""}>${esc(c.name)}${coffee_is_retired(c.id)?" (retired)":""}</option>`
-  ).join("");
-}
 function coffee_id_by_name(name) { const c = state.coffees_obj.find(x => x.name === name); return c ? c.id : null; }
 function contract_remaining(c) { return Number(c.bag_count||0) - Number(state.contract_delivered[c.id]||0); }
 
 async function load_data() {
-  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name, retired_at").order("name");
-  // coffees_obj stays COMPLETE. coffee_name_by_id() resolves historical arrivals, movements and
-  // contracts through it, so filtering it would render every past record belonging to a retired
-  // coffee as "—". The active lists below are what the pickers read.
-  state.coffees_obj        = coffees_data || [];
-  state.coffees_obj_active = (coffees_data || []).filter(c => !c.retired_at);
-  state.coffees            = state.coffees_obj_active.map(c => c.name);
-  state.retired_ids        = new Set((coffees_data || []).filter(c => c.retired_at).map(c => c.id));
-  state.retired_names      = new Set((coffees_data || []).filter(c => c.retired_at).map(c => c.name));
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
+  state.coffees = (coffees_data || []).map(c => c.name);
+  state.coffees_obj = coffees_data || [];
 
   // Green now lives in green_deliveries + green_movements, with the balance DERIVED by
   // v_green_stock rather than stored. See sql/green_schema.sql. These are mapped into the
@@ -200,7 +153,7 @@ async function load_data() {
     supabaseClient.from("v_green_movements").select("*").order("occurred_on", { ascending: false }).limit(500),
   ]);
 
-  const map_stock_row = (r) => ({
+  state.stock_items = (gstock || []).filter(r => !r.retired_at).map(r => ({
     id: `GS-${r.coffee_id}`,                       // synthetic; nothing writes back via this
     coffee: r.coffee,
     coffee_id: r.coffee_id,
@@ -209,14 +162,7 @@ async function load_data() {
     low_stock_threshold: Number(r.low_stock_threshold) || LOW_STOCK_KG,
     is_negative: !!r.is_negative,                  // a negative balance means something wasn't logged
     last_intake_on: r.last_intake_on,
-  });
-  state.stock_items = (gstock || []).filter(r => !r.retired_at).map(map_stock_row);
-  // A retired coffee is expected to read zero. If it doesn't, that kg is real and still counted by
-  // v_green_stock and the reports — hiding it would make this page disagree with the ledger, which
-  // is the failure mode the derived-view architecture exists to prevent. So surface it instead.
-  state.stock_items_retired = (gstock || [])
-    .filter(r => r.retired_at && Math.abs(Number(r.on_hand_kg) || 0) > 0.05)
-    .map(map_stock_row);
+  }));
 
   state.deliveries = (arrivals || []).map(a => ({
     id: a.arrival_id,
@@ -280,6 +226,12 @@ async function save_delivery() {
   const valid_items = d.items.filter(i => i.coffee && Number(i.weight_kg) > 0);
   if (!d.date) { state.ui.delivery_err="Please enter a delivery date."; state.saving=false; render(); return; }
   if (!valid_items.length) { state.ui.delivery_err="Please add at least one item with a coffee and weight."; state.saving=false; render(); return; }
+  // A PDF with no reference produces a delivery that can be downloaded but reads as "awaiting
+  // invoice" — the exact state that led to a duplicate delivery being logged. Attach both or neither.
+  if (state.ui.pending_invoice_file && !(d.invoice_ref || "").trim()) {
+    state.ui.delivery_err = "Enter the invoice reference to go with that PDF, or remove the file and attach it later from the delivery list.";
+    state.saving=false; render(); return;
+  }
   const delivery_id = gen_id("DEL");
 
   // Upload invoice PDF if one was staged
@@ -340,6 +292,30 @@ async function save_delivery() {
 // Attach or update invoice detail on an arrival. Only invoice_ref, the PDF and per-line
 // price_per_kg are touched — the physical facts of the delivery stay as recorded on the day.
 // Applies the ref and PDF across every line of the arrival, since one invoice covers all of it.
+// Remove a whole arrival. green_movements.delivery_id is ON DELETE CASCADE, so the intake
+// movements go with it and the balance corrects itself — there is no stored figure to unwind.
+// Reserved for a delivery that shouldn't exist (a duplicate, a mistaken entry). A delivery
+// whose QUANTITY was wrong is corrected with an adjustment instead, so the ledger stays honest.
+async function delete_arrival(arrival_id) {
+  const d = state.deliveries.find(x => x.id === arrival_id);
+  if (!d) return;
+  const total = d.items.reduce((t, i) => t + (Number(i.weight_kg) || 0), 0);
+  const lines = d.items.map(i => `  · ${i.coffee} ${Number(i.weight_kg).toFixed(1)}kg`).join("\n");
+  if (!confirm(
+    `Delete this delivery?\n\n${d.supplier || "Unknown supplier"} · ${d.date}\n${lines}\n\n`
+    + `This removes ${total.toFixed(1)}kg from stock and cannot be undone.\n\n`
+    + `Only do this if the delivery should not exist. If the WEIGHT was wrong, cancel and log a `
+    + `stock correction instead so the history stays intact.`
+  )) return;
+
+  state.saving = true; render();
+  const { error } = await supabaseClient.from("green_deliveries").delete().eq("arrival_id", arrival_id);
+  state.saving = false;
+  if (error) { alert("Failed to delete: " + error.message); render(); return; }
+  if (state.ui.invoice_edit?.arrival_id === arrival_id) state.ui.invoice_edit = null;
+  await load_data(); render();
+}
+
 async function save_invoice_detail() {
   const e = state.ui.invoice_edit;
   if (!e) return;
@@ -378,6 +354,39 @@ async function save_invoice_detail() {
     const { error: p_err } = await supabaseClient.from("green_deliveries")
       .update({ price_per_kg: price }).eq("id", item.id);
     if (p_err) { e.saving = false; e.err = "Failed to save a price: " + p_err.message; render(); return; }
+  }
+
+  // One invoice can cover several arrivals — two coffees on one invoice logged at different
+  // times, or a delivery only logged weeks later when the coffee was first roasted. So the PDF
+  // is shared across every arrival carrying the same reference, in whichever direction is useful:
+  // if this arrival now has the file, offer it to the others; if it doesn't and another does,
+  // offer to link theirs rather than making you upload the same document twice.
+  const siblings = state.deliveries.filter(x => x.id !== e.arrival_id && x.invoice_ref === ref);
+  if (siblings.length) {
+    const describe = x => `${x.date}${x.items.length ? " · " + x.items.map(i => i.coffee).join(", ") : ""}`;
+
+    if (invoice_path) {
+      const need = siblings.filter(x => !x.invoice_path);
+      if (need.length && confirm(
+        `${ref} also covers:\n\n${need.map(x => "  · " + describe(x)).join("\n")}\n\n`
+        + `Attach this PDF to ${need.length === 1 ? "it" : "them"} as well?`
+      )) {
+        const { error: sib_err } = await supabaseClient.from("green_deliveries")
+          .update({ invoice_path }).in("arrival_id", need.map(x => x.id));
+        if (sib_err) alert("Saved, but linking the PDF to the other deliveries failed: " + sib_err.message);
+      }
+    } else {
+      // No file on this one — but one of its siblings may already have it.
+      const source = siblings.find(x => x.invoice_path);
+      if (source && confirm(
+        `${ref} already has a PDF on file, from the delivery on ${describe(source)}.\n\n`
+        + `Link that same PDF to this delivery?`
+      )) {
+        const { error: link_err } = await supabaseClient.from("green_deliveries")
+          .update({ invoice_path: source.invoice_path }).eq("arrival_id", e.arrival_id);
+        if (link_err) alert("Saved, but linking the existing PDF failed: " + link_err.message);
+      }
+    }
   }
 
   state.ui.invoice_edit = null;
@@ -571,9 +580,7 @@ function build_app() {
 
 function build_quick_stock() {
   const open = state.ui.show_quick_stock;
-  // Active coffees only. Quick Count is a stocktake tool for coffee on the shelf; a retired
-  // coffee is finished with and would just be a row in the way.
-  const rows = state.coffees_obj_active.map(c => {
+  const rows = state.coffees_obj.map(c => {
     const item = state.stock_items.find(s => s.coffee_id === c.id);
     const cur = item ? Number(item.current_kg) : 0;
     return `
@@ -639,33 +646,7 @@ function build_green_stock() {
           <button class="btn btn-ghost btn-sm" data-set-threshold="${esc(item.coffee)}" data-threshold="${threshold}">Set Alert Level</button>
         </div>
       </div>`;
-  }).join("")}${build_retired_stock()}`;
-}
-
-// Retired coffees are expected to sit at zero. Any that don't are still counted by v_green_stock
-// and by the reports, so they are shown rather than hidden — otherwise this page and the ledger
-// quietly disagree about how much green is on site.
-function build_retired_stock() {
-  const items = state.stock_items_retired;
-  if (!items.length) return "";
-  const inner = items.map(item => `
-    <div class="stock-card" style="border-left:4px solid #d97706;opacity:.9">
-      <div class="flex-between mb-8">
-        <div class="flex-wrap">
-          <span style="font-weight:700;font-size:15px">${esc(item.coffee)}</span>
-          <span class="tag" style="background:#fff7ed;color:#d97706">Retired &middot; balance not zero</span>
-        </div>
-        <span style="font-size:22px;font-weight:700;color:${item.current_kg<0?"#dc2626":"#d97706"}">${item.current_kg.toFixed(1)}kg</span>
-      </div>
-      <div class="hint mt-4">${item.current_kg<0
-        ? "Negative balance — something was roasted or dispatched without being logged."
-        : "Still on hand. Adjust it down if the coffee is gone, or restore the coffee in Settings if it isn't."}</div>
-      <div style="margin-top:10px;display:flex;gap:8px">
-        <button class="btn btn-ghost btn-sm" data-adj-coffee="${esc(item.coffee)}">± Adjust</button>
-      </div>
-    </div>`).join("");
-  return retired_section("still carrying a balance", items.length, inner,
-    "These coffees are retired but their green balance isn't zero, so the figure above excludes them while the reports still count it.");
+  }).join("")}`;
 }
 
 function build_deliveries() {
@@ -712,6 +693,18 @@ function build_deliveries() {
       <div style="border-top:1px solid #e8e6e1;margin-top:12px;padding-top:12px">
         <div style="background:#faf9f7;border-radius:8px;padding:14px">
           <div style="font-weight:700;font-size:14px;margin-bottom:10px">Invoice detail</div>
+          ${(() => {
+            const ref = (e.invoice_ref || "").trim();
+            if (!ref) return "";
+            const sib = state.deliveries.filter(x => x.id !== d.id && x.invoice_ref === ref);
+            if (!sib.length) return "";
+            const withPdf = sib.find(x => x.invoice_path);
+            return `<div style="background:#eef4fb;border:1px solid #cfe0f2;border-radius:6px;padding:8px 10px;font-size:12px;color:#2563eb;margin-bottom:10px">
+              ${esc(ref)} also covers ${sib.length} other deliver${sib.length!==1?"ies":"y"}
+              (${sib.map(x => esc(x.date)).join(", ")}).
+              ${withPdf && !d.invoice_path ? " A PDF is already on file — save and you'll be offered it." : ""}
+              ${d.invoice_path ? "" : ""}</div>`;
+          })()}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
             <div><label class="lbl">Invoice / Ref No.</label>
               <input id="inv-ref" value="${esc(e.invoice_ref||"")}" placeholder="e.g. INV-2026-042" /></div>
@@ -744,7 +737,8 @@ function build_deliveries() {
 
   // Arrivals with no invoice reference yet. The whole point of invoice_ref being nullable:
   // stock is usable on arrival, and the outstanding invoices stay visible instead of forgotten.
-  const awaiting = state.deliveries.filter(d => d.awaiting_invoice);
+  const awaiting = state.deliveries.filter(d => !d.invoice_ref);
+  const no_pdf   = state.deliveries.filter(d => d.invoice_ref && !d.invoice_path);
   const awaiting_html = awaiting.length ? `
     <div class="card mb-16" style="border-left:3px solid #d97706">
       <div class="flex-between mb-8">
@@ -765,11 +759,29 @@ function build_deliveries() {
           </div>`;
         }).join("")}
       </div>
-    </div>` : "";
+      ${no_pdf.length ? `<div style="border-top:1px solid #f5d9b8;margin-top:10px;padding-top:8px;font-size:12px;color:#666">
+        <strong>${no_pdf.length}</strong> other deliver${no_pdf.length!==1?"ies have":"y has"} a reference but no PDF:
+        ${no_pdf.map(x => `<span class="mono">${esc(x.invoice_ref)}</span>`).join(", ")}</div>` : ""}
+    </div>` : (no_pdf.length ? `
+    <div class="card mb-16" style="border-left:3px solid #999">
+      <div style="font-weight:700;font-size:14px;margin-bottom:4px">📎 Missing invoice PDFs</div>
+      <div style="font-size:12px;color:#666">${no_pdf.length} deliver${no_pdf.length!==1?"ies have":"y has"} a reference recorded but no file uploaded:
+      ${no_pdf.map(x => `<span class="mono">${esc(x.invoice_ref)}</span>`).join(", ")}</div>
+    </div>` : "");
 
-  const arrival_all_retired = (d) =>
-    (d.items || []).length > 0 && d.items.every(i => coffee_is_retired(i.coffee_id));
-  const render_arrival = (d) => {
+  // Invoice completeness has THREE states, not two. Showing "awaiting invoice" beside a working
+  // Download button — which a migrated delivery with a PDF but no reference did — is how a
+  // duplicate delivery got logged instead of the existing one being updated.
+  const invoice_state_html = (d) => {
+    const has_ref = !!d.invoice_ref, has_pdf = !!d.invoice_path;
+    if (has_ref && has_pdf) return `<span class="mono hint">${esc(d.invoice_ref)}</span>`;
+    if (has_ref) return `<span class="mono hint">${esc(d.invoice_ref)}</span>
+      <span class="tag" style="background:#f0eee9;color:#666;font-weight:700;font-size:10px" title="Reference recorded, no PDF uploaded">NO PDF</span>`;
+    if (has_pdf) return `<span class="tag" style="background:#fdf5f5;color:#dc2626;font-weight:700" title="A PDF is attached but the invoice reference is missing">⚠️ REFERENCE MISSING</span>`;
+    return `<span class="tag" style="background:#fff7ed;color:#d97706;font-weight:700">⏳ AWAITING INVOICE</span>`;
+  };
+
+  const delivery_list = state.deliveries.map(d => {
     const total_kg    = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0), 0);
     const total_value = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0)*(Number(i.price_per_kg)||0), 0);
     return `
@@ -778,10 +790,10 @@ function build_deliveries() {
           <div class="flex-wrap">
             <span style="font-weight:700;font-size:15px">${esc(d.supplier||"Delivery")}</span>
             <span class="tag" style="background:#f4f2ed;color:#666">${d.date}</span>
-            ${d.invoice_ref?`<span class="mono hint">${esc(d.invoice_ref)}</span>`
-              :`<span class="tag" style="background:#fff7ed;color:#d97706;font-weight:700">⏳ AWAITING INVOICE</span>`}
-            ${d.invoice_path?`<button class="btn btn-ghost btn-sm" style="font-size:11px" data-download-invoice="${esc(d.invoice_path)}">📄 Download Invoice</button>`:""}
+            ${invoice_state_html(d)}
+            ${d.invoice_path?`<button class="btn btn-ghost btn-sm" style="font-size:11px" data-download-invoice="${esc(d.invoice_path)}">📄 Download PDF</button>`:""}
             <button class="btn btn-ghost btn-sm" style="font-size:11px" data-edit-invoice="${esc(d.id)}">${d.invoice_ref?"✏️ Edit invoice":"+ Add invoice"}</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px;color:#dc2626" data-delete-arrival="${esc(d.id)}" title="Remove this delivery and the stock it added">🗑️</button>
           </div>
           <div style="text-align:right">
             <div style="font-weight:700;font-size:16px">${total_kg.toFixed(1)}kg</div>
@@ -807,12 +819,7 @@ function build_deliveries() {
         </div>
         ${invoice_editor_html(d)}
       </div>`;
-  };
-  const live_arrivals    = state.deliveries.filter(d => !arrival_all_retired(d));
-  const retired_arrivals = state.deliveries.filter(arrival_all_retired);
-  const delivery_list    = live_arrivals.map(render_arrival).join("")
-    + retired_section("deliveries", retired_arrivals.length, retired_arrivals.map(render_arrival).join(""),
-        "Arrivals where every line is a retired coffee. Kept so the green ledger still reconciles.");
+  }).join("");
 
   return `
     <div class="flex-between mb-16">
@@ -836,7 +843,7 @@ function build_delivery_item_row(item, i) {
         <div><label class="lbl">Master Coffee Name *</label>
           <select class="item-coffee" data-idx="${i}">
             <option value="">— Select —</option>
-            ${coffee_name_options(item.coffee)}
+            ${state.coffees.map(c=>`<option value="${esc(c)}" ${item.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Green Name</label><input class="item-green-name" data-idx="${i}" value="${esc(item.green_name||"")}" placeholder="e.g. Ethiopia Yirgacheffe Kochere Gr.1" /></div>
@@ -849,8 +856,7 @@ function build_delivery_item_row(item, i) {
         <div><label class="lbl">From Contract?</label>
           <select class="item-contract" data-idx="${i}">
             <option value="">— Spot (no contract) —</option>
-            ${state.contracts.filter(co => !coffee_is_retired(co.coffee_id) || item.contract_id===co.id)
-                .map(co=>`<option value="${esc(co.id)}" ${item.contract_id===co.id?"selected":""}>${esc(co.supplier)} · ${esc(coffee_name_by_id(co.coffee_id))}${coffee_is_retired(co.coffee_id)?" (retired)":""} · ${contract_remaining(co)} bags left</option>`).join("")}
+            ${state.contracts.map(co=>`<option value="${esc(co.id)}" ${item.contract_id===co.id?"selected":""}>${esc(co.supplier)} · ${esc(coffee_name_by_id(co.coffee_id))} · ${contract_remaining(co)} bags left</option>`).join("")}
           </select>
         </div>
       </div>
@@ -869,7 +875,7 @@ function build_contracts() {
         <div><label class="lbl">Green Coffee *</label>
           <select id="con-coffee">
             <option value="">— Select —</option>
-            ${coffee_id_options(contract.coffee_id)}
+            ${state.coffees_obj.map(c=>`<option value="${c.id}" ${String(contract.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Total Bags *</label><input type="number" id="con-bags" value="${esc(contract.bag_count)}" placeholder="e.g. 275" /></div>
@@ -891,7 +897,7 @@ function build_contracts() {
       </div>
     </div>` : "";
 
-  const render_contract = (c) => {
+  const rows = state.contracts.map(c => {
     const total = Number(c.bag_count||0);
     const delivered = Number(state.contract_delivered[c.id]||0);
     const remaining = total - delivered;
@@ -915,12 +921,7 @@ function build_contracts() {
           </div>
         </div>
       </div>`;
-  };
-  const live_contracts    = state.contracts.filter(c => !coffee_is_retired(c.coffee_id));
-  const retired_contracts = state.contracts.filter(c => coffee_is_retired(c.coffee_id));
-  const rows = live_contracts.map(render_contract).join("")
-    + retired_section("contracts", retired_contracts.length, retired_contracts.map(render_contract).join(""),
-        "Contracts against a retired coffee. Any bags still showing as outstanding are a live commitment.");
+  }).join("");
 
   return `
     <div class="flex-between mb-16">
@@ -973,7 +974,7 @@ function build_adjustments() {
         <div><label class="lbl">Coffee *</label>
           <select id="adj-coffee">
             <option value="">— Select coffee —</option>
-            ${coffee_name_options(adj.coffee)}
+            ${state.coffees.map(c=>`<option value="${esc(c)}" ${adj.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Movement type *</label>
@@ -994,7 +995,7 @@ function build_adjustments() {
       </div>
     </div>` : "";
   const reason_labels = { roast:"🔥 Roast", spill:"💧 Spill", sample:"🧪 Sample", correction:"🔧 Correction", delivery:"📦 Delivery", other:"📝 Other" };
-  const render_movement = (a) => {
+  const adj_list = state.adjustments.map(a => {
     const is_pos = a.change_kg>0;
     return `
       <div class="adj-row">
@@ -1005,23 +1006,14 @@ function build_adjustments() {
         <span class="hint" style="white-space:nowrap">${a.date}</span>
         ${a.auto?`<span class="tag" style="background:#f4f2ed;color:#999;font-size:10px">auto</span>`:`<span class="tag" style="background:#fff7ed;color:#d97706;font-size:10px;font-weight:600">MANUAL</span>`}
       </div>`;
-  };
-  const live_moves    = state.adjustments.filter(a => !coffee_is_retired(a.coffee_id));
-  const retired_moves = state.adjustments.filter(a => coffee_is_retired(a.coffee_id));
-  const adj_list = live_moves.map(render_movement).join("");
-  const retired_moves_html = retired_section("movements", retired_moves.length,
-    `<div class="card">${retired_moves.map(render_movement).join("")}</div>`,
-    "Ledger movements for retired coffees. Kept so the green balance still adds up.");
+  }).join("");
   return `
     <div class="flex-between mb-16">
       <h2>Adjustments</h2>
       <button class="btn btn-dark" id="toggle-adj-form">± New Adjustment</button>
     </div>
     ${form_html}
-    ${state.adjustments.length===0&&!show_adj_form
-      ? `<div class="card empty"><div class="icon">⚖️</div>No adjustments yet.</div>`
-      : `<div class="card">${adj_list||`<div class="hint" style="padding:8px 0">No movements for coffees in use.</div>`}</div>`}
-    ${retired_moves_html}`;
+    ${state.adjustments.length===0&&!show_adj_form?`<div class="card empty"><div class="icon">⚖️</div>No adjustments yet.</div>`:`<div class="card">${adj_list||`<div class="hint" style="padding:8px 0">No adjustments yet.</div>`}</div>`}`;
 }
 
 function build_staff() {
@@ -1174,6 +1166,7 @@ function attach_listeners() {
   });
 
   // Download invoice
+  app.querySelectorAll("[data-delete-arrival]").forEach(btn => btn.addEventListener("click", () => delete_arrival(btn.dataset.deleteArrival)));
   app.querySelectorAll("[data-edit-invoice]").forEach(btn => btn.addEventListener("click", () => {
     const id = btn.dataset.editInvoice;
     const d = state.deliveries.find(x => x.id === id);
@@ -1187,6 +1180,8 @@ function attach_listeners() {
   }));
   app.querySelector("#inv-cancel")?.addEventListener("click", () => { state.ui.invoice_edit = null; render(); });
   app.querySelector("#inv-ref")?.addEventListener("input", e => { if (state.ui.invoice_edit) state.ui.invoice_edit.invoice_ref = e.target.value; });
+  // Re-render on blur so the "also covers…" hint appears once a known reference is typed.
+  app.querySelector("#inv-ref")?.addEventListener("blur", () => { if (state.ui.invoice_edit) render(); });
   app.querySelectorAll(".inv-price").forEach(inp => inp.addEventListener("input", () => {
     if (state.ui.invoice_edit) state.ui.invoice_edit.prices[inp.dataset.line] = inp.value;
   }));
