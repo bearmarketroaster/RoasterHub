@@ -1156,8 +1156,15 @@ function attach_listeners() {
   app.querySelector("#choose-del-invoice-pdf")?.addEventListener("click", () => {
     document.getElementById("del-invoice-pdf")?.click();
   });
+  const capture_delivery_header = () => {
+    const g = id => document.getElementById(id);
+    if (g("del-date"))     state.ui.delivery.date        = g("del-date").value     || state.ui.delivery.date;
+    if (g("del-supplier")) state.ui.delivery.supplier    = g("del-supplier").value;
+    if (g("del-invoice"))  state.ui.delivery.invoice_ref = g("del-invoice").value;
+  };
   app.querySelector("#del-invoice-pdf")?.addEventListener("change", e => {
     const file = e.target.files?.[0];
+    capture_delivery_header();
     if (!file) return;
     if (file.type !== "application/pdf") { state.ui.invoice_err="Please select a PDF file."; render(); return; }
     state.ui.pending_invoice_file = file;
@@ -1165,6 +1172,7 @@ function attach_listeners() {
     render();
   });
   app.querySelector("#clear-invoice-pdf")?.addEventListener("click", () => {
+    capture_delivery_header();
     state.ui.pending_invoice_file = null;
     render();
   });
@@ -1202,11 +1210,22 @@ function attach_listeners() {
   }));
 
   app.querySelector("#add-delivery-item")?.addEventListener("click", () => {
+    capture_delivery_header();
     state.ui.delivery.items.push(new_delivery_item()); render();
   });
   app.querySelectorAll("[data-remove-item]").forEach(btn => btn.addEventListener("click", () => {
+    capture_delivery_header();
     state.ui.delivery.items.splice(Number(btn.dataset.removeItem),1); render();
   }));
+  // Delivery header: date, supplier, invoice ref. These were only read when Save was clicked,
+  // so any render() before that silently wiped them — attaching a PDF, or adding a coffee line.
+  [["#del-date","date"],["#del-supplier","supplier"],["#del-invoice","invoice_ref"]].forEach(([sel, field]) => {
+    const el = app.querySelector(sel);
+    if (!el) return;
+    el.addEventListener("input",  () => { state.ui.delivery[field] = el.value; });
+    el.addEventListener("change", () => { state.ui.delivery[field] = el.value; });
+  });
+
   const sync = (sel, field) => app.querySelectorAll(sel).forEach(el => {
     el.addEventListener("input",  e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; });
     el.addEventListener("change", e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; });
