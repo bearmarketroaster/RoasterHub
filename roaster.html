@@ -103,8 +103,6 @@
     .wl-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
     .wl-badge.done { background: #16a34a; color: #fff; }
     .wl-badge.skip { background: #999; color: #fff; }
-    .wl-badge.retd { background: #6b7280; color: #fff; }
-    .wl-coffee.retd { text-decoration: line-through; color: #6b7280; }
     .wl-act { display: flex; align-items: center; gap: 6px; }
     .wl-start { background: #16a34a; color: #fff; text-decoration: none; font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
     .wl-skip { background: #fff; border: 1px solid #ddd; font-size: 12px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
@@ -161,7 +159,11 @@ function today_str() { const d = new Date(); return `${d.getFullYear()}-${String
 function gen_plan_id() { return `PLAN-${today_str().replace(/-/g,"")}-${Math.random().toString(36).slice(2,8).toUpperCase()}`; }
 async function load_plan() {
   const { data } = await supabaseClient.from("roast_plan").select("*").eq("plan_date", today_str()).order("seq", { ascending: true });
-  state.plan_items = data || [];
+  // A retired coffee is finished with and has no green stock, so it is not something to roast.
+  // Dropping the rows here rather than at each render site means the worklist, the drum slots,
+  // the batch and green totals and the tap-to-assign guard all agree: the drum reads as empty
+  // and is assignable again. The rows stay in roast_plan; they are just not shown or counted.
+  state.plan_items = (data || []).filter(i => !state.retired_coffees.has(i.coffee));
 }
 
 // Tuning — flag a coffee LOW when cover drops below this; suggest roasting up to the target.
@@ -187,7 +189,7 @@ const state = {
   empty_buckets: [],        // [{ id, name, prefix }]
   green_order: [],          // green stock to reorder: [{ coffee, current_kg, threshold, status }]
   coffees: [],              // [name] — ACTIVE coffees only
-  retired_coffees: new Set(), // names of retired coffees: excluded from the priority list, flagged in the plan
+  retired_coffees: new Set(), // names of retired coffees — excluded from the priority list and the plan
   plan_items: [],           // persistent roast_plan rows for today: {id, container_id, coffee, coffee_id, batches, seq, status, roast_session_id}
   selected_coffee: null,    // coffee picked for tap-to-assign
 };
@@ -433,16 +435,13 @@ function render() {
     const g = state.green_per_roast[it.coffee];
     const mx = max_for(it.container_id);
     const done = it.status === "done", skip = it.status === "skipped";
-    // A coffee retired after the plan was built: flag it rather than dropping the row, so the
-    // roaster can see why it is no longer to be roasted instead of the item silently vanishing.
-    const retd = state.retired_coffees.has(it.coffee);
     return `<div class="wl ${it.status}">
       <div class="wl-ord">
         <button class="wl-mv" data-move="${it.id}|-1" ${idx===0?"disabled":""}>▲</button>
         <button class="wl-mv" data-move="${it.id}|1" ${idx===items.length-1?"disabled":""}>▼</button>
       </div>
       <div class="wl-body">
-        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee ${retd?"retd":""}">${esc(it.coffee)}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""}${retd?`<span class="wl-badge retd">retired</span>`:""}</div>
+        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee">${esc(it.coffee)}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""}</div>
         <div class="wl-sub">${(done||skip)?`${it.batches} batch${it.batches!=1?"es":""}`:`<span class="stepper"><button data-pbatch="${it.id}|-1">−</button><span>${it.batches}</span><button data-pbatch="${it.id}|1">+</button> <span class="slot-max">/ ${mx} batches</span></span>`}${g>0?` · ≈ ${kg(g*it.batches)} green`:""}</div>
       </div>
       <div class="wl-act">
