@@ -410,32 +410,34 @@ async function save_adjustment() {
   state.saving = true;
   const coffee = state.ui.adj.coffee;
   const raw = String(state.ui.adj.change_kg || "").trim();
-  const change_kg = parseFloat(raw);
+  const counted = parseFloat(raw);
   const reason = state.ui.adj.reason;
   const note = (state.ui.adj.note || "").trim();
   if (!coffee) { state.ui.adj_err="Please select a coffee."; state.saving=false; render(); return; }
-  if (!raw || isNaN(change_kg) || change_kg === 0) { state.ui.adj_err="Please enter a non-zero kg value (use - for deductions)."; state.saving=false; render(); return; }
-  // Validate deductions don't exceed available stock
-  if (change_kg < 0) {
-    const existing_check = state.stock_items.find(s => s.coffee_id === coffee_id_by_name(coffee));
-    const available = existing_check?.current_kg || 0;
-    if (Math.abs(change_kg) > available) {
-      state.ui.adj_err = `Cannot deduct ${Math.abs(change_kg).toFixed(1)}kg of ${coffee} — only ${available.toFixed(1)}kg available.`;
-      state.saving=false; render(); return;
-    }
-  }
+  if (!raw || isNaN(counted) || counted < 0) { state.ui.adj_err="Enter the counted amount — what's actually there, as a positive number."; state.saving=false; render(); return; }
   if (!reason) { state.ui.adj_err="Please choose what kind of movement this is."; state.saving=false; render(); return; }
-  // Direction has to match the kind — green_movements_direction rejects a positive spill or a
-  // negative intake. Catching it here gives a useful message instead of a constraint error.
+
+  // You enter the ABSOLUTE figure you counted; the ledger records the difference. Same logic as
+  // Quick Count, which is the multi-coffee version of this. Nobody standing at a bag knows the
+  // delta — they know what's there.
+  const existing = state.stock_items.find(x => x.coffee_id === coffee_id_by_name(coffee));
+  const current = existing ? Number(existing.current_kg) || 0 : 0;
+  const change_kg = Math.round((counted - current) * 100) / 100;
+  if (Math.abs(change_kg) < 0.005) {
+    state.ui.adj_err = `${coffee} already shows ${current.toFixed(2)}kg — nothing to record.`;
+    state.saving=false; render(); return;
+  }
+  // Direction has to match the kind — green_movements_direction rejects a positive spill.
   if ((reason === "spill" || reason === "sample") && change_kg > 0) {
-    state.ui.adj_err = `A ${reason} takes stock out — enter a negative value, or use Stock Correction to add.`;
+    state.ui.adj_err = `That would ADD ${change_kg.toFixed(2)}kg, but a ${reason} takes stock out. Use Stock correction if the count went up.`;
     state.saving=false; render(); return;
   }
   const adj_cid = coffee_id_by_name(coffee);
   // One row. The balance is the sum of green_movements, so there is nothing else to update.
   const { error } = await supabaseClient.from("green_movements").insert({
     id: gen_id("GM"), coffee_id: adj_cid, occurred_on: today(),
-    change_kg, kind: reason, note: note || null,
+    change_kg, kind: reason,
+    note: `${note ? note + " · " : ""}counted ${counted.toFixed(2)}kg (was ${current.toFixed(2)}kg)`,
   });
   if (error) { state.ui.adj_err="Failed to save adjustment: "+error.message; state.saving=false; render(); return; }
   state.saving=false; state.ui.adj={ coffee:"", change_kg:"", reason:"", note:"" }; state.ui.show_adj_form=false; state.ui.adj_err="";
@@ -961,10 +963,29 @@ async function save_contract() {
 
 function build_adjustments() {
   const { show_adj_form, adj, adj_err } = state.ui;
+
+  // Shows the arithmetic before it's committed. You enter the absolute figure you counted —
+  // which is what you actually know standing in the green room — and the ledger movement is
+  // the difference. Same logic Quick Count uses; this is the single-coffee version of it.
+  const adj_preview_html = () => {
+    if (!adj.coffee) return "";
+    const item = state.stock_items.find(x => x.coffee === adj.coffee);
+    const current = item ? Number(item.current_kg) || 0 : 0;
+    const raw = String(adj.change_kg ?? "").trim();
+    if (raw === "") return `<p class="hint" style="margin-top:10px">${esc(adj.coffee)} currently shows <strong>${current.toFixed(2)}kg</strong>.</p>`;
+    const counted = Number(raw);
+    if (!Number.isFinite(counted) || counted < 0) return `<p class="err" style="margin-top:10px">Enter the counted amount as a positive number.</p>`;
+    const delta = Math.round((counted - current) * 100) / 100;
+    if (Math.abs(delta) < 0.005) return `<p class="hint" style="margin-top:10px">${esc(adj.coffee)} already shows <strong>${current.toFixed(2)}kg</strong> — nothing to record.</p>`;
+    return `<div style="margin-top:10px;background:#f4f2ed;border-radius:8px;padding:10px 12px;font-size:13px">
+      ${esc(adj.coffee)}: <strong>${current.toFixed(2)}kg</strong> → <strong>${counted.toFixed(2)}kg</strong>
+      &nbsp;·&nbsp; records <strong style="color:${delta<0?"#dc2626":"#16a34a"}">${delta>0?"+":""}${delta.toFixed(2)}kg</strong>
+    </div>`;
+  };
   const form_html = show_adj_form ? `
     <div class="card mb-16">
-      <h3>Manual Adjustment</h3>
-      <p class="hint mb-12">Use this to correct stock levels — spills, sampling, write-offs, or counting corrections.</p>
+      <h3>Update Stock Level</h3>
+      <p class="hint mb-12">Enter what's <strong>actually there</strong> — the system works out the difference. Use this after a count, a spill, or sampling.</p>
       <div class="grid-2">
         <div><label class="lbl">Coffee *</label>
           <select id="adj-coffee">
@@ -975,14 +996,16 @@ function build_adjustments() {
         <div><label class="lbl">Movement type *</label>
           <select id="adj-reason">
             <option value="" ${!adj.reason?"selected":""}>— Select —</option>
-            <option value="correction" ${adj.reason==="correction"?"selected":""}>Stock correction (+ or −)</option>
-            <option value="spill" ${adj.reason==="spill"?"selected":""}>Spill / loss (−)</option>
-            <option value="sample" ${adj.reason==="sample"?"selected":""}>Sample / cupping (−)</option>
+            <option value="correction" ${adj.reason==="correction"?"selected":""}>Stock correction — recount</option>
+            <option value="spill" ${adj.reason==="spill"?"selected":""}>Spill / loss</option>
+            <option value="sample" ${adj.reason==="sample"?"selected":""}>Sample / cupping</option>
           </select>
         </div>
-        <div><label class="lbl">Change (kg) — use negative to deduct *</label><input type="text" id="adj-kg" value="${adj.change_kg}" placeholder="e.g. -2.5 or +10" inputmode="decimal" /></div>
+        <div><label class="lbl">Counted amount (kg) *</label>
+          <input type="text" id="adj-kg" value="${adj.change_kg}" placeholder="what's actually there, e.g. 37" inputmode="decimal" /></div>
         <div><label class="lbl">Note</label><input id="adj-note" value="${esc(adj.note)}" placeholder="Optional note" /></div>
       </div>
+      ${adj_preview_html()}
       ${adj_err?`<p class="err mt-8">${esc(adj_err)}</p>`:""}
       <div style="display:flex;gap:8px;margin-top:16px">
         <button class="btn btn-dark btn-lg" id="save-adj" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Adjustment"}</button>
