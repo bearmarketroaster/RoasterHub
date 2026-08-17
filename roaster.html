@@ -310,13 +310,14 @@ async function load() {
     .map(d => ({ ...d, max: max_roasts(d.prefix) }))
     .sort((a, b) => size_rank(a.prefix) - size_rank(b.prefix) || a.id.localeCompare(b.id));
   state.empty_buckets = empty_buckets;
-  // Active coffees, plus any retired one that still has roasted stock in a drum or moved during
-  // the window — those are real and need finishing. A retired coffee with neither is dropped.
+  // Active coffees, plus any RETIRED one that still has roasted stock sitting in a drum — that
+  // stock is real and needs packing out. Recent usage does NOT keep a retired coffee on the list:
+  // having sold some a fortnight ago says nothing about whether there's any left, and a coffee
+  // you no longer stock has nothing to roast.
   const active_names = new Set((coffees || []).map(c => c.name));
   state.coffees = [...new Set([
     ...active_names,
     ...Object.keys(on_hand).filter(n => (on_hand[n] || 0) > 0.05),
-    ...Object.keys(usage).filter(n => (usage[n] || 0) > 0),
   ])].filter(Boolean).sort();
   state.retired_names = new Set([...state.coffees].filter(n => !active_names.has(n)));
 
