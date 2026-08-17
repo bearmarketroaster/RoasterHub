@@ -340,7 +340,10 @@ async function load() {
 
 // Build the per-coffee "what to roast" rows, sorted by urgency.
 function roast_rows() {
-  const names = [...new Set([...state.coffees, ...Object.keys(state.on_hand), ...Object.keys(state.usage)])].filter(Boolean);
+  // state.coffees is the authoritative list, built in load_data(): active coffees, plus any
+  // retired one that still has roasted stock in a drum. Do NOT re-union on_hand/usage here —
+  // usage covers a 28-day window, so that resurrects archived coffees sold weeks ago.
+  const names = [...state.coffees].filter(Boolean);
   const rows = names.map(coffee => {
     const on_hand = state.on_hand[coffee] || 0;
     const total = state.usage[coffee] || 0;
