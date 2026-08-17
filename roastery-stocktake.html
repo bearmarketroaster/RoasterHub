@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roastery Stocktake — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    button { font-family: inherit; font-size: 14px; cursor: pointer; }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; transition: all 0.15s; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .content { padding: 24px; max-width: 900px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; }
+    .card.empty { text-align: center; padding: 48px 16px; color: #999; }
+    .card.empty .icon { font-size: 36px; margin-bottom: 8px; }
+    .btn { color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
+    .btn-ghost { background: #f4f2ed; color: #1a1a1a; border: 1px solid #e8e6e1; }
+    .btn-ghost:hover:not(:disabled) { background: #e8e6e1; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .tag { border-radius: 10px; padding: 2px 8px; font-size: 11px; font-weight: 700; display: inline-block; }
+    .tag-retired { background: #f4f2ed; color: #666; }
+    .hint { color: #999; font-size: 13px; }
+    .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+    .flex-between { display: flex; justify-content: space-between; align-items: center; }
+    .gap-8 { gap: 8px; } .flex { display: flex; }
+    .mb-16 { margin-bottom: 16px; }
+
+    .stamp { font-size: 13px; color: #666; }
+    .stamp strong { color: #1a1a1a; }
+
+    .totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+    .tot { background: #fff; border: 1px solid #e8e6e1; border-radius: 10px; padding: 14px 16px; }
+    .tot-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #666; font-weight: 700; }
+    .tot-val { font-size: 26px; font-weight: 700; margin-top: 4px; }
+    .tot-val small { font-size: 14px; color: #999; font-weight: 600; }
+
+    table.st { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.st th { text-align: left; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #666; font-weight: 700; padding: 8px 10px; border-bottom: 2px solid #e8e6e1; }
+    table.st th.n, table.st td.n { text-align: right; font-variant-numeric: tabular-nums; }
+    table.st td { padding: 9px 10px; border-bottom: 1px solid #f0eee9; }
+    table.st tbody tr:last-child td { border-bottom: 2px solid #e8e6e1; }
+    table.st tfoot td { padding: 10px; font-weight: 700; font-size: 15px; }
+    .neg { color: #dc2626; font-weight: 700; }
+    .zero { color: #bbb; }
+    .coffee-name { font-weight: 600; }
+
+    .warn { background: #fdecea; border: 1px solid #f5c6c2; color: #a3211a; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; }
+
+    @media (max-width: 640px) {
+      .content { padding: 16px 12px; }
+      .totals { grid-template-columns: 1fr; }
+      table.st th, table.st td { padding: 8px 6px; }
+    }
+
+    /* Printed as a dated record, so the chrome goes and the ink stays black. */
+    @media print {
+      @page { size: A4 portrait; margin: 14mm; }
+      body { background: #fff; }
+      .header, .no-print { display: none !important; }
+      .content { padding: 0; max-width: none; }
+      .card { border: none; box-shadow: none; padding: 0; }
+      .totals { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .tot { border: 1px solid #999; }
+      .print-head { display: block !important; margin-bottom: 12px; }
+      table.st { font-size: 11pt; }
+      table.st th { border-bottom: 1.5pt solid #000; color: #000; }
+      table.st td { border-bottom: 0.5pt solid #ccc; }
+      table.st tbody tr { page-break-inside: avoid; }
+      .neg { color: #000; text-decoration: underline; }
+      thead { display: table-header-group; }
+    }
+    .print-head { display: none; }
+    .print-head h1 { font-size: 18pt; margin-bottom: 2px; }
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+supabaseClient.auth.getSession().then(({ data: { session } }) => {
+  if (!session) window.location.href = "login.html";
+  else init();
+});
+
+const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const kg1 = v => num(v).toFixed(1);
+
+const state = {
+  loading: true,
+  err: "",
+  rows: [],
+  taken_at: null,   // Date the figures were read, not the date the page was opened
+};
+
+// A stocktake is a moment, so the timestamp is captured when the read returns and
+// never recalculated on re-render — otherwise a print an hour later carries a time
+// that no longer matches the numbers on the page.
+function stamp_text() {
+  if (!state.taken_at) return "";
+  const d = state.taken_at;
+  const pad = n => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} at ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function load_data() {
+  state.loading = true; state.err = ""; render();
+  // v_stocktake is one row per coffee holding stock — bounded by the number of
+  // coffees, so a single unpaginated read is safe here. See sql/v_stocktake.sql;
+  // green comes from the green_movements ledger and roasted from
+  // v_container_state, so this page computes no balances of its own.
+  const { data, error } = await supabaseClient
+    .from("v_stocktake")
+    .select("coffee, coffee_id, green_kg, roasted_kg, total_kg, retired")
+    .order("coffee", { ascending: true });
+  if (error) {
+    state.err = error.message;
+    state.rows = [];
+  } else {
+    state.rows = (data || []).map(r => ({
+      coffee:     r.coffee,
+      coffee_id:  r.coffee_id,
+      green_kg:   num(r.green_kg),
+      roasted_kg: num(r.roasted_kg),
+      total_kg:   num(r.total_kg),
+      retired:    !!r.retired,
+    }));
+    state.taken_at = new Date();
+  }
+  state.loading = false; render();
+}
+
+function totals() {
+  return state.rows.reduce((a, r) => ({
+    green:   a.green   + r.green_kg,
+    roasted: a.roasted + r.roasted_kg,
+    total:   a.total   + r.total_kg,
+  }), { green: 0, roasted: 0, total: 0 });
+}
+
+function kg_cell(v) {
+  if (v < 0) return `<td class="n neg">${kg1(v)}</td>`;
+  if (v === 0) return `<td class="n zero">0.0</td>`;
+  return `<td class="n">${kg1(v)}</td>`;
+}
+
+function build_table() {
+  if (!state.rows.length) {
+    return `<div class="card empty"><div class="icon">📋</div>No coffee in stock.<br/>
+      <span class="hint">Nothing green in the warehouse and nothing roasted in a drum.</span></div>`;
+  }
+  const t = totals();
+  const negatives = state.rows.filter(r => r.green_kg < 0 || r.roasted_kg < 0);
+  return `
+    ${negatives.length ? `<div class="warn"><strong>${negatives.length} coffee${negatives.length>1?"s":""} showing a negative balance.</strong>
+      A negative means a movement was never logged — the true figure is higher than what is printed here.
+      Worth resolving before this is filed: ${esc(negatives.map(r=>r.coffee).join(", "))}.</div>` : ""}
+    <div class="totals">
+      <div class="tot"><div class="tot-label">Green</div><div class="tot-val">${kg1(t.green)} <small>kg</small></div></div>
+      <div class="tot"><div class="tot-label">Roasted</div><div class="tot-val">${kg1(t.roasted)} <small>kg</small></div></div>
+      <div class="tot"><div class="tot-label">Total on hand</div><div class="tot-val">${kg1(t.total)} <small>kg</small></div></div>
+    </div>
+    <div class="card">
+      <table class="st">
+        <thead>
+          <tr>
+            <th>Coffee</th>
+            <th class="n">Green kg</th>
+            <th class="n">Roasted kg</th>
+            <th class="n">Total kg</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.rows.map(r => `
+            <tr>
+              <td><span class="coffee-name">${esc(r.coffee)}</span>${r.retired ? ` <span class="tag tag-retired">RETIRED</span>` : ""}</td>
+              ${kg_cell(r.green_kg)}
+              ${kg_cell(r.roasted_kg)}
+              ${kg_cell(r.total_kg)}
+            </tr>`).join("")}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>Total — ${state.rows.length} coffee${state.rows.length===1?"":"s"}</td>
+            <td class="n">${kg1(t.green)}</td>
+            <td class="n">${kg1(t.roasted)}</td>
+            <td class="n">${kg1(t.total)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="hint" style="margin-top:12px">
+      Green is what is in the warehouse. Roasted is what is still at the roastery — in a drum, or in a
+      filled bucket that has not been dispatched. Coffee already at a shop is not counted.
+    </div>`;
+}
+
+function render() {
+  const app = document.getElementById("app");
+  const header = `
+    <div class="header no-print">
+      <div class="header-left">
+        <button class="header-back" id="go-reports">← Reports</button>
+        <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+        <div><div class="header-title">📋 Roastery Stocktake</div><div class="header-sub">Bear Mrkt</div></div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>`;
+
+  let body;
+  if (state.loading) {
+    body = `<div class="loading">Counting…</div>`;
+  } else if (state.err) {
+    body = `<div class="card empty"><div class="icon">⚠️</div>Could not load the stocktake.<br/>
+      <span class="hint">${esc(state.err)}</span></div>`;
+  } else {
+    body = `
+      <div class="print-head">
+        <h1>Roastery Stocktake</h1>
+        <div class="stamp">Bear Market Roastery · as at <strong>${esc(stamp_text())}</strong></div>
+      </div>
+      <div class="flex-between mb-16 no-print">
+        <div class="stamp">As at <strong>${esc(stamp_text())}</strong></div>
+        <div class="flex gap-8">
+          <button class="btn btn-ghost btn-sm" id="refresh-btn">↻ Refresh</button>
+          <button class="btn btn-ghost btn-sm" id="csv-btn">Download CSV</button>
+          <button class="btn btn-ghost btn-sm" id="print-btn">🖨 Print</button>
+        </div>
+      </div>
+      ${build_table()}`;
+  }
+
+  app.innerHTML = header + `<div class="content">${body}</div>`;
+
+  app.querySelector("#go-reports")?.addEventListener("click", () => window.location.href = "reports.html");
+  app.querySelector("#logout-btn")?.addEventListener("click", async () => {
+    await supabaseClient.auth.signOut();
+    window.location.href = "login.html";
+  });
+  app.querySelector("#refresh-btn")?.addEventListener("click", load_data);
+  app.querySelector("#print-btn")?.addEventListener("click", () => window.print());
+  app.querySelector("#csv-btn")?.addEventListener("click", download_csv);
+}
+
+function download_csv() {
+  const t = totals();
+  const q = s => `"${String(s==null?"":s).replace(/"/g,'""')}"`;
+  const lines = [
+    ["Roastery Stocktake"].map(q).join(","),
+    ["As at", stamp_text()].map(q).join(","),
+    "",
+    ["Coffee","Green kg","Roasted kg","Total kg","Retired"].map(q).join(","),
+    ...state.rows.map(r => [r.coffee, kg1(r.green_kg), kg1(r.roasted_kg), kg1(r.total_kg), r.retired ? "yes" : ""].map(q).join(",")),
+    ["Total", kg1(t.green), kg1(t.roasted), kg1(t.total), ""].map(q).join(","),
+  ];
+  const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const d = state.taken_at || new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `stocktake-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+function init() { load_data(); }
+</script>
+</body>
+</html>
