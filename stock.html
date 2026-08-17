@@ -741,8 +741,9 @@ function build_deliveries() {
 
   // Arrivals with no invoice reference yet. The whole point of invoice_ref being nullable:
   // stock is usable on arrival, and the outstanding invoices stay visible instead of forgotten.
+  // Awaiting = no invoice REFERENCE. A missing PDF is not chased: the reference is enough to
+  // find the document by email or in the accounts system.
   const awaiting = state.deliveries.filter(d => !d.invoice_ref);
-  const no_pdf   = state.deliveries.filter(d => d.invoice_ref && !d.invoice_path);
   const awaiting_html = awaiting.length ? `
     <div class="card mb-16" style="border-left:3px solid #d97706">
       <div class="flex-between mb-8">
@@ -763,24 +764,14 @@ function build_deliveries() {
           </div>`;
         }).join("")}
       </div>
-      ${no_pdf.length ? `<div style="border-top:1px solid #f5d9b8;margin-top:10px;padding-top:8px;font-size:12px;color:#666">
-        <strong>${no_pdf.length}</strong> other deliver${no_pdf.length!==1?"ies have":"y has"} a reference but no PDF:
-        ${no_pdf.map(x => `<span class="mono">${esc(x.invoice_ref)}</span>`).join(", ")}</div>` : ""}
-    </div>` : (no_pdf.length ? `
-    <div class="card mb-16" style="border-left:3px solid #999">
-      <div style="font-weight:700;font-size:14px;margin-bottom:4px">📎 Missing invoice PDFs</div>
-      <div style="font-size:12px;color:#666">${no_pdf.length} deliver${no_pdf.length!==1?"ies have":"y has"} a reference recorded but no file uploaded:
-      ${no_pdf.map(x => `<span class="mono">${esc(x.invoice_ref)}</span>`).join(", ")}</div>
-    </div>` : "");
+    </div>` : "";
 
   // Invoice completeness has THREE states, not two. Showing "awaiting invoice" beside a working
   // Download button — which a migrated delivery with a PDF but no reference did — is how a
   // duplicate delivery got logged instead of the existing one being updated.
   const invoice_state_html = (d) => {
     const has_ref = !!d.invoice_ref, has_pdf = !!d.invoice_path;
-    if (has_ref && has_pdf) return `<span class="mono hint">${esc(d.invoice_ref)}</span>`;
-    if (has_ref) return `<span class="mono hint">${esc(d.invoice_ref)}</span>
-      <span class="tag" style="background:#f0eee9;color:#666;font-weight:700;font-size:10px" title="Reference recorded, no PDF uploaded">NO PDF</span>`;
+    if (has_ref) return `<span class="mono hint">${esc(d.invoice_ref)}</span>`;
     if (has_pdf) return `<span class="tag" style="background:#fdf5f5;color:#dc2626;font-weight:700" title="A PDF is attached but the invoice reference is missing">⚠️ REFERENCE MISSING</span>`;
     return `<span class="tag" style="background:#fff7ed;color:#d97706;font-weight:700">⏳ AWAITING INVOICE</span>`;
   };
