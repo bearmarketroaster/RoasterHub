@@ -468,7 +468,7 @@ async function retire_bucket(id) {
   render();
 }
 
-async function restore_bucket(id) {
+async function unretire_bucket(id) {
   await supabaseClient.from("buckets").update({ retired_at: null }).eq("id", id);
   await load_buckets();
   render();
@@ -841,7 +841,7 @@ function test_qr(raw) {
   setTimeout(() => document.getElementById("qr-test-input")?.focus(), 50);
 }
 
-async function restore_bucket(raw, name) {
+async function restore_bucket_by_scan(raw, name) {
   const v = String(raw || "").trim();
   if (!v) return;
   const m = v.match(/BKT-[A-Za-z0-9]+/i);
@@ -1881,8 +1881,8 @@ function attach_listeners() {
   app.querySelector("#qr-test-btn")?.addEventListener("click", () => { test_qr(document.getElementById("qr-test-input")?.value ?? state.ui.qr_test); });
   app.querySelector("#qr-test-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); test_qr(e.target.value); } });
   app.querySelector("#bucket-restore-name")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); document.getElementById("bucket-restore-input")?.focus(); } });
-  app.querySelector("#bucket-restore-btn")?.addEventListener("click", () => restore_bucket(document.getElementById("bucket-restore-input")?.value ?? state.ui.restore_code, document.getElementById("bucket-restore-name")?.value ?? state.ui.restore_name));
-  app.querySelector("#bucket-restore-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); restore_bucket(e.target.value, document.getElementById("bucket-restore-name")?.value ?? state.ui.restore_name); } });
+  app.querySelector("#bucket-restore-btn")?.addEventListener("click", () => restore_bucket_by_scan(document.getElementById("bucket-restore-input")?.value ?? state.ui.restore_code, document.getElementById("bucket-restore-name")?.value ?? state.ui.restore_name));
+  app.querySelector("#bucket-restore-input")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); restore_bucket_by_scan(e.target.value, document.getElementById("bucket-restore-name")?.value ?? state.ui.restore_name); } });
   app.querySelector("#bucket-restore-clear")?.addEventListener("click", () => { state.restore_log = []; render(); });
   app.querySelectorAll("[data-bucket-filter]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.bucket_filter = btn.dataset.bucketFilter;
@@ -1892,7 +1892,7 @@ function attach_listeners() {
     retire_bucket(btn.dataset.retireBucket);
   }));
   app.querySelectorAll("[data-restore-bucket]").forEach(btn => btn.addEventListener("click", () => {
-    restore_bucket(btn.dataset.restoreBucket);
+    unretire_bucket(btn.dataset.restoreBucket);
   }));
   app.querySelectorAll("[data-bucket-name]").forEach(inp => {
     const save = async () => {
