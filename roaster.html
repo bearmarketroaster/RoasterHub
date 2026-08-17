@@ -184,6 +184,7 @@ const state = {
   empty_drums: [],          // [{ id, name, prefix }]
   empty_buckets: [],        // [{ id, name, prefix }]
   green_order: [],          // green stock to reorder: [{ coffee, current_kg, threshold, status }]
+  retired_names: new Set(), // archived coffees still showing because they have stock left to use up
   coffees: [],              // [name]
   plan_items: [],           // persistent roast_plan rows for today: {id, container_id, coffee, coffee_id, batches, seq, status, roast_session_id}
   selected_coffee: null,    // coffee picked for tap-to-assign
@@ -219,7 +220,7 @@ async function load() {
     fetch_all("roast_sessions", "id, container_id, coffee, fill_id, roasted_weight, date, is_test, roast_batches(green_weight)", "date"),
     fetch_all("dispatches", "id, date, shop, dispatch_lines(*)", "date"),
     fetch_all("buckets", "id, name, coffee, fill_id, status, retired_at, created_at", "created_at"),
-    supabaseClient.from("coffees").select("name").then(r => r.data || []),
+    supabaseClient.from("coffees").select("name, retired_at").then(r => (r.data || []).filter(c => !c.retired_at)),
     supabaseClient.from("fp_codes").select("fp_code, coffees(name)").then(r => r.data || []),
     // Green on hand comes from v_green_stock — the sum of green_movements, not a stored figure.
     // Aliased to the old column names so the reorder logic below is untouched.
@@ -309,7 +310,15 @@ async function load() {
     .map(d => ({ ...d, max: max_roasts(d.prefix) }))
     .sort((a, b) => size_rank(a.prefix) - size_rank(b.prefix) || a.id.localeCompare(b.id));
   state.empty_buckets = empty_buckets;
-  state.coffees = [...new Set([...(coffees || []).map(c => c.name), ...Object.keys(on_hand), ...Object.keys(usage)])].filter(Boolean).sort();
+  // Active coffees, plus any retired one that still has roasted stock in a drum or moved during
+  // the window — those are real and need finishing. A retired coffee with neither is dropped.
+  const active_names = new Set((coffees || []).map(c => c.name));
+  state.coffees = [...new Set([
+    ...active_names,
+    ...Object.keys(on_hand).filter(n => (on_hand[n] || 0) > 0.05),
+    ...Object.keys(usage).filter(n => (usage[n] || 0) > 0),
+  ])].filter(Boolean).sort();
+  state.retired_names = new Set([...state.coffees].filter(n => !active_names.has(n)));
 
   // Green stock to order — mirror the Stock page: out = 0kg, low = below the line's threshold (default 20kg).
   state.green_order = (stock_items || [])
@@ -372,7 +381,7 @@ function render() {
     const sel = state.selected_coffee === r.coffee;
     const cover = r.cover === Infinity ? "—" : r.cover === 0 ? "OUT" : `${r.cover.toFixed(1)}d`;
     return `<button class="prio ${sel ? "sel" : ""}" data-pick="${esc(r.coffee)}" style="--c:${SCOL[r.status]}">
-      <div class="prio-top"><span class="prio-name">${esc(r.coffee)}</span><span class="prio-badge" style="background:${SCOL[r.status]}">${SLAB[r.status]}</span></div>
+      <div class="prio-top"><span class="prio-name">${esc(r.coffee)}${state.retired_names.has(r.coffee)?` <span style="font-size:10px;color:#999;font-weight:600">ARCHIVED</span>`:""}</span><span class="prio-badge" style="background:${SCOL[r.status]}">${SLAB[r.status]}</span></div>
       <div class="prio-cover">${cover === "OUT" ? `<strong style="color:#dc2626">NEEDS ROASTING</strong>` : cover === "—" ? `<span style="color:#bbb">no demand</span>` : `<strong>${cover}</strong> cover · ${kg(r.on_hand)} on hand`}</div>
       <div class="prio-sub">${r.per_day > 0 ? kg(r.per_day) + "/day" : "no recent use"}${r.bucket ? ` · +${kg(r.bucket)} in buckets` : ""}</div>
       ${r.suggest > 0 ? `<div class="prio-rec">↳ roast ${r.suggest_roasts ? `≈${r.suggest_roasts} batch${r.suggest_roasts != 1 ? "es" : ""}` : `~${r.suggest}kg`}</div>` : ""}
