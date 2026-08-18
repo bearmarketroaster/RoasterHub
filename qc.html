@@ -68,10 +68,34 @@ const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.
 
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function today_iso() { return new Date().toISOString().split("T")[0]; }
+// Same shape as gen_id() in stock.html: PREFIX-YYYYMMDD-HEX
+function gen_id(prefix) {
+  const r = crypto.randomUUID().split("-")[0].toUpperCase();
+  return `${prefix}-${today_iso().replace(/-/g,"")}-${r}`;
+}
+function new_sample_form() {
+  return {
+    supplier: "",
+    supplier_green_reference: "",
+    origin: "",
+    process: "",
+    additional_info: "",
+    sample_roaster_roast_id: "",
+    roasted_on: today_iso(),
+    // File objects are staged here the moment they are chosen. A file input cannot
+    // be repopulated after a re-render, so reading it at save time would lose the
+    // pick as soon as any other field caused render().
+    sample_photo_file: null,
+    profile_photo_file: null,
+    saving: false,
+    err: "",
+    ok: false,
+  };
+}
 
 const state = {
   loaded: false,
-  active_tab: "green",                 // "green" | "roasted"
+  active_tab: "green",                 // "green" | "samples" | "roasted"
   qc_entries: [],                      // green QC log
   in_stock_greens: [],                 // derived: green coffees with positive stock, sorted by recency
   green_form: {
@@ -86,8 +110,12 @@ const state = {
     err: "",
     ok: false,
   },
-  filter_coffee: "all",                // for the log table
+  filter_coffee: "all",                // for the green log table
+  samples: [],                         // sample_roasts rows, newest first
+  sample_form: null,                   // set on first render via new_sample_form()
+  filter_supplier: "all",              // for the sample roast log
 };
+state.sample_form = new_sample_form();
 
 (async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
@@ -119,6 +147,14 @@ async function load() {
     .order("measured_at", { ascending: false })
     .order("created_at", { ascending: false });
   state.qc_entries = qc || [];
+
+  // Sample roasts. Offer samples we may not own, so no join to coffees or green stock.
+  const { data: samples } = await supabaseClient
+    .from("sample_roasts")
+    .select("*")
+    .order("roasted_on", { ascending: false })
+    .order("created_at", { ascending: false });
+  state.samples = samples || [];
 
   state.loaded = true;
 }
@@ -196,11 +232,14 @@ function render() {
 
     <div class="tabs">
       <button class="tab-btn ${state.active_tab==="green"?"active":""}" data-tab="green">🌱 Green</button>
+      <button class="tab-btn ${state.active_tab==="samples"?"active":""}" data-tab="samples">📮 Sample Roasts</button>
       <button class="tab-btn ${state.active_tab==="roasted"?"active":""}" data-tab="roasted">🔥 Roasted</button>
     </div>
 
     <div class="content">
-      ${state.active_tab === "green" ? build_green_tab() : build_roasted_tab()}
+      ${state.active_tab === "green" ? build_green_tab()
+        : state.active_tab === "samples" ? build_samples_tab()
+        : build_roasted_tab()}
     </div>
   `;
   attach_listeners();
@@ -316,6 +355,202 @@ function build_green_tab() {
   `;
 }
 
+// ── SAMPLE ROASTS ──────────────────────────────────────────────────────────
+// Offer samples roasted on the sample roaster. Not linked to coffees or to green
+// stock: most of these are lots we do not own and may never buy, so there is no
+// stock to consume. Drawing a sample from a lot we DO own is a different act,
+// handled by the 'sample' kind in green_movements from stock.html.
+
+const SAMPLE_BUCKET = "samples";
+
+async function save_sample_roast() {
+  const f = state.sample_form;
+  if (!f.supplier.trim())  { f.err = "Enter a supplier."; render(); return; }
+  if (!f.roasted_on)       { f.err = "Enter the date roasted."; render(); return; }
+
+  f.saving = true; f.err = ""; f.ok = false; render();
+
+  const id = gen_id("SR");
+
+  // Upload staged photos first. If either fails, nothing is inserted — better a
+  // retry than a row pointing at an image that was never stored.
+  const paths = { sample_photo_path: null, profile_photo_path: null };
+  for (const [key, col] of [["sample_photo_file","sample_photo_path"], ["profile_photo_file","profile_photo_path"]]) {
+    const file = f[key];
+    if (!file) continue;
+    const safe_name = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+    const path = `${id}/${col === "sample_photo_path" ? "sample" : "profile"}-${safe_name}`;
+    const { error: up_err } = await supabaseClient.storage.from(SAMPLE_BUCKET).upload(path, file);
+    if (up_err) {
+      f.saving = false;
+      f.err = `Failed to upload ${col === "sample_photo_path" ? "sample" : "profile"} photo: ${up_err.message}`;
+      render();
+      return;
+    }
+    paths[col] = path;
+  }
+
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const payload = {
+    id,
+    supplier: f.supplier.trim(),
+    supplier_green_reference: f.supplier_green_reference.trim() || null,
+    origin: f.origin.trim() || null,
+    process: f.process.trim() || null,
+    additional_info: f.additional_info.trim() || null,
+    sample_roaster_roast_id: f.sample_roaster_roast_id.trim() || null,
+    roasted_on: f.roasted_on,
+    sample_photo_path: paths.sample_photo_path,
+    profile_photo_path: paths.profile_photo_path,
+    created_by: user?.id || null,
+  };
+
+  const { data, error } = await supabaseClient.from("sample_roasts").insert(payload).select().single();
+  if (error) {
+    f.saving = false;
+    f.err = "Save failed: " + error.message;
+    render();
+    return;
+  }
+
+  state.samples.unshift(data);
+  state.sample_form = new_sample_form();
+  state.sample_form.ok = true;
+  render();
+  setTimeout(() => {
+    if (state.sample_form.ok) { state.sample_form.ok = false; render(); }
+  }, 2000);
+}
+
+async function delete_sample_roast(id) {
+  const row = state.samples.find(s => s.id === id);
+  if (!row) return;
+  if (!confirm(`Delete sample roast ${id}?${row.sample_photo_path || row.profile_photo_path ? " Its photos will be removed too." : ""}`)) return;
+
+  // Remove the images first, or they orphan in the bucket with nothing referencing them.
+  const paths = [row.sample_photo_path, row.profile_photo_path].filter(Boolean);
+  if (paths.length) await supabaseClient.storage.from(SAMPLE_BUCKET).remove(paths);
+
+  const { error } = await supabaseClient.from("sample_roasts").delete().eq("id", id);
+  if (error) { alert("Delete failed: " + error.message); return; }
+  state.samples = state.samples.filter(s => s.id !== id);
+  render();
+}
+
+// The bucket is private, so a path is not a URL. Sign it on demand rather than
+// signing every row on render — most are never opened.
+async function open_sample_photo(path) {
+  const { data, error } = await supabaseClient.storage.from(SAMPLE_BUCKET).createSignedUrl(path, 60);
+  if (error || !data?.signedUrl) { alert("Could not open the image: " + (error?.message || "unknown error")); return; }
+  window.open(data.signedUrl, "_blank");
+}
+
+function build_samples_tab() {
+  const f = state.sample_form;
+  const log = state.samples.slice();
+  const suppliers = [...new Set(log.map(s => s.supplier).filter(Boolean))].sort();
+  const filtered = state.filter_supplier === "all" ? log : log.filter(s => s.supplier === state.filter_supplier);
+  const dash = v => (v === null || v === undefined || v === "") ? "—" : esc(v);
+
+  // A staged file cannot be shown in the input after a re-render, so its name is
+  // echoed beside the control to make clear the pick survived.
+  const staged = (file, id, label) => `
+    <div>
+      <label class="lbl">${label}</label>
+      <input type="file" id="${id}" accept="image/*" />
+      ${file ? `<p class="hint" style="font-size:11px;margin-top:4px;color:#16a34a">✓ ${esc(file.name)} ready to upload</p>`
+              : `<p class="hint" style="font-size:11px;margin-top:4px">Optional</p>`}
+    </div>`;
+
+  return `
+    <div class="card">
+      <div class="section-label">Log a sample roast</div>
+      <div class="grid-2" style="margin-bottom:12px">
+        <div>
+          <label class="lbl">Supplier *</label>
+          <input type="text" id="sr-supplier" value="${esc(f.supplier)}" placeholder="e.g. Caravela" />
+        </div>
+        <div>
+          <label class="lbl">Supplier green reference</label>
+          <input type="text" id="sr-ref" value="${esc(f.supplier_green_reference)}" placeholder="Their offer or lot ref" />
+        </div>
+      </div>
+      <div class="grid-3" style="margin-bottom:12px">
+        <div>
+          <label class="lbl">Origin</label>
+          <input type="text" id="sr-origin" value="${esc(f.origin)}" placeholder="e.g. Chirinos, Cajamarca" />
+        </div>
+        <div>
+          <label class="lbl">Process</label>
+          <input type="text" id="sr-process" value="${esc(f.process)}" placeholder="e.g. Washed, Natural" />
+        </div>
+        <div>
+          <label class="lbl">Date roasted *</label>
+          <input type="date" id="sr-date" value="${esc(f.roasted_on)}" />
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">Sample roaster roast ID</label>
+        <input type="text" id="sr-roast-id" value="${esc(f.sample_roaster_roast_id)}" placeholder="Roast ID from the sample roaster" />
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">Additional info</label>
+        <textarea id="sr-info" placeholder="Variety, altitude, producer, sample condition, anything else worth keeping…">${esc(f.additional_info)}</textarea>
+      </div>
+      <div class="grid-2" style="margin-bottom:12px">
+        ${staged(f.sample_photo_file, "sr-photo-sample", "Photo of the sample")}
+        ${staged(f.profile_photo_file, "sr-photo-profile", "Photo of the roast profile")}
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn btn-dark" id="sr-save-btn" ${f.saving?"disabled":""}>${f.saving?"Saving…":"💾 Save sample roast"}</button>
+        ${f.ok ? `<span class="ok-msg">✓ Saved</span>` : ""}
+        ${f.err ? `<span class="err">${esc(f.err)}</span>` : ""}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">Sample Roasts (${log.length})</div>
+      ${log.length === 0 ? '<p class="hint" style="font-style:italic">No sample roasts logged yet.</p>' : `
+        <div class="filters">
+          <select id="filter-supplier">
+            <option value="all">All suppliers</option>
+            ${suppliers.map(s => `<option value="${esc(s)}" ${state.filter_supplier===s?"selected":""}>${esc(s)}</option>`).join("")}
+          </select>
+          <span class="hint">${filtered.length} sample${filtered.length===1?"":"s"}</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr>
+              <th>Roasted</th><th>ID</th><th>Supplier</th><th>Their ref</th>
+              <th>Origin</th><th>Process</th><th>Roaster ID</th>
+              <th>Info</th><th>Photos</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${filtered.map(s => `
+                <tr>
+                  <td>${esc(s.roasted_on)}</td>
+                  <td style="font-family:monospace;font-size:11px">${esc(s.id)}</td>
+                  <td style="font-weight:600">${dash(s.supplier)}</td>
+                  <td>${dash(s.supplier_green_reference)}</td>
+                  <td>${dash(s.origin)}</td>
+                  <td>${dash(s.process)}</td>
+                  <td>${dash(s.sample_roaster_roast_id)}</td>
+                  <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.additional_info||"")}">${esc(s.additional_info||"")}</td>
+                  <td style="white-space:nowrap">
+                    ${s.sample_photo_path ? `<button class="btn btn-ghost btn-sm" data-photo="${esc(s.sample_photo_path)}" title="Photo of the sample">📷</button>` : ""}
+                    ${s.profile_photo_path ? `<button class="btn btn-ghost btn-sm" data-photo="${esc(s.profile_photo_path)}" title="Photo of the roast profile">📈</button>` : ""}
+                    ${!s.sample_photo_path && !s.profile_photo_path ? `<span class="hint">—</span>` : ""}
+                  </td>
+                  <td><button class="delete-btn" data-delete-sample="${esc(s.id)}" title="Delete">✕</button></td>
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      `}
+    </div>
+  `;
+}
+
 function build_roasted_tab() {
   return `
     <div class="card">
@@ -362,6 +597,44 @@ function attach_listeners() {
   // Delete entry
   document.querySelectorAll("[data-delete-id]").forEach(btn => btn.addEventListener("click", () => {
     delete_qc_entry(btn.dataset.deleteId);
+  }));
+
+  // ── Sample roast form ────────────────────────────────────────────────────
+  // Every field writes to state on input, or its value is lost the moment
+  // anything else triggers render().
+  const bind_sr = (id, key) => document.getElementById(id)
+    ?.addEventListener("input", e => { state.sample_form[key] = e.target.value; });
+  bind_sr("sr-supplier", "supplier");
+  bind_sr("sr-ref",      "supplier_green_reference");
+  bind_sr("sr-origin",   "origin");
+  bind_sr("sr-process",  "process");
+  bind_sr("sr-date",     "roasted_on");
+  bind_sr("sr-roast-id", "sample_roaster_roast_id");
+  bind_sr("sr-info",     "additional_info");
+
+  // File inputs cannot be repopulated after a re-render, so the File object is
+  // staged in state on change and read from there at save time.
+  const bind_file = (id, key) => document.getElementById(id)
+    ?.addEventListener("change", e => {
+      state.sample_form[key] = e.target.files?.[0] || null;
+      render();
+    });
+  bind_file("sr-photo-sample",  "sample_photo_file");
+  bind_file("sr-photo-profile", "profile_photo_file");
+
+  document.getElementById("sr-save-btn")?.addEventListener("click", save_sample_roast);
+
+  document.getElementById("filter-supplier")?.addEventListener("change", e => {
+    state.filter_supplier = e.target.value;
+    render();
+  });
+
+  document.querySelectorAll("[data-photo]").forEach(btn => btn.addEventListener("click", () => {
+    open_sample_photo(btn.dataset.photo);
+  }));
+
+  document.querySelectorAll("[data-delete-sample]").forEach(btn => btn.addEventListener("click", () => {
+    delete_sample_roast(btn.dataset.deleteSample);
   }));
 }
 </script>
