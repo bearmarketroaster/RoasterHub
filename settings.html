@@ -630,7 +630,7 @@ async function retire_coffee(coffee_id) {
   // Cascade: retire all currently-active FP codes
   if (active_fps.length > 0) {
     const active_fp_ids = active_fps.map(f => f.id);
-    const { error: fe } = await supabaseClient.from("fp_codes").update({ retired_at: now }).in("id", active_fp_ids);
+    const { error: fe } = await supabaseClient.from("fp_codes").update({ retired_at: now, retired_by: state.current_user?.id || null }).in("id", active_fp_ids);
     if (fe) { alert("Coffee retired, but failed to retire its FP codes: " + fe.message); render(); return; }
     coffee.fp_codes.forEach(f => { if (active_fp_ids.includes(f.id)) f.retired_at = now; });
     // Close each code's open version (per-version retirement).
@@ -677,7 +677,7 @@ async function retire_fp_code(coffee_id, fp_id) {
   const msg = `You are about to retire FP code "${fp.fp_code}" (${fp.bag_size}).\n\nRetired FP codes stay in reports but are hidden from packing, printing, and label workflows.\n\nAre you sure?`;
   if (!confirm(msg)) return;
   const now = new Date().toISOString();
-  const { error } = await supabaseClient.from("fp_codes").update({ retired_at: now }).eq("id", fp_id);
+  const { error } = await supabaseClient.from("fp_codes").update({ retired_at: now, retired_by: state.current_user?.id || null }).eq("id", fp_id);
   if (error) { alert("Failed to retire FP code: " + error.message); return; }
   fp.retired_at = now;
   await close_open_assignment(fp.fp_code);
