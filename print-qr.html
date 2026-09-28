@@ -98,6 +98,7 @@
       max-width: 37mm;     /* wider now the QR is 20mm, so long names fit */
       word-break: break-word;
     }
+    body.mode-a4_21 .bag-label.no-qr .bl-name { max-width: 58mm; }  /* QR hidden — name can use the full width */
     body.mode-a4_21 .bag-label .bl-roast {
       font-weight: 700;
       font-size: 7pt;
@@ -299,7 +300,7 @@
         <label>FP Code</label>
         <select id="a4-21-fp-select" style="min-width:240px"></select>
         <label style="display:flex;align-items:center;gap:5px;margin-left:6px;cursor:pointer;color:#ccc">
-          <input type="checkbox" id="hide-price-toggle" style="width:auto;margin:0" /> Hide pricing
+          <input type="checkbox" id="hide-price-toggle" style="width:auto;margin:0" /> Hide QR &amp; price
         </label>
       </div>
       <button class="btn-print" id="print-btn">🖨️ Print All</button>
@@ -628,7 +629,7 @@
       const flavours = [label_data.flavour_1, label_data.flavour_2, label_data.flavour_3].filter(Boolean).join(" · ");
       const origin_lines = [label_data.region, label_data.process, label_data.altitude].filter(Boolean);
       const label_inner = `
-          <div class="bl-qr" data-value="${esc_attr(fp_code)}"></div>
+          ${!state.hide_price ? `<div class="bl-qr" data-value="${esc_attr(fp_code)}"></div>` : ""}
           <div class="bl-name">${esc(fp.coffee_name || "")}</div>
           ${label_data.roast_type ? `<div class="bl-roast">${esc(label_data.roast_type)}</div>` : ""}
           ${origin_lines.length ? `<div class="bl-origin">${origin_lines.map(l => esc(l)).join("<br>")}</div>` : ""}
@@ -644,14 +645,17 @@
         const col = i % 3;
         const top_mm  = 15.15 + row * 38.1;
         const left_mm = 7.21  + col * 66.04;
-        all_labels.push(`<div class="bag-label" style="top:${top_mm}mm;left:${left_mm}mm">${label_inner}</div>`);
+        all_labels.push(`<div class="bag-label${state.hide_price ? " no-qr" : ""}" style="top:${top_mm}mm;left:${left_mm}mm">${label_inner}</div>`);
       }
       grid.innerHTML = `<div class="a4-sheet">${all_labels.join("")}</div>`;
 
       // One plain QR for this coffee (FP code encoded), cloned into all 21 label slots.
-      qr_dataurl(fp_code).then(dataurl => {
-        grid.querySelectorAll(".bl-qr").forEach(el => { el.innerHTML = `<img src="${dataurl}" alt="QR" />`; });
-      });
+      // Skipped entirely when "Hide QR & price" is on.
+      if (!state.hide_price) {
+        qr_dataurl(fp_code).then(dataurl => {
+          grid.querySelectorAll(".bl-qr").forEach(el => { el.innerHTML = `<img src="${dataurl}" alt="QR" />`; });
+        });
+      }
     }
 
     // ── Plain QR: encode `text`, return a high-res PNG data URL. (Centre-image feature removed.)
