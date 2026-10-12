@@ -361,28 +361,22 @@ async function invite_user(email, role) {
     render(); return;
   }
 
-  // Insert pending invite (the trigger will create user_roles on signup)
-  const { error: inv_err } = await supabaseClient.from("pending_invites").insert({ email, role, invited_by: state.current_user.id });
-  if (inv_err) { state.ui.user_err = inv_err.message; render(); return; }
-
-  // Trigger the Supabase signup confirmation email
-  const redirect_url = window.location.origin + window.location.pathname.replace(/[^/]*$/, "") + "login.html?mode=set_password";
-  const { error: sup_err } = await supabaseClient.auth.signUp({
-    email,
-    password: crypto.randomUUID(),  // random temp password — user resets via email link
-    options: { emailRedirectTo: redirect_url },
-  });
-  if (sup_err) {
-    // Roll back the pending invite if signup failed
-    await supabaseClient.from("pending_invites").delete().eq("email", email);
-    state.ui.user_err = sup_err.message;
+  // Public sign-up is switched off, so invites go through the invite-user Edge Function
+  // (supabase/functions/invite-user). It checks we're an admin, records the role and
+  // sends the invite email; the handle_new_user trigger then assigns the role.
+  const { data, error } = await supabaseClient.functions.invoke("invite-user", { body: { email, role } });
+  if (error) {
+    // A refusal arrives as an error; the function's own explanation is in its JSON body
+    let msg = null;
+    try { msg = (await error.context.json()).error; } catch (_) {}
+    state.ui.user_err = msg || "Couldn't send the invite. Please try again.";
     render(); return;
   }
 
   state.ui.new_user_email = "";
   state.ui.new_user_role = "viewer";
   state.ui.user_err = "";
-  state.ui.user_msg = `Invitation sent to ${email}.`;
+  state.ui.user_msg = data?.message || `Invitation sent to ${email}.`;
   await load_users();
   render();
   setTimeout(() => { state.ui.user_msg = ""; render(); }, 5000);
