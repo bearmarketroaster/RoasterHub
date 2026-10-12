@@ -64,6 +64,10 @@
     .muted-list h3 { font-size: 13px; margin-bottom: 8px; color: #555; }
     .muted-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: #666; border-bottom: 1px solid #f4f2ed; }
     .muted-row:last-child { border-bottom: none; }
+    /* Phones: let the header wrap rather than run off the screen */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+    }
   </style>
 </head>
 <body>

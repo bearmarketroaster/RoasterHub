@@ -67,6 +67,12 @@
       .content { padding: 16px; }
       .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
     }
+    /* Phones: let the header wrap rather than run off the screen, and use 16px form
+       text - iPhones zoom the page in when a smaller field is tapped */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+      input, select, textarea { font-size: 16px !important; }
+    }
   </style>
 </head>
 <body>
@@ -356,7 +362,7 @@ function build_measure_inputs(kind, m) {
       <label class="lbl">${label} (${unit})</label>
       <div class="readings-row">
         ${state.forms[kind].readings[m].map((v, i) => `
-          <input type="number" step="${step}" min="0" data-reading="${kind}|${m}|${i}" value="${esc(v)}" placeholder="${i === 0 ? placeholder : `#${i + 1}`}" />`).join("")}
+          <input type="number" inputmode="decimal" step="${step}" min="0" data-reading="${kind}|${m}|${i}" value="${esc(v)}" placeholder="${i === 0 ? placeholder : `#${i + 1}`}" />`).join("")}
       </div>
       <div class="measure-avg" id="avg-${kind}-${m}">${live_avg_text(kind, m)}</div>
     </div>`;

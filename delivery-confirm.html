@@ -38,6 +38,10 @@
     .btn-confirm-row { padding: 10px 16px; white-space: nowrap; }
     .footer-msg { text-align: center; color: #999; font-size: 12px; margin-top: 24px; }
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+    /* Phones: 16px form text - iPhones zoom the page in when a smaller field is tapped */
+    @media (max-width: 600px) {
+      input, select, textarea { font-size: 16px !important; }
+    }
   </style>
 </head>
 <body>

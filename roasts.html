@@ -63,10 +63,23 @@
     .empty { text-align: center; color: #999; padding: 40px 20px; }
     .empty .icon { font-size: 36px; margin-bottom: 8px; }
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
+    .header-actions { display: flex; gap: 8px; align-items: center; }
     @media (max-width: 600px) {
       .grid-2 { grid-template-columns: 1fr; }
       .content { padding: 16px; }
       .steps .step { font-size: 10px; padding: 8px 4px; }
+      .stat-grid { grid-template-columns: 1fr 1fr; }
+      /* Actions drop to their own full-width row under the title */
+      .header { padding: 12px 16px; }
+      .header-actions { width: 100%; }
+      .header-actions .btn { flex: 1; }
+    }
+    /* Phones: let the header wrap rather than run off the screen, and use 16px form
+       text - iPhones zoom the page in when a smaller field is tapped */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+      input, select, textarea { font-size: 16px !important; }
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -236,7 +249,7 @@ function build_app() {
         <div><div class="header-title">🔥 Roasts</div><div class="header-sub">Bear Mrkt</div></div>
       </div>
       ${state.view==="home" ? `
-        <div style="display:flex;gap:8px;align-items:center">
+        <div class="header-actions">
           <button class="btn btn-ghost btn-sm" id="go-history">History</button>
           <button class="btn btn-dark" id="start-new">+ New Roast</button>
           <button class="btn-logout" id="logout-btn">Log Out</button>
@@ -251,7 +264,7 @@ function build_home() {
   const total_green = sessions.reduce((s,r) => s+r.batches.reduce((bs,b) => bs+(Number(b.green_weight)||0),0), 0);
   const total_roasted = sessions.reduce((s,r) => s+(Number(r.roasted_weight)||0), 0);
   const stats_html = `
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px">
+    <div class="stat-grid">
       ${[{icon:"🔥",label:"Sessions",value:sessions.length},{icon:"🌱",label:"Total Green In",value:`${total_green.toFixed(1)}kg`},{icon:"⚖️",label:"Total Roasted",value:`${total_roasted.toFixed(1)}kg`},{icon:"☕",label:"Coffees",value:new Set(sessions.map(r=>r.coffee)).size}]
         .map(({icon,label,value}) => `<div class="card" style="text-align:center;padding:14px 10px;margin-bottom:0"><div style="font-size:22px;margin-bottom:4px">${icon}</div><div style="font-size:20px;font-weight:700">${value}</div><div style="font-size:11px;color:#666;margin-top:2px">${label}</div></div>`).join("")}
     </div>`;
@@ -332,8 +345,8 @@ function build_step1() {
           ${state.containers.length === 0 ? '<p class="hint" style="font-size:11px;margin-top:4px;color:#dc2626">No containers yet — add some in Settings → Containers.</p>' : ""}
         </div>`}
         ${s.is_test
-          ? `<div><label class="lbl">Number of Batches</label><input type="number" value="1" disabled style="background:#f4f2ed;color:#666" /><p class="hint" style="font-size:11px;margin-top:4px">Test roasts are limited to 1 batch. Log more as separate sessions.</p></div>`
-          : `<div><label class="lbl">Number of Batches *</label><input type="number" id="s1-count" value="${s.batch_count}" min="1" max="20" /></div>`}
+          ? `<div><label class="lbl">Number of Batches</label><input type="number" inputmode="decimal" value="1" disabled style="background:#f4f2ed;color:#666" /><p class="hint" style="font-size:11px;margin-top:4px">Test roasts are limited to 1 batch. Log more as separate sessions.</p></div>`
+          : `<div><label class="lbl">Number of Batches *</label><input type="number" inputmode="decimal" id="s1-count" value="${s.batch_count}" min="1" max="20" /></div>`}
       </div>
       <p id="s1-err" class="err" style="display:none"></p>
       <div style="display:flex;gap:8px;margin-top:16px">
@@ -354,7 +367,7 @@ function build_step2() {
       </div>
       <div class="grid-2">
         <div><label class="lbl">Cropster Roast ID *</label><input class="b-id" data-idx="${i}" value="${esc(b.cropster_id)}" placeholder="e.g. 42" /></div>
-        <div><label class="lbl">Green Weight In (kg) *</label><input type="number" class="b-green" data-idx="${i}" value="${b.green_weight}" placeholder="0.0" step="0.1" /></div>
+        <div><label class="lbl">Green Weight In (kg) *</label><input type="number" inputmode="decimal" class="b-green" data-idx="${i}" value="${b.green_weight}" placeholder="0.0" step="0.1" /></div>
       </div>
     </div>`).join("");
   return `
@@ -408,13 +421,13 @@ function build_step3() {
       <div style="margin-bottom:16px">
         ${has_empty ? `
           <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Gross Weight on Scale (kg) — container + coffee</label>
-          <input type="number" id="s3-gross" class="big" value="${state.ui.gross_weight || ""}" placeholder="0.0" step="0.1" />
+          <input type="number" inputmode="decimal" id="s3-gross" class="big" value="${state.ui.gross_weight || ""}" placeholder="0.0" step="0.1" />
           <div style="text-align:center;font-size:13px;color:#666;margin-top:8px">
             Container empty: <strong>${Number(empty_kg).toFixed(2)}kg</strong>${state.ui.gross_weight ? ` · Net roasted: <strong style="color:#1a1a1a">${Math.max(0, Number(state.ui.gross_weight) - Number(empty_kg)).toFixed(2)}kg</strong>` : ""}
           </div>
         ` : `
           <label class="lbl" style="font-size:15px;color:#333;margin-bottom:8px">Roasted Weight ${s.is_test ? "" : `of ${esc(s.container_id)}`} (kg)</label>
-          <input type="number" id="s3-roasted" class="big" value="${s.roasted_weight}" placeholder="0.0" step="0.1" />
+          <input type="number" inputmode="decimal" id="s3-roasted" class="big" value="${s.roasted_weight}" placeholder="0.0" step="0.1" />
         `}
       </div>
       <div id="yield-display" style="text-align:center;font-size:15px;margin-bottom:16px;min-height:22px">

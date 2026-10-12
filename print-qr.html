@@ -264,6 +264,10 @@
       body.mode-a4_21 .a4-sheet:last-child { page-break-after: auto; break-after: auto; }
       body.mode-a4_21 .bag-label { border: none !important; }
     }
+    /* Phones: 16px form text - iPhones zoom the page in when a smaller field is tapped */
+    @media (max-width: 600px) {
+      input, select, textarea { font-size: 16px !important; }
+    }
   </style>
 </head>
 <body class="mode-single">
@@ -287,7 +291,7 @@
       </select>
       <div id="size-controls" style="display:none;align-items:center;gap:8px">
         <label>Size (mm)</label>
-        <input type="number" id="size-input" value="38" min="10" max="120" step="1" style="width:64px" />
+        <input type="number" inputmode="decimal" id="size-input" value="38" min="10" max="120" step="1" style="width:64px" />
         <div style="display:flex;gap:4px">
           <button class="size-preset" data-size="20">20</button>
           <button class="size-preset" data-size="30">30</button>

@@ -83,7 +83,21 @@
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
     details summary { font-size: 12px; color: #999; cursor: pointer; list-style: none; }
     details summary::-webkit-details-marker { display: none; }
-    @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .grid-4 { grid-template-columns: 1fr 1fr; } .content { padding: 16px; } }
+    @media (max-width: 600px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .grid-4 { grid-template-columns: 1fr 1fr; }
+      .content { padding: 16px; }
+      /* Rooms stack on a phone: no tall empty drop areas, and no drag-only Empty column
+         (Active drums have their own Empty button) */
+      .room-col { min-height: 0 !important; }
+      .room-drop-only { display: none; }
+    }
+    /* Phones: let the header wrap rather than run off the screen, and use 16px form
+       text - iPhones zoom the page in when a smaller field is tapped */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+      input, select, textarea { font-size: 16px !important; }
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
@@ -531,7 +545,7 @@ function build_app() {
   if (state.ui.fill_bucket_container) return build_fill_buckets_overlay();
   if (state.ui.bucket_return_open) return build_bucket_return_overlay();
   if (state.ui.empty_choice) return build_empty_choice_overlay();
-  const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Mrkt</div></div></div><div style="display:flex;align-items:center;gap:10px"><button id="lang-toggle" style="background:none;border:1px solid #888;color:#1a1a1a;border-radius:6px;padding:5px 12px;font-size:14px;font-weight:700;cursor:pointer">${LANG==="uk"?"УКР ▾":"EN ▾"}</button><button class="btn-logout" id="logout-btn">Log Out</button></div></div>`;
+  const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Mrkt</div></div></div><div style="display:flex;align-items:center;gap:10px"><button id="lang-toggle" style="background:none;border:1px solid #666;color:#ccc;border-radius:6px;padding:5px 12px;font-size:14px;font-weight:700;cursor:pointer">${LANG==="uk"?"УКР ▾":"EN ▾"}</button><button class="btn-logout" id="logout-btn">Log Out</button></div></div>`;
   if (state.loading) return header+`<div class="loading">Loading…</div>`;
   const badges={Deliveries:state.dispatches.filter(d=>!d.confirmed_at).length};
   return header+`
@@ -1083,7 +1097,7 @@ function build_rooms_view() {
   };
 
   const col = (title, subtitle, list, dropTarget, accent, bg, placeholder) => `
-    <div data-room-drop="${dropTarget}" style="flex:1;min-width:200px;background:${bg};border:2px dashed ${accent};border-radius:14px;padding:14px;min-height:56vh;transition:background .1s,box-shadow .1s">
+    <div data-room-drop="${dropTarget}" class="room-col${dropTarget === "empty" ? " room-drop-only" : ""}" style="flex:1;min-width:200px;background:${bg};border:2px dashed ${accent};border-radius:14px;padding:14px;min-height:56vh;transition:background .1s,box-shadow .1s">
       <div style="text-align:center;margin-bottom:12px">
         <div style="font-weight:800;font-size:16px;color:${accent}">${title}${list.length?` (${list.length})`:""}</div>
         <div style="font-size:11px;color:#888">${subtitle}</div>
@@ -1093,7 +1107,7 @@ function build_rooms_view() {
 
   return `
     <div class="flex-between mb-16"><h2 style="margin:0">Containers</h2><div class="flex gap-8">${new_dispatch_btn_html()}</div></div>
-    <p style="color:#666;font-size:13px;margin:0 0 14px">Drag a drum between rooms, or use the buttons. <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. To clear a drum, drag it to the red <strong>Empty</strong> column.</p>
+    <p style="color:#666;font-size:13px;margin:0 0 14px">Move drums with the buttons on each card (on a computer you can also drag them). <strong>Filling</strong> is where you fill 5kg buckets; <strong>Active</strong> is where you pack from. To clear a drum, press <strong>🗑️ Empty</strong> on an Active drum or drag it to the red <strong>Empty</strong> column.</p>
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
       ${col("🪣 Filling", "Fill 5kg buckets", filling, "filling", "#2563eb", "#faf9f7", "Drop a drum here")}
       ${col("🏠 Inactive", "Store · waiting", inactive, "waiting", "#d97706", "#faf9f7", "Drop a drum here")}
@@ -1208,12 +1222,12 @@ function build_coffee_select(id, value) {
 }
 
 function build_order_editor(order) {
-  const items_html=order.items.map((item,i)=>`<div style="background:#f4f2ed;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#666">${esc(item.code)}</span><button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px" data-remove-edit-item="${i}">✕</button></div><div class="grid-2"><div><label class="lbl">Description</label><input data-edit-desc="${i}" value="${esc(item.description)}" /></div><div class="grid-2"><div><label class="lbl">Qty</label><input type="number" data-edit-qty="${i}" value="${item.quantity}" /></div><div><label class="lbl">Unit</label><select data-edit-unit="${i}"><option ${item.unit==="EACH"?"selected":""}>EACH</option><option ${item.unit==="KGS"?"selected":""}>KGS</option></select></div></div></div></div>`).join("");
+  const items_html=order.items.map((item,i)=>`<div style="background:#f4f2ed;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#666">${esc(item.code)}</span><button style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px" data-remove-edit-item="${i}">✕</button></div><div class="grid-2"><div><label class="lbl">Description</label><input data-edit-desc="${i}" value="${esc(item.description)}" /></div><div class="grid-2"><div><label class="lbl">Qty</label><input type="number" inputmode="decimal" data-edit-qty="${i}" value="${item.quantity}" /></div><div><label class="lbl">Unit</label><select data-edit-unit="${i}"><option ${item.unit==="EACH"?"selected":""}>EACH</option><option ${item.unit==="KGS"?"selected":""}>KGS</option></select></div></div></div></div>`).join("");
   return `<h2>Edit Order</h2><div class="card mb-16"><div class="grid-2"><div><label class="lbl">Shop Name *</label><input id="edit-shop" value="${esc(order.shop_name)}" /></div><div><label class="lbl">PO Number</label><input id="edit-po" value="${esc(order.po_number||"")}" /></div></div></div><div class="card mb-16"><h3>Line Items</h3><div id="edit-items-list">${items_html}</div></div><div class="flex gap-10"><button class="btn btn-dark btn-lg" id="save-edit-order" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Changes"}</button><button class="btn btn-grey btn-lg" id="cancel-edit-order">Cancel</button></div>`;
 }
 
 function build_manual_order_entry() {
-  return `<h2>Add Order Manually</h2><div class="card mb-16"><h3>Order Details</h3><div class="grid-2"><div><label class="lbl">Shop Name *</label><input id="mo-shop" placeholder="e.g. Bearmarket Stillorgan" /></div><div><label class="lbl">PO Number</label><input id="mo-po" placeholder="e.g. PO008108" /></div><div><label class="lbl">Order Date</label><input id="mo-date" placeholder="e.g. 21 March 2026" /></div></div></div><div class="card mb-16"><h3>Line Items</h3><div id="mo-items"><div class="mo-item" style="background:#f4f2ed;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#666">Item 1</span></div><div class="grid-2"><div><label class="lbl">Description *</label><input class="mo-desc" placeholder="e.g. House Roast 1kg" /></div><div><label class="lbl">Product Code</label><input class="mo-code" placeholder="e.g. FP0030" /></div><div><label class="lbl">Quantity *</label><input type="number" class="mo-qty" placeholder="0" /></div><div><label class="lbl">Unit</label><select class="mo-unit"><option>EACH</option><option>KGS</option></select></div></div></div></div><button class="btn btn-amber" style="width:100%;padding:10px" id="add-mo-item">+ Add Item</button></div><p id="mo-err" class="err" style="display:none;margin-bottom:12px"></p><div class="flex gap-10"><button class="btn btn-dark btn-lg" id="save-manual-order" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Order"}</button><button class="btn btn-grey btn-lg" id="cancel-manual-order">Cancel</button></div>`;
+  return `<h2>Add Order Manually</h2><div class="card mb-16"><h3>Order Details</h3><div class="grid-2"><div><label class="lbl">Shop Name *</label><input id="mo-shop" placeholder="e.g. Bearmarket Stillorgan" /></div><div><label class="lbl">PO Number</label><input id="mo-po" placeholder="e.g. PO008108" /></div><div><label class="lbl">Order Date</label><input id="mo-date" placeholder="e.g. 21 March 2026" /></div></div></div><div class="card mb-16"><h3>Line Items</h3><div id="mo-items"><div class="mo-item" style="background:#f4f2ed;border-radius:8px;padding:12px;margin-bottom:10px"><div class="flex-between mb-8"><span style="font-weight:600;font-size:13px;color:#666">Item 1</span></div><div class="grid-2"><div><label class="lbl">Description *</label><input class="mo-desc" placeholder="e.g. House Roast 1kg" /></div><div><label class="lbl">Product Code</label><input class="mo-code" placeholder="e.g. FP0030" /></div><div><label class="lbl">Quantity *</label><input type="number" inputmode="decimal" class="mo-qty" placeholder="0" /></div><div><label class="lbl">Unit</label><select class="mo-unit"><option>EACH</option><option>KGS</option></select></div></div></div></div><button class="btn btn-amber" style="width:100%;padding:10px" id="add-mo-item">+ Add Item</button></div><p id="mo-err" class="err" style="display:none;margin-bottom:12px"></p><div class="flex gap-10"><button class="btn btn-dark btn-lg" id="save-manual-order" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save Order"}</button><button class="btn btn-grey btn-lg" id="cancel-manual-order">Cancel</button></div>`;
 }
 
 function build_deliveries_tab() {
@@ -1897,7 +1911,7 @@ function build_packing_page(container, fill) {
             <option value="">— ${LANG==="uk"?"Кава для зразка":"Coffee to sample"} —</option>
             ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${kgfloor(c.remaining)}kg)</option>`).join("")}
           </select>
-          <input type="number" id="sample-count" min="1" step="1" value="1" style="width:58px;font-size:14px;padding:9px;text-align:center" />
+          <input type="number" inputmode="decimal" id="sample-count" min="1" step="1" value="1" style="width:58px;font-size:14px;padding:9px;text-align:center" />
           <button class="btn btn-amber btn-sm" id="sample-add">+ ${tr("Add","Додати")}</button>
         </div>
       </div>

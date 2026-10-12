@@ -35,7 +35,16 @@
     .status-active { background: #e7f5ec; color: #16a34a; }
     .module-arrow  { font-size: 18px; color: #999; transition: color 0.15s; }
     .module-card:hover .module-arrow { color: #1a1a1a; }
-    @media (max-width: 600px) { .header { padding: 16px 20px; } .main { padding: 24px 16px; } .module-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 600px) {
+      .header { padding: 14px 16px; }
+      .header-user { display: none; }
+      .main { padding: 24px 16px; }
+      .module-grid { grid-template-columns: 1fr; }
+    }
+    /* Phones: let the header wrap rather than run off the screen */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+    }
   </style>
 </head>
 <body>

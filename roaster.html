@@ -67,8 +67,8 @@
     /* Two-panel split */
     .split { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.4fr); gap: 18px; align-items: start; }
     @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
-    .panel { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-    .panel-h { font-weight: 800; font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .panel { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); min-width: 0; }
+    .panel-h { font-weight: 800; font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
     .panel-hint { font-weight: 400; font-size: 11px; color: #aaa; }
 
     /* Priority coffee cards */
@@ -143,6 +143,10 @@
     .order-meta { display: flex; align-items: center; gap: 10px; font-size: 13px; }
     .order-kg { font-variant-numeric: tabular-nums; font-weight: 600; }
     .order-thr { color: #999; font-size: 12px; }
+    /* Phones: let the header wrap rather than run off the screen */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+    }
   </style>
 </head>
 <body>

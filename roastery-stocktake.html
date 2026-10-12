@@ -81,6 +81,10 @@
     }
     .print-head { display: none; }
     .print-head h1 { font-size: 18pt; margin-bottom: 2px; }
+    /* Phones: let the header wrap rather than run off the screen */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+    }
   </style>
 </head>
 <body>

@@ -80,6 +80,12 @@
     @media (max-width: 500px) { .label-grid { grid-template-columns: 1fr; } }
     .label-input { width: 100%; }
     @media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } .content { padding: 16px; } }
+    /* Phones: let the header wrap rather than run off the screen, and use 16px form
+       text - iPhones zoom the page in when a smaller field is tapped */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+      input, select, textarea { font-size: 16px !important; }
+    }
   </style>
 </head>
 <body>
@@ -971,8 +977,8 @@ function build_buckets_section() {
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#fcfbf9;border-bottom:1px solid #f0eee9;font-size:13px">
           <span style="color:#666;font-weight:600">🖨️ Print range:</span>
           <input id="range-prefix" type="text" value="${esc(state.ui.range_prefix||"")}" placeholder="name has… (e.g. White)" style="font-size:12px;padding:5px 8px;width:140px" />
-          <span style="color:#666">#</span><input id="range-from" type="number" min="1" value="${esc(state.ui.range_from||"")}" placeholder="from" style="font-size:12px;padding:5px 8px;width:60px" />
-          <span style="color:#666">–</span><input id="range-to" type="number" min="1" value="${esc(state.ui.range_to||"")}" placeholder="to" style="font-size:12px;padding:5px 8px;width:60px" />
+          <span style="color:#666">#</span><input id="range-from" type="number" inputmode="decimal" min="1" value="${esc(state.ui.range_from||"")}" placeholder="from" style="font-size:12px;padding:5px 8px;width:60px" />
+          <span style="color:#666">–</span><input id="range-to" type="number" inputmode="decimal" min="1" value="${esc(state.ui.range_to||"")}" placeholder="to" style="font-size:12px;padding:5px 8px;width:60px" />
           <button class="btn btn-amber btn-sm" id="print-range-btn">Print these</button>
         </div>
         ${filtered.length === 0 ? '<div style="padding:14px 12px;font-size:12px;color:#999;font-style:italic">No buckets in this view.</div>' : buckets_html}
@@ -983,7 +989,7 @@ function build_buckets_section() {
         <div style="display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:flex-end">
           <div>
             <label class="lbl">How many?</label>
-            <input id="bucket-count" type="number" value="${bucket_count}" min="1" max="100" style="font-size:13px" />
+            <input id="bucket-count" type="number" inputmode="decimal" value="${bucket_count}" min="1" max="100" style="font-size:13px" />
           </div>
           <div>
             <label class="lbl">Name prefix</label>
@@ -1051,7 +1057,7 @@ function build_containers_section() {
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:4px">
-          <input type="number" step="0.01" data-container-empty="${esc(c.id)}" value="${c.empty_kg ?? ""}" placeholder="empty" style="font-size:13px;padding:4px 8px;border:1px solid #e8e6e1;border-radius:5px;background:#fff;width:80px;text-align:right" ${retired?"disabled":""} title="Empty container weight in kg" />
+          <input type="number" inputmode="decimal" step="0.01" data-container-empty="${esc(c.id)}" value="${c.empty_kg ?? ""}" placeholder="empty" style="font-size:13px;padding:4px 8px;border:1px solid #e8e6e1;border-radius:5px;background:#fff;width:80px;text-align:right" ${retired?"disabled":""} title="Empty container weight in kg" />
           <span style="font-size:11px;color:#666">kg</span>
         </div>
         ${retired
@@ -1090,7 +1096,7 @@ function build_containers_section() {
           </div>
           <div>
             <label class="lbl">Empty kg (optional)</label>
-            <input type="number" step="0.01" id="new-container-empty" value="${state.ui.new_container_empty || ""}" placeholder="0.00" style="font-size:13px;text-align:right" />
+            <input type="number" inputmode="decimal" step="0.01" id="new-container-empty" value="${state.ui.new_container_empty || ""}" placeholder="0.00" style="font-size:13px;text-align:right" />
           </div>
           <button class="btn btn-dark btn-sm" id="add-container-btn">+ Add</button>
         </div>

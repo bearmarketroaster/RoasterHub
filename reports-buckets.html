@@ -111,6 +111,12 @@
     .modal-body { padding: 16px 20px; }
 
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
+    /* Phones: let the header wrap rather than run off the screen, and use 16px form
+       text - iPhones zoom the page in when a smaller field is tapped */
+    @media (max-width: 600px) {
+      .header { flex-wrap: wrap; row-gap: 10px; }
+      input, select, textarea { font-size: 16px !important; }
+    }
   </style>
 </head>
 <body>
