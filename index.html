@@ -8,7 +8,8 @@
     // Invite and password-reset links belong on the login page, which shows the set-password
     // form. If one lands here instead (Supabase falls back to the site's main address when a
     // link's destination isn't on its allowed list), hand it over before anything signs in.
-    if (/[#&]type=(invite|recovery|signup|magiclink)\b/.test(location.hash)) {
+    // A rejected link (#error_code=…) goes there too, so the login page can explain it.
+    if (/[#&](type=(invite|recovery|signup|magiclink)\b|error_code=)/.test(location.hash)) {
       location.replace("login.html" + location.hash);
     }
   </script>
@@ -130,7 +131,7 @@
 
     async function updateAuthUI() {
       const { data: { session } } = await supabaseClient.auth.getSession();
-      if (!session) { window.location.href = "login.html"; return; }
+      if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
       userEl.textContent = session.user.email;
       // Look up the user's role and adjust accordingly
       const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
@@ -147,5 +148,7 @@
     }
     updateAuthUI();
   </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

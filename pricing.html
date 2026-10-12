@@ -7,6 +7,7 @@
   <link rel="icon" type="image/png" href="bear-icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="unsaved-work.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
@@ -157,13 +158,48 @@ const state = {
 
 (async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) { window.location.href = "login.html"; return; }
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
   // Admin-only — pricing exposes cost data.
   const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
   if (role_row?.role !== "admin") { window.location.href = "index.html"; return; }
+  UnsavedWork.track(session.user.id, collect_unsaved);
   await load();
+  const restored = restore_unsaved();
   render();
+  if (restored) UnsavedWork.notice(UnsavedWork.RESTORED_MSG);
 })();
+
+// ── UNSAVED WORK ──────────────────────────────────────────────────────────────
+// Price edits not yet saved (see unsaved-work.js): the inputs/packaging draft while
+// "Unsaved changes" shows, and each coffee's chosen prices while marked dirty.
+// Green and shipping overrides save as soon as they're changed, so aren't included.
+function collect_unsaved() {
+  if (!state.loaded) return null;
+  const finals = {};
+  for (const [id, dirty] of Object.entries(state.coffee_dirty)) {
+    if (dirty) finals[id] = state.final[id] || {};
+  }
+  const inputs = state.dirty ? { cfg: state.cfg, pkg: state.pkg } : null;
+  if (!inputs && !Object.keys(finals).length) return null;
+  return { inputs, finals };
+}
+
+// Runs after load(), so the saved drafts go back on top of the freshly loaded prices
+function restore_unsaved() {
+  const saved = UnsavedWork.take();
+  if (!saved) return false;
+  if (saved.inputs) {
+    state.cfg = { ...state.cfg, ...saved.inputs.cfg };
+    state.pkg = { ...state.pkg, ...saved.inputs.pkg };
+    state.dirty = true;
+  }
+  for (const [id, prices] of Object.entries(saved.finals || {})) {
+    if (!state.coffees.some(c => String(c.id) === id)) continue;   // coffee since retired
+    state.final[id] = prices;
+    state.coffee_dirty[id] = true;
+  }
+  return true;
+}
 
 async function load() {
   // Config
@@ -518,6 +554,7 @@ function cfg_pkg(label, val) {
 }
 
 function render_results() {
+  UnsavedWork.sync();   // every edit and save ends up here, so the kept copy stays current
   const el = document.getElementById("results");
   if (!el) return;
 
@@ -801,5 +838,7 @@ async function save() {
   setTimeout(() => { if (Date.now() >= state.flash_until) { state.flash_until = 0; render(); } }, 2100);
 }
 </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

@@ -59,7 +59,7 @@
 <script>
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 supabaseClient.auth.getSession().then(({ data: { session } }) => {
-  if (!session) window.location.href = "login.html";
+  if (!session) window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search);
   else init();
 });
 
@@ -407,5 +407,7 @@ function attach_listeners() {
   }));
 }
 </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

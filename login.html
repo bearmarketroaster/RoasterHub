@@ -70,7 +70,25 @@
     const password_flows   = ["recovery", "invite", "signup", "magiclink"];
     const is_set_password_flow = manual_set_pw || has_code || password_flows.includes(hash_type);
 
+    // Where to go once logged in: back to the page that sent us here (?next=, set by
+    // session-guard.js), as long as it's one of our own pages; otherwise the dashboard.
+    const next_param = url_params.get("next") || "";
+    const after_login_url = /^[a-z0-9-]+\.html(\?[^#]*)?$/i.test(next_param) ? next_param : "index.html";
+
     async function bootstrap() {
+      // A rejected email link comes back as #error=…&error_code=…&error_description=…
+      // (e.g. it expired, was already used, or an email scanner opened it first). Say so
+      // rather than showing a bare login form.
+      const link_error = hash_params.get("error_code") || url_params.get("error_code") || hash_params.get("error") || url_params.get("error");
+      if (link_error) {
+        showMsg(link_error === "otp_expired"
+          ? "That link has expired or has already been used. Click “Forgot your password?” below and we'll email you a fresh link to set your password."
+          : "That link didn't work (" + (hash_params.get("error_description") || url_params.get("error_description") || link_error).replace(/\+/g, " ") + "). Click “Forgot your password?” below to get a fresh one.");
+        history.replaceState(null, "", window.location.pathname);
+        renderLogin();
+        return;
+      }
+
       // Wait briefly for the SDK to process URL params (e.g. exchange ?code= for session)
       // The SDK fires onAuthStateChange when this completes.
       let session = (await supabaseClient.auth.getSession()).data.session;
@@ -86,12 +104,15 @@
       if (is_set_password_flow && session) {
         renderSetPassword();
       } else if (session) {
-        window.location.href = "index.html";
+        window.location.href = after_login_url;
       } else if (is_set_password_flow) {
         // Tried to enter set-password flow but session never materialised
         showMsg("Invitation link is invalid or has expired. Please ask an admin to resend it.");
         renderLogin();
       } else {
+        if (url_params.get("expired")) {
+          showMsg("You've been logged out — this account was signed out on another device, or the login timed out. Log in to carry on where you left off.", "info");
+        }
         renderLogin();
       }
     }
@@ -118,7 +139,7 @@
           showMsg(friendly); loginBtn.disabled = false; loginBtn.textContent = "Log In";
         } else {
           showMsg("Logged in! Redirecting…", "info");
-          window.location.href = "index.html";
+          window.location.href = after_login_url;
         }
       }
       loginBtn.addEventListener("click", doLogin);

@@ -7,6 +7,7 @@
   <link rel="icon" type="image/png" href="bear-icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="unsaved-work.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
@@ -104,8 +105,8 @@
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 supabaseClient.auth.getSession().then(({ data: { session } }) => {
-  if (!session) window.location.href = "login.html";
-  else init();
+  if (!session) window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search);
+  else { UnsavedWork.track(session.user.id, collect_unsaved); init(); }
 });
 
 const BAG_SIZES = ["100g","200g","500g","1kg","Bar 5kg"];
@@ -545,7 +546,53 @@ async function init() {
   if (state.current_user?.role !== "admin") { window.location.href = "reports.html"; return; }
   await Promise.all([load_coffees(), load_shop_mappings(), load_fp_label_data(), load_fp_assignments(), load_users(), load_buckets(), load_containers()]);
   state.loading = false;
+  const restored = restore_unsaved();
   render();
+  if (restored) UnsavedWork.notice(UnsavedWork.RESTORED_MSG);
+}
+
+// ── UNSAVED WORK ──────────────────────────────────────────────────────────────
+// Typed-but-unsaved input (see unsaved-work.js): label details being edited, new FP
+// codes, a reassignment in progress, and the "add" boxes for coffees, shops, users
+// and containers. Plus which tab/section/coffee was open, to reopen the same screen.
+// (The bucket range filter and restore-scan boxes are left out: they're filters and
+// quick scans that don't clear themselves, so they'd always look like unsaved work.)
+const UNSAVED_TEXT_FIELDS = ["new_coffee_name", "new_shop_master", "new_user_email",
+  "new_container_id", "new_container_name", "new_container_empty"];
+
+function collect_unsaved() {
+  if (state.loading) return null;
+  const u = state.ui;
+  const label_edit = {};
+  for (const [fp, d] of Object.entries(u.label_edit)) {
+    if (d && d.dirty) label_edit[fp] = UnsavedWork.strip(d, ["saving", "saved", "err", "saved_flash_until"]);
+  }
+  const new_fp = {};
+  for (const [cid, d] of Object.entries(u.new_fp)) {
+    if (d && d.fp_code) new_fp[cid] = UnsavedWork.strip(d, ["err"]);
+  }
+  const reassign = u.reassign_open != null && u.reassign_form.coffee_id
+    ? { open: u.reassign_open, form: UnsavedWork.strip(u.reassign_form, ["err", "saving"]) } : null;
+  const fields = {};
+  for (const k of UNSAVED_TEXT_FIELDS) if (u[k] !== "" && u[k] != null) fields[k] = u[k];
+
+  if (!Object.keys(label_edit).length && !Object.keys(new_fp).length && !reassign && !Object.keys(fields).length) return null;
+  return { active_tab: state.active_tab, open_section: state.open_section, open_coffee: u.open_coffee,
+           label_edit, new_fp, reassign, fields };
+}
+
+function restore_unsaved() {
+  const saved = UnsavedWork.take();
+  if (!saved) return false;
+  const u = state.ui;
+  state.active_tab = saved.active_tab || state.active_tab;
+  state.open_section = saved.open_section || state.open_section;
+  u.open_coffee = saved.open_coffee ?? u.open_coffee;
+  for (const [fp, d] of Object.entries(saved.label_edit || {})) u.label_edit[fp] = { ...d, dirty: true };
+  for (const [cid, d] of Object.entries(saved.new_fp || {})) u.new_fp[cid] = { bag_size: "100g", ...d, err: "" };
+  if (saved.reassign) { u.reassign_open = saved.reassign.open; u.reassign_form = { ...saved.reassign.form, err: "", saving: false }; }
+  Object.assign(u, saved.fields || {});
+  return true;
 }
 
 // ── COFFEES ───────────────────────────────────────────────────────────────────
@@ -1203,7 +1250,7 @@ function build_users_section() {
     </div>`;
 }
 
-function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
+function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); UnsavedWork.sync(); }
 
 function build_app() {
   const header = `
@@ -2005,5 +2052,7 @@ function attach_listeners() {
 
 }
 </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

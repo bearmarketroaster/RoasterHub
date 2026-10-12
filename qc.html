@@ -7,6 +7,7 @@
   <link rel="icon" type="image/png" href="bear-icon.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="unsaved-work.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
@@ -158,10 +159,46 @@ state.sample_form = new_sample_form();
 
 (async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) { window.location.href = "login.html"; return; }
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
+  UnsavedWork.track(session.user.id, collect_unsaved);
   await load();
+  const restored = restore_unsaved();
   render();
+  if (restored) UnsavedWork.notice(UnsavedWork.RESTORED_MSG);
 })();
+
+// ── UNSAVED WORK ──────────────────────────────────────────────────────────────
+// Readings and sample-roast details typed but not yet saved (see unsaved-work.js)
+const FORM_STATUS_KEYS = ["saving", "err", "ok"];
+
+// Shop, brew method and date carry over after a save, so on their own they aren't unsaved work
+function qc_form_touched(f) {
+  return !!(f.coffee || f.notes || Object.values(f.readings).some(vals => vals.some(v => v !== "")));
+}
+
+function collect_unsaved() {
+  if (!state.loaded) return null;
+  const forms = {};
+  for (const [kind, f] of Object.entries(state.forms)) {
+    if (qc_form_touched(f)) forms[kind] = UnsavedWork.strip(f, FORM_STATUS_KEYS);
+  }
+  const s = state.sample_form;
+  const sample = (s.supplier || s.supplier_green_reference || s.origin || s.process || s.additional_info || s.sample_roaster_roast_id)
+    ? UnsavedWork.strip(s, FORM_STATUS_KEYS) : null;
+  if (!Object.keys(forms).length && !sample) return null;
+  return { active_tab: state.active_tab, forms, sample };
+}
+
+function restore_unsaved() {
+  const saved = UnsavedWork.take();
+  if (!saved) return false;
+  state.active_tab = saved.active_tab || state.active_tab;
+  for (const [kind, f] of Object.entries(saved.forms || {})) {
+    if (state.forms[kind]) state.forms[kind] = { ...new_qc_form(kind), ...f };
+  }
+  if (saved.sample) state.sample_form = { ...new_sample_form(), ...saved.sample };
+  return true;
+}
 
 async function load() {
   // In-stock greens from v_green_stock — the sum of green_movements, not a stored figure.
@@ -327,6 +364,7 @@ function render() {
     </div>
   `;
   attach_listeners();
+  UnsavedWork.sync();
 }
 
 // ── QC FORMS & LOGS (Green, Roasted, Shops) ────────────────────────────────
@@ -668,5 +706,7 @@ function attach_listeners() {
   }));
 }
 </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

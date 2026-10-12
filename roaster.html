@@ -196,7 +196,7 @@ const state = {
 
 (async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) { window.location.href = "login.html"; return; }
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
   await load();
   render();
 })();
@@ -565,5 +565,7 @@ function render() {
   }));
 }
 </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

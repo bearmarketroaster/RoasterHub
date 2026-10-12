@@ -115,11 +115,13 @@
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
-  if (!session) { window.location.href = "login.html"; return; }
+  // Come back here after logging in, so any unsaved work (kept in sessionStorage) is restored
+  if (!session) { window.location.href = "login.html?next=roastery-traceability.html"; return; }
   const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
   const role = role_row?.role;
   if (role !== "admin" && role !== "packer") { window.location.href = "reports.html"; return; }
   state.user_role = role;  // Stash for UI hiding (e.g. PO upload button for packers)
+  state.user_id = session.user.id;
   init();
 });
 
@@ -132,6 +134,7 @@ const state = {
   active_coffees: [],  // names of coffees not retired — used for NEW input only (dropdowns, autocomplete)
   active_fp_codes: [], // FP codes not retired AND whose parent coffee is not retired — same purpose
   user_role: null,
+  user_id: null,
   loading: true, saving: false, scan_id: null,
   ui: {
     expanded_qr: null,
@@ -531,13 +534,91 @@ async function confirm_delivery(dispatch_id) {
 async function init() {
   await load_data();
   state.loading=false;
+  const restored = restore_draft();
   render();
+  if (restored) show_toast("Picked up where you left off — check everything is still right before saving.");
 }
 
 function render() {
   document.getElementById("app").innerHTML=build_app();
   attach_listeners();
   document.querySelectorAll("[data-qr]").forEach(el => render_qr(el,el.dataset.qr,140));
+  save_draft();
+}
+
+// ── UNSAVED WORK ──────────────────────────────────────────────────────────────
+// A dispatch being packed, buckets being filled, and buckets being returned live only
+// in memory until saved. Every render mirrors them into this tab's sessionStorage, so
+// being sent to log in again (session-guard.js), an accidental refresh or a dropped
+// connection brings the packer back exactly where they were. The copy is cleared as
+// soon as the work is saved or cancelled, and is never kept beyond this browser tab.
+const DRAFT_KEY = "rh_trace_draft";
+const DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
+function save_draft() {
+  if (state.loading) return;   // don't wipe a draft before init() has had a chance to restore it
+  try {
+    const p = packing_state;
+    const packing = !!state.scan_id && p.step !== "done" &&
+      !!(p.shop || Object.keys(p.scanned_items).length || p.scanned_buckets.length || p.samples.length || p.batch);
+    const filling = !!state.ui.fill_bucket_container && fill_state.filled.length > 0;
+    const returning = state.ui.bucket_return_open && return_state.returned.length > 0;
+    if (!packing && !filling && !returning) { sessionStorage.removeItem(DRAFT_KEY); return; }
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+      saved_at: Date.now(),
+      user_id: state.user_id,
+      tab: state.tab,
+      packing: packing ? {
+        scan_id: state.scan_id,
+        step: p.step, shop: p.shop, scanned_items: p.scanned_items, scanned_buckets: p.scanned_buckets,
+        samples: p.samples, batch: p.batch, shop_groups_open: p.shop_groups_open,
+      } : null,
+      filling: filling ? { container_id: state.ui.fill_bucket_container, filled: fill_state.filled } : null,
+      returning: returning ? { returned: return_state.returned, condition: state.ui.bucket_return_condition } : null,
+    }));
+  } catch (_) { /* storage unavailable (private mode etc.) — nothing to keep */ }
+}
+
+// Returns true if unsaved work was put back
+function restore_draft() {
+  let d = null;
+  try { d = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "null"); } catch (_) {}
+  if (!d) return false;
+  if (Date.now() - d.saved_at > DRAFT_MAX_AGE_MS || d.user_id !== state.user_id) {
+    try { sessionStorage.removeItem(DRAFT_KEY); } catch (_) {}
+    return false;
+  }
+  state.tab = d.tab ?? state.tab;
+  if (d.packing) {
+    reset_packing_state();
+    const { scan_id, ...saved } = d.packing;
+    Object.assign(packing_state, saved);
+    state.scan_id = scan_id;
+    return true;
+  }
+  if (d.filling && state.containers.some(c => c.id === d.filling.container_id)) {
+    reset_fill_state();
+    fill_state.filled = d.filling.filled || [];
+    state.ui.fill_bucket_container = d.filling.container_id;
+    return true;
+  }
+  if (d.returning) {
+    reset_return_state();
+    return_state.returned = d.returning.returned || [];
+    state.ui.bucket_return_condition = d.returning.condition || "clean";
+    state.ui.bucket_return_open = true;
+    return true;
+  }
+  return false;
+}
+
+// A short notice that sits above whatever screen is showing (survives re-renders)
+function show_toast(msg) {
+  const t = document.createElement("div");
+  t.textContent = msg;
+  t.style.cssText = "position:fixed;top:12px;left:50%;transform:translateX(-50%);max-width:92vw;z-index:9999;background:#1a1a1a;color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.25);text-align:center";
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 7000);
 }
 
 function build_app() {
@@ -2596,5 +2677,7 @@ function attach_listeners() {
   }));
 }
 </script>
+<!-- Sends the packer to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

@@ -84,6 +84,7 @@
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="unsaved-work.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -101,9 +102,10 @@
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
-  if (!session) { window.location.href = "login.html"; return; }
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
   const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
   if (role_row?.role !== "admin") { window.location.href = "reports.html"; return; }
+  UnsavedWork.track(session.user.id, collect_unsaved);
   init();
 });
 
@@ -234,11 +236,36 @@ async function init() {
       state.ui.step = 1;   // land on step 1 so the roaster can confirm coffee/drum/batches before weighing
     }
   }
+  // A roast being logged when the user was sent to log in (or the page refreshed)?
+  // Runs after the plan pre-fill so the roaster's own entries win.
+  const saved = UnsavedWork.take();
+  if (saved) {
+    state.view = "new";
+    state.ui.step = saved.step;
+    state.ui.gross_weight = saved.gross_weight || "";
+    state.session = { ...new_session(), ...saved.session };
+    state.from_plan_id = saved.from_plan_id || null;
+  }
   state.loading = false;
   render();
+  if (saved) UnsavedWork.notice(UnsavedWork.RESTORED_MSG);
 }
 
-function render() { document.getElementById("app").innerHTML = build_app(); attach_listeners(); }
+function render() {
+  document.getElementById("app").innerHTML = build_app();
+  attach_listeners();
+  UnsavedWork.sync();
+}
+
+// A roast part-way through being logged (not the "saved" confirmation at step 4)
+function collect_unsaved() {
+  if (state.loading || state.view !== "new" || state.ui.step >= 4) return null;
+  const s = state.session;
+  const touched = s.coffee || s.container_id || s.roasted_weight || state.ui.gross_weight ||
+                  s.batches.some(b => b.cropster_id || b.green_weight);
+  if (!touched) return null;
+  return { step: state.ui.step, session: s, gross_weight: state.ui.gross_weight, from_plan_id: state.from_plan_id };
+}
 
 function build_app() {
   const header = `
@@ -605,5 +632,7 @@ function attach_listeners() {
   app.querySelector("#done-another")?.addEventListener("click", () => { state.session=new_session(); state.ui.step=1; state.ui.gross_weight=""; state.view="new"; render(); });
 }
 </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

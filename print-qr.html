@@ -320,7 +320,7 @@
   <script>
     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
     supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) { window.location.href = "login.html"; return; }
+      if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
       const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
       const role = role_row?.role;
       if (role !== "admin" && role !== "packer") { window.location.href = "reports.html"; return; }
@@ -858,5 +858,7 @@
     function esc(s)      { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
     function esc_attr(s) { return String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;"); }
   </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

@@ -76,7 +76,7 @@ document.getElementById("auth-btn").addEventListener("click", async () => {
 
 (async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) { window.location.href = "login.html"; return; }
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
   const { data } = await supabaseClient.from("fp_assignments")
     .select("fp_code, bag_size, effective_start, effective_end, coffees(name)")
     .order("fp_code");
@@ -189,5 +189,7 @@ function render_results() {
   el.innerHTML = current_html + history_html;
 }
 </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>

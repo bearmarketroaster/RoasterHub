@@ -67,6 +67,7 @@
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="unsaved-work.js"></script>
 </head>
 <body>
 <div id="app"></div>
@@ -78,9 +79,10 @@
 const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 
 supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
-  if (!session) { window.location.href = "login.html"; return; }
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
   const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
   if (role_row?.role !== "admin") { window.location.href = "reports.html"; return; }
+  UnsavedWork.track(session.user.id, collect_unsaved);
   init();
 });
 
@@ -517,9 +519,61 @@ async function save_staff_takeaway() {
   render();
 }
 
-async function init() { await load_data(); state.loading=false; render(); }
+async function init() {
+  await load_data();
+  state.loading=false;
+  const restored = restore_unsaved();
+  render();
+  if (restored) UnsavedWork.notice(UnsavedWork.RESTORED_MSG + (restored.had_file ? " Re-attach the PDF — files can't be kept." : ""));
+}
 
-function render() { document.getElementById("app").innerHTML=build_app(); attach_listeners(); }
+function render() {
+  document.getElementById("app").innerHTML=build_app();
+  attach_listeners();
+  UnsavedWork.sync();
+}
+
+// Forms with something typed in that haven't been saved yet. Picked PDFs can't be
+// kept, so only whether one was attached is noted.
+function collect_unsaved() {
+  if (state.loading) return null;
+  const u = state.ui, out = { tab: state.tab };
+  let any = false;
+  if (u.show_delivery_form) {
+    const d = u.delivery;
+    if (d.supplier || d.invoice_ref || d.due_date || d.items.some(i => Object.values(i).some(Boolean))) {
+      out.delivery = d; out.delivery_file = !!u.pending_invoice_file; any = true;
+    }
+  }
+  if (u.show_adj_form) {
+    const a = u.adj;
+    if (a.coffee || a.change_kg || a.reason || a.note) { out.adj = a; any = true; }
+  }
+  if (u.show_contract_form) {
+    const c = u.contract;
+    if (c.supplier || c.coffee_id || c.bag_count) { out.contract = c; out.contract_file = !!u.pending_contract_file; any = true; }
+  }
+  if (u.invoice_edit) {
+    out.invoice_edit = UnsavedWork.strip(u.invoice_edit, ["file", "err", "saving"]);
+    out.invoice_file = !!u.invoice_edit.file; any = true;
+  }
+  if (u.staff.coffee || u.staff.container_id) { out.staff = UnsavedWork.strip(u.staff, ["err", "saving"]); any = true; }
+  return any ? out : null;
+}
+
+// Put back forms saved by collect_unsaved(). Returns { had_file } if anything was restored.
+function restore_unsaved() {
+  const s = UnsavedWork.take();
+  if (!s) return null;
+  const u = state.ui;
+  state.tab = s.tab ?? state.tab;
+  if (s.delivery)     { u.delivery = s.delivery; u.show_delivery_form = true; }
+  if (s.adj)          { u.adj = s.adj; u.show_adj_form = true; }
+  if (s.contract)     { u.contract = s.contract; u.show_contract_form = true; }
+  if (s.invoice_edit) { u.invoice_edit = { ...s.invoice_edit, file: null, err: "", saving: false }; }
+  if (s.staff)        { u.staff = { ...u.staff, ...s.staff }; }
+  return { had_file: !!(s.delivery_file || s.contract_file || s.invoice_file) };
+}
 
 function build_app() {
   const header = `
@@ -1239,5 +1293,7 @@ function attach_listeners() {
   app.querySelector("#save-staff")?.addEventListener("click", () => save_staff_takeaway());
 }
 </script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
 </body>
 </html>
