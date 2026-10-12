@@ -49,6 +49,7 @@ const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.
 
 const state = {
   loading: true,
+  scan_id: null,   // shop QR id from the URL — every database call is keyed on it
   shop_name: null,
   pending: [],     // unconfirmed dispatches for this shop
   view: "list",    // "list" | "done" | "no-pending" | "not-found"
@@ -68,28 +69,18 @@ async function init() {
     return;
   }
 
-  // Look up the shop
-  const { data: mappings, error: mappings_err } = await supabaseClient
-    .from("shop_mappings")
-    .select("master_name, shop_qr_id")
-    .eq("shop_qr_id", scan_id);
-  if (mappings_err || !mappings || mappings.length === 0) {
+  // Look up the shop and its unconfirmed dispatches. Goes through a database function
+  // keyed on the QR id, so visitors can't read the tables directly.
+  const { data: found, error: lookup_err } = await supabaseClient.rpc("delivery_lookup", { p_scan: scan_id });
+  if (lookup_err || !found) {
     state.view = "not-found";
     state.loading = false;
     render();
     return;
   }
-  state.shop_name = mappings[0].master_name;
-
-  // Load unconfirmed dispatches for that shop with their lines
-  const { data: dispatches } = await supabaseClient
-    .from("dispatches")
-    .select("id, shop, date, total_kg, confirmed_at, dispatch_lines(*)")
-    .eq("shop", state.shop_name)
-    .is("confirmed_at", null)
-    .order("date", { ascending: true });
-
-  state.pending = (dispatches || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
+  state.scan_id = scan_id;
+  state.shop_name = found.shop;
+  state.pending = found.pending || [];
   if (state.pending.length === 0) state.view = "no-pending";
 
   state.loading = false;
@@ -98,10 +89,7 @@ async function init() {
 
 async function confirm_one(dispatch_id, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "Confirming…"; }
-  const { error } = await supabaseClient
-    .from("dispatches")
-    .update({ confirmed_at: new Date().toISOString() })
-    .eq("id", dispatch_id);
+  const { error } = await supabaseClient.rpc("delivery_confirm", { p_scan: state.scan_id, p_dispatch_ids: [dispatch_id] });
   if (error) {
     if (btn) { btn.disabled = false; btn.textContent = "✓ Confirm"; }
     alert("Couldn't confirm. Please try again or contact Bear Mrkt.");
@@ -120,15 +108,7 @@ async function confirm_with_issue(dispatch_id) {
   }
   const btn = document.getElementById("submit-issue-btn");
   if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
-  const now_iso = new Date().toISOString();
-  const { error } = await supabaseClient
-    .from("dispatches")
-    .update({
-      confirmed_at: now_iso,
-      issue_reported_at: now_iso,
-      issue_note: note,
-    })
-    .eq("id", dispatch_id);
+  const { error } = await supabaseClient.rpc("delivery_confirm", { p_scan: state.scan_id, p_dispatch_ids: [dispatch_id], p_issue_note: note });
   if (error) {
     if (btn) { btn.disabled = false; btn.textContent = "Submit & Confirm"; }
     alert("Couldn't submit. Please try again or contact Bear Mrkt.");
@@ -145,10 +125,7 @@ async function confirm_all() {
   const btn = document.getElementById("confirm-all-btn");
   if (btn) { btn.disabled = true; btn.textContent = "Confirming…"; }
   const ids = state.pending.map(d => d.id);
-  const { error } = await supabaseClient
-    .from("dispatches")
-    .update({ confirmed_at: new Date().toISOString() })
-    .in("id", ids);
+  const { error } = await supabaseClient.rpc("delivery_confirm", { p_scan: state.scan_id, p_dispatch_ids: ids });
   if (error) {
     if (btn) { btn.disabled = false; btn.textContent = `✓ Confirm All (${ids.length})`; }
     alert("Couldn't confirm. Please try again or contact Bear Mrkt.");
