@@ -543,6 +543,12 @@ function render() {
   document.getElementById("app").innerHTML=build_app();
   attach_listeners();
   document.querySelectorAll("[data-qr]").forEach(el => render_qr(el,el.dataset.qr,140));
+  // The scanned-items and sample lists are drawn by their in-place updaters, not by
+  // build_app(), which always shows the empty placeholder. Fill them after a full redraw
+  // so items already in the dispatch show (restored work, "Back to edit" from review).
+  if (document.getElementById("scan-panel") &&
+      (Object.keys(packing_state.scanned_items).length || packing_state.scanned_buckets.length)) update_scan_panel();
+  if (document.getElementById("sample-list") && packing_state.samples.length) update_sample_list();
   save_draft();
 }
 
@@ -578,6 +584,12 @@ function save_draft() {
     }));
   } catch (_) { /* storage unavailable (private mode etc.) — nothing to keep */ }
 }
+
+// Backstop for anything else that changes the work without a render(): refresh the copy
+// after any typing or tap (once the page's own handler has run) and when the page is left.
+// Camera scans fire no DOM event, but they all end in one of the update_*_panel functions.
+["input", "change", "click"].forEach(ev => document.addEventListener(ev, () => setTimeout(save_draft, 0), true));
+window.addEventListener("pagehide", save_draft);
 
 // Returns true if unsaved work was put back
 function restore_draft() {
@@ -751,6 +763,7 @@ function flash_fill_scan(msg, type) {
 }
 
 function update_fill_panel() {
+  save_draft();   // this panel updates in place, not via render(), so keep the unsaved copy current here too
   const panel = document.getElementById("fill-panel");
   if (!panel) { render(); return; }
   const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
@@ -960,6 +973,7 @@ function flash_return_scan(msg, type) {
 }
 
 function update_return_panel() {
+  save_draft();   // this panel updates in place, not via render(), so keep the unsaved copy current here too
   const panel = document.getElementById("return-panel");
   if (!panel) { render(); return; }
   const list = return_state.returned.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
@@ -1660,6 +1674,7 @@ function process_scan(raw_value) {
 
 // In-place update of the scanned items panel without re-rendering the camera div
 function update_scan_panel() {
+  save_draft();   // this panel updates in place, not via render(), so keep the unsaved copy current here too
   const panel = document.getElementById("scan-panel");
   const flash = document.getElementById("scan-flash");
   const reviewBtn = document.getElementById("pack-review");
@@ -1823,6 +1838,7 @@ function sample_list_html() {
   </div>`).join("");
 }
 function update_sample_list() {
+  save_draft();   // this panel updates in place, not via render(), so keep the unsaved copy current here too
   const el = document.getElementById("sample-list");
   if (!el) return;
   el.innerHTML = sample_list_html();
