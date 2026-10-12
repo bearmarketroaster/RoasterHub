@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bear Mrkt</title>
+  <script>
+    // Invite and password-reset links belong on the login page, which shows the set-password
+    // form. If one lands here instead (Supabase falls back to the site's main address when a
+    // link's destination isn't on its allowed list), hand it over before anything signs in.
+    if (/[#&]type=(invite|recovery|signup|magiclink)\b/.test(location.hash)) {
+      location.replace("login.html" + location.hash);
+    }
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
   <style>
