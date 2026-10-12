@@ -56,9 +56,17 @@
     .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
     .filters select, .filters input { max-width: 220px; }
 
-    .placeholder { text-align: center; padding: 60px 20px; color: #999; }
-    .placeholder .ph-icon { font-size: 48px; margin-bottom: 12px; }
-    .placeholder .ph-title { font-size: 18px; font-weight: 600; color: #666; margin-bottom: 6px; }
+    /* QC reading forms: subject fields, then one block of 3 readings per measure */
+    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
+    .measures { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 12px; }
+    .readings-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .measure-avg { font-size: 12px; color: #666; margin-top: 4px; }
+    td .readings { font-size: 11px; color: #999; font-weight: normal; margin-top: 2px; white-space: nowrap; }
+
+    @media (max-width: 640px) {
+      .content { padding: 16px; }
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -93,24 +101,54 @@ function new_sample_form() {
   };
 }
 
-const state = {
-  loaded: false,
-  active_tab: "green",                 // "green" | "samples" | "roasted"
-  qc_entries: [],                      // green QC log
-  in_stock_greens: [],                 // derived: green coffees with positive stock, sorted by recency
-  green_form: {
+// ── QC READINGS ────────────────────────────────────────────────────────────
+// Every measure is taken three times and averaged. Readings are stored in
+// numbered columns: <measure>_1, <measure>_2, <measure>_3. Older green entries
+// only have two readings; they still display and average correctly.
+const N_READINGS = 3;
+
+const MEASURES = {
+  density:        { label: "Density",        unit: "g/L",    step: "0.01",  digits: 2, placeholder: "e.g. 720",  min: 0 },
+  moisture:       { label: "Moisture",       unit: "%",      step: "0.01",  digits: 2, placeholder: "e.g. 10.5", min: 0, max: 100 },
+  water_activity: { label: "Water activity", unit: "aw",     step: "0.001", digits: 3, placeholder: "e.g. 0.55", min: 0, max: 1 },
+  whole_bean:     { label: "Whole bean",     unit: "Agtron", step: "0.1",   digits: 1, placeholder: "e.g. 65",   min: 0 },
+  ground:         { label: "Ground",         unit: "Agtron", step: "0.1",   digits: 1, placeholder: "e.g. 72",   min: 0 },
+  tds:            { label: "TDS",            unit: "%",      step: "0.01",  digits: 2, placeholder: "e.g. 1.35", min: 0, max: 30 },
+};
+
+const QC_FORMS = {
+  green:  { table: "green_qc_entries",  measures: ["density", "moisture", "water_activity"] },
+  agtron: { table: "qc_agtron_entries", measures: ["whole_bean", "ground"] },
+  tds:    { table: "qc_tds_entries",    measures: ["tds"] },
+};
+
+const BREW_METHODS = ["Espresso", "Filter", "Batch brew"];
+
+// `carry` keeps the date (and shop / brew method) from the previous entry,
+// for easier successive entries.
+function new_qc_form(kind, carry = {}) {
+  return {
     coffee: "",
-    measured_at: today_iso(),
-    density_1: "",
-    moisture_1: "",
-    density_2: "",
-    moisture_2: "",
+    shop: carry.shop || "",
+    brew_method: carry.brew_method || "",
+    measured_at: carry.measured_at || today_iso(),
     notes: "",
+    readings: Object.fromEntries(QC_FORMS[kind].measures.map(m => [m, Array(N_READINGS).fill("")])),
     saving: false,
     err: "",
     ok: false,
-  },
-  filter_coffee: "all",                // for the green log table
+  };
+}
+
+const state = {
+  loaded: false,
+  active_tab: "green",                 // "green" | "roasted" | "shops" | "samples"
+  in_stock_greens: [],                 // derived: green coffees with positive stock, sorted by recency
+  coffees: [],                         // active coffees — for Agtron and TDS
+  shops: [],                           // physical shop names — for TDS
+  entries: { green: [], agtron: [], tds: [] },          // QC logs, newest first
+  forms:   { green: new_qc_form("green"), agtron: new_qc_form("agtron"), tds: new_qc_form("tds") },
+  filters: { green: "all", agtron: "all", tds: "all" }, // log filter: coffee, or shop for TDS
   samples: [],                         // sample_roasts rows, newest first
   sample_form: null,                   // set on first render via new_sample_form()
   filter_supplier: "all",              // for the sample roast log
@@ -140,13 +178,27 @@ async function load() {
                  latest_in: g.last_intake_on || null }))
     .sort((a, b) => (b.latest_in || "").localeCompare(a.latest_in || ""));
 
-  // Load all QC entries
-  const { data: qc } = await supabaseClient
-    .from("green_qc_entries")
-    .select("*")
-    .order("measured_at", { ascending: false })
-    .order("created_at", { ascending: false });
-  state.qc_entries = qc || [];
+  // Active coffees and physical shops, for the Agtron and TDS forms
+  const { data: coffees } = await supabaseClient
+    .from("coffees")
+    .select("id, name")
+    .is("retired_at", null)
+    .order("name");
+  state.coffees = coffees || [];
+
+  // Several parsed names can map to one shop, so de-duplicate on master_name
+  const { data: shops } = await supabaseClient.from("shop_mappings").select("master_name, kind");
+  state.shops = [...new Set((shops || []).filter(s => (s.kind || "shop") === "shop").map(s => s.master_name))].sort();
+
+  // Load all QC entries — green, Agtron and TDS
+  await Promise.all(Object.entries(QC_FORMS).map(async ([kind, cfg]) => {
+    const { data } = await supabaseClient
+      .from(cfg.table)
+      .select("*")
+      .order("measured_at", { ascending: false })
+      .order("created_at", { ascending: false });
+    state.entries[kind] = data || [];
+  }));
 
   // Sample roasts. Offer samples we may not own, so no join to coffees or green stock.
   const { data: samples } = await supabaseClient
@@ -159,57 +211,86 @@ async function load() {
   state.loaded = true;
 }
 
-async function save_green_qc() {
-  const f = state.green_form;
-  if (!f.coffee) { f.err = "Select a coffee."; render(); return; }
-  if (!f.measured_at) { f.err = "Enter a measurement date."; render(); return; }
-  // At least one reading must be provided
-  const has_r1 = (f.density_1 !== "" || f.moisture_1 !== "");
-  const has_r2 = (f.density_2 !== "" || f.moisture_2 !== "");
-  if (!has_r1 && !has_r2) { f.err = "Enter at least one reading."; render(); return; }
+const mean = vals => vals.reduce((a, b) => a + b, 0) / vals.length;
+
+// The readings stored on a saved row for one measure, as numbers.
+function row_readings(row, m) {
+  return Array.from({ length: N_READINGS }, (_, i) => row[`${m}_${i + 1}`])
+    .filter(v => v !== null && v !== undefined)
+    .map(Number);
+}
+
+function coffee_id_for(kind, name) {
+  const list = kind === "green"
+    ? state.in_stock_greens.map(g => ({ id: g.coffee_id, name: g.coffee }))
+    : state.coffees;
+  return list.find(c => c.name === name)?.id ?? null;
+}
+
+// A measure is either left blank or given all three readings; at least one
+// measure must be filled in. Returns an error message, or null when valid.
+function check_readings(kind) {
+  const f = state.forms[kind];
+  let any = false;
+  for (const m of QC_FORMS[kind].measures) {
+    const vals = f.readings[m].filter(v => v !== "");
+    if (vals.length === 0) continue;
+    const { label, min, max } = MEASURES[m];
+    if (vals.length < N_READINGS) return `${label}: enter all ${N_READINGS} readings, or leave it blank.`;
+    if (vals.some(v => isNaN(Number(v)) || Number(v) < min || (max !== undefined && Number(v) > max))) {
+      return max === undefined ? `${label}: readings can't be negative.` : `${label}: readings should be between ${min} and ${max}.`;
+    }
+    any = true;
+  }
+  if (!any) return QC_FORMS[kind].measures.length > 1 ? "Enter at least one set of readings." : `Enter ${N_READINGS} readings.`;
+  return null;
+}
+
+async function save_qc(kind) {
+  const f = state.forms[kind];
+  const fail = msg => { f.saving = false; f.err = msg; f.ok = false; render(); };
+  if (kind === "tds" && !f.shop) return fail("Select a shop.");
+  if (!f.coffee) return fail("Select a coffee.");
+  if (!f.measured_at) return fail("Enter a measurement date.");
+  const reading_err = check_readings(kind);
+  if (reading_err) return fail(reading_err);
 
   f.saving = true; f.err = ""; f.ok = false; render();
   const { data: { user } } = await supabaseClient.auth.getUser();
   const payload = {
     coffee: f.coffee,
-    coffee_id: (state.in_stock_greens.find(g => g.coffee === f.coffee)?.coffee_id) ?? null,
+    coffee_id: coffee_id_for(kind, f.coffee),
     measured_at: f.measured_at,
-    density_1: f.density_1 === "" ? null : Number(f.density_1),
-    moisture_1: f.moisture_1 === "" ? null : Number(f.moisture_1),
-    density_2: f.density_2 === "" ? null : Number(f.density_2),
-    moisture_2: f.moisture_2 === "" ? null : Number(f.moisture_2),
-    notes: f.notes || null,
+    notes: f.notes.trim() || null,
     created_by: user?.id || null,
   };
-  const { data, error } = await supabaseClient.from("green_qc_entries").insert(payload).select().single();
-  if (error) {
-    f.saving = false;
-    f.err = "Save failed: " + error.message;
-    render();
-    return;
+  if (kind === "tds") {
+    payload.shop = f.shop;
+    payload.brew_method = f.brew_method || null;
   }
-  // Success — prepend to the log, reset form (keep date)
-  state.qc_entries.unshift(data);
-  state.green_form = {
-    coffee: "",
-    measured_at: f.measured_at,                // keep the date for easier successive entries
-    density_1: "", moisture_1: "",
-    density_2: "", moisture_2: "",
-    notes: "",
-    saving: false, err: "", ok: true,
-  };
+  for (const m of QC_FORMS[kind].measures) {
+    f.readings[m].forEach((v, i) => { payload[`${m}_${i + 1}`] = v === "" ? null : Number(v); });
+  }
+
+  const { data, error } = await supabaseClient.from(QC_FORMS[kind].table).insert(payload).select().single();
+  if (error) return fail("Save failed: " + error.message);
+
+  // Success — prepend to the log, reset the form but keep date / shop / brew method
+  state.entries[kind].unshift(data);
+  state.forms[kind] = new_qc_form(kind, f);
+  state.forms[kind].ok = true;
   render();
   // Auto-clear "saved" message after a moment
   setTimeout(() => {
-    if (state.green_form.ok) { state.green_form.ok = false; render(); }
+    if (state.forms[kind].ok) { state.forms[kind].ok = false; render(); }
   }, 2000);
 }
 
-async function delete_qc_entry(id) {
+async function delete_qc(kind, id) {
   if (!confirm("Delete this QC entry?")) return;
-  const { error } = await supabaseClient.from("green_qc_entries").delete().eq("id", id);
+  const { error } = await supabaseClient.from(QC_FORMS[kind].table).delete().eq("id", id);
   if (error) { alert("Delete failed: " + error.message); return; }
-  state.qc_entries = state.qc_entries.filter(e => e.id !== id);
+  state.entries[kind] = state.entries[kind].filter(e => e.id !== id);
   render();
 }
 
@@ -232,127 +313,155 @@ function render() {
 
     <div class="tabs">
       <button class="tab-btn ${state.active_tab==="green"?"active":""}" data-tab="green">🌱 Green</button>
-      <button class="tab-btn ${state.active_tab==="samples"?"active":""}" data-tab="samples">📮 Sample Roasts</button>
       <button class="tab-btn ${state.active_tab==="roasted"?"active":""}" data-tab="roasted">🔥 Roasted</button>
+      <button class="tab-btn ${state.active_tab==="shops"?"active":""}" data-tab="shops">☕ Shops</button>
+      <button class="tab-btn ${state.active_tab==="samples"?"active":""}" data-tab="samples">📮 Sample Roasts</button>
     </div>
 
     <div class="content">
       ${state.active_tab === "green" ? build_green_tab()
-        : state.active_tab === "samples" ? build_samples_tab()
-        : build_roasted_tab()}
+        : state.active_tab === "roasted" ? build_roasted_tab()
+        : state.active_tab === "shops" ? build_shops_tab()
+        : build_samples_tab()}
     </div>
   `;
   attach_listeners();
 }
 
-function build_green_tab() {
-  const f = state.green_form;
-  const log = state.qc_entries.slice();
-  const filtered = state.filter_coffee === "all" ? log : log.filter(e => e.coffee === state.filter_coffee);
-  // Distinct coffees ever measured — for the filter dropdown
-  const historical_coffees = [...new Set(log.map(e => e.coffee))].sort();
+// ── QC FORMS & LOGS (Green, Roasted, Shops) ────────────────────────────────
+const field = (label, html) => `<div><label class="lbl">${label}</label>${html}</div>`;
 
-  const coffees_for_dropdown = state.in_stock_greens;
+function build_select(kind, key, options, empty_label) {
+  const cur = state.forms[kind][key];
+  return `<select data-field="${kind}|${key}">
+    <option value="">${empty_label}</option>
+    ${options.map(o => `<option value="${esc(o.value)}" ${cur===o.value?"selected":""}>${esc(o.label)}</option>`).join("")}
+  </select>`;
+}
 
-  const fmt_num = (n) => (n === null || n === undefined || n === "") ? "—" : Number(n).toFixed(2);
+const date_input = kind => `<input type="date" data-field="${kind}|measured_at" value="${esc(state.forms[kind].measured_at)}" />`;
+const coffee_options = () => state.coffees.map(c => ({ value: c.name, label: c.name }));
+
+// Shown under each measure's inputs and updated in place as readings are typed
+function live_avg_text(kind, m) {
+  const vals = state.forms[kind].readings[m].filter(v => v !== "" && !isNaN(Number(v))).map(Number);
+  if (!vals.length) return `${N_READINGS} readings`;
+  return `Avg <strong>${mean(vals).toFixed(MEASURES[m].digits)}</strong> · ${vals.length}/${N_READINGS}`;
+}
+
+function build_measure_inputs(kind, m) {
+  const { label, unit, step, placeholder } = MEASURES[m];
+  return `
+    <div>
+      <label class="lbl">${label} (${unit})</label>
+      <div class="readings-row">
+        ${state.forms[kind].readings[m].map((v, i) => `
+          <input type="number" step="${step}" min="0" data-reading="${kind}|${m}|${i}" value="${esc(v)}" placeholder="${i === 0 ? placeholder : `#${i + 1}`}" />`).join("")}
+      </div>
+      <div class="measure-avg" id="avg-${kind}-${m}">${live_avg_text(kind, m)}</div>
+    </div>`;
+}
+
+function build_qc_form(kind, title, fields_html) {
+  const f = state.forms[kind];
+  return `
+    <div class="card">
+      <div class="section-label">${title}</div>
+      <div class="fields">${fields_html}</div>
+      <div class="measures">${QC_FORMS[kind].measures.map(m => build_measure_inputs(kind, m)).join("")}</div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">Notes (optional)</label>
+        <textarea data-field="${kind}|notes" placeholder="Anything notable — odd smell, sample condition, batch reference…">${esc(f.notes)}</textarea>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn btn-dark" data-save="${kind}" ${f.saving?"disabled":""}>${f.saving?"Saving…":"💾 Save readings"}</button>
+        ${f.ok ? `<span class="ok-msg">✓ Saved</span>` : ""}
+        ${f.err ? `<span class="err">${esc(f.err)}</span>` : ""}
+      </div>
+    </div>`;
+}
+
+// Average in bold, the individual readings underneath
+function reading_cell(row, m) {
+  const vals = row_readings(row, m);
+  if (!vals.length) return `<td class="num hint">—</td>`;
+  const d = MEASURES[m].digits;
+  return `<td class="num"><strong>${mean(vals).toFixed(d)}</strong><div class="readings">${vals.map(v => v.toFixed(d)).join(" · ")}</div></td>`;
+}
+
+function build_qc_log(kind, title) {
+  const is_tds = kind === "tds";
+  const by = is_tds ? "shop" : "coffee";
+  const log = state.entries[kind];
+  const filtered = state.filters[kind] === "all" ? log : log.filter(e => e[by] === state.filters[kind]);
+  // Distinct coffees (or shops) ever logged — for the filter dropdown
+  const filter_options = [...new Set(log.map(e => e[by]).filter(Boolean))].sort();
+  const measures = QC_FORMS[kind].measures;
 
   return `
     <div class="card">
-      <div class="section-label">Log a measurement</div>
-      ${coffees_for_dropdown.length === 0 ? `
-        <p class="hint" style="font-style:italic;padding:14px 0">No green coffees in stock. Log a delivery in Stock first.</p>
-      ` : `
-        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:12px;margin-bottom:12px">
-          <div>
-            <label class="lbl">Coffee *</label>
-            <select id="qc-coffee">
-              <option value="">— Pick green coffee —</option>
-              ${coffees_for_dropdown.map(g => `
-                <option value="${esc(g.coffee)}" ${f.coffee===g.coffee?"selected":""}>
-                  ${esc(g.coffee)} (${g.remaining.toFixed(0)}kg)
-                </option>`).join("")}
-            </select>
-          </div>
-          <div>
-            <label class="lbl">Date *</label>
-            <input type="date" id="qc-date" value="${esc(f.measured_at)}" />
-          </div>
-        </div>
-        <div class="grid-4" style="margin-bottom:12px">
-          <div>
-            <label class="lbl">Density 1 (g/L)</label>
-            <input type="number" id="qc-d1" step="0.01" value="${esc(f.density_1)}" placeholder="e.g. 720" />
-          </div>
-          <div>
-            <label class="lbl">Moisture 1 (%)</label>
-            <input type="number" id="qc-m1" step="0.01" value="${esc(f.moisture_1)}" placeholder="e.g. 10.5" />
-          </div>
-          <div>
-            <label class="lbl">Density 2 (g/L)</label>
-            <input type="number" id="qc-d2" step="0.01" value="${esc(f.density_2)}" placeholder="e.g. 718" />
-          </div>
-          <div>
-            <label class="lbl">Moisture 2 (%)</label>
-            <input type="number" id="qc-m2" step="0.01" value="${esc(f.moisture_2)}" placeholder="e.g. 10.4" />
-          </div>
-        </div>
-        <div style="margin-bottom:12px">
-          <label class="lbl">Notes (optional)</label>
-          <textarea id="qc-notes" placeholder="Anything notable — odd smell, sample condition, batch reference…">${esc(f.notes)}</textarea>
-        </div>
-        <div style="display:flex;gap:10px;align-items:center">
-          <button class="btn btn-dark" id="qc-save-btn" ${f.saving?"disabled":""}>${f.saving?"Saving…":"💾 Save reading"}</button>
-          ${f.ok ? `<span class="ok-msg">✓ Saved</span>` : ""}
-          ${f.err ? `<span class="err">${esc(f.err)}</span>` : ""}
-        </div>
-      `}
-    </div>
-
-    <div class="card">
-      <div class="section-label">QC Log (${log.length})</div>
-      ${log.length === 0 ? '<p class="hint" style="font-style:italic">No QC entries logged yet.</p>' : `
+      <div class="section-label">${title} (${log.length})</div>
+      ${log.length === 0 ? '<p class="hint" style="font-style:italic">No entries logged yet.</p>' : `
         <div class="filters">
-          <select id="filter-coffee">
-            <option value="all">All coffees</option>
-            ${historical_coffees.map(c => `<option value="${esc(c)}" ${state.filter_coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+          <select data-filter="${kind}">
+            <option value="all">All ${is_tds ? "shops" : "coffees"}</option>
+            ${filter_options.map(o => `<option value="${esc(o)}" ${state.filters[kind]===o?"selected":""}>${esc(o)}</option>`).join("")}
           </select>
           <span class="hint">${filtered.length} entr${filtered.length===1?"y":"ies"}</span>
         </div>
         <div style="overflow-x:auto">
           <table>
             <thead><tr>
-              <th>Date</th><th>Coffee</th>
-              <th class="num">Density 1</th><th class="num">Moisture 1</th>
-              <th class="num">Density 2</th><th class="num">Moisture 2</th>
-              <th class="num">Avg Density</th><th class="num">Avg Moisture</th>
+              <th>Date</th>${is_tds ? "<th>Shop</th>" : ""}<th>Coffee</th>${is_tds ? "<th>Brew</th>" : ""}
+              ${measures.map(m => `<th class="num">${MEASURES[m].label} (${MEASURES[m].unit})</th>`).join("")}
               <th>Notes</th><th></th>
             </tr></thead>
             <tbody>
-              ${filtered.map(e => {
-                const ds = [e.density_1, e.density_2].filter(v => v !== null && v !== undefined).map(Number);
-                const ms = [e.moisture_1, e.moisture_2].filter(v => v !== null && v !== undefined).map(Number);
-                const avg_d = ds.length ? (ds.reduce((a,b)=>a+b,0)/ds.length) : null;
-                const avg_m = ms.length ? (ms.reduce((a,b)=>a+b,0)/ms.length) : null;
-                return `
+              ${filtered.map(e => `
                 <tr>
                   <td>${esc(e.measured_at)}</td>
-                  <td style="font-weight:600">${esc(e.coffee)}</td>
-                  <td class="num">${fmt_num(e.density_1)}</td>
-                  <td class="num">${fmt_num(e.moisture_1)}</td>
-                  <td class="num">${fmt_num(e.density_2)}</td>
-                  <td class="num">${fmt_num(e.moisture_2)}</td>
-                  <td class="num"><strong>${avg_d===null?"—":avg_d.toFixed(2)}</strong></td>
-                  <td class="num"><strong>${avg_m===null?"—":avg_m.toFixed(2)}</strong></td>
+                  ${is_tds ? `<td style="font-weight:600">${esc(e.shop)}</td>` : ""}
+                  <td${is_tds ? "" : ' style="font-weight:600"'}>${esc(e.coffee)}</td>
+                  ${is_tds ? `<td>${esc(e.brew_method || "—")}</td>` : ""}
+                  ${measures.map(m => reading_cell(e, m)).join("")}
                   <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.notes||"")}">${esc(e.notes||"")}</td>
-                  <td><button class="delete-btn" data-delete-id="${esc(e.id)}" title="Delete">✕</button></td>
-                </tr>`;
-              }).join("")}
+                  <td><button class="delete-btn" data-delete-qc="${kind}|${esc(e.id)}" title="Delete">✕</button></td>
+                </tr>`).join("")}
             </tbody>
           </table>
         </div>
       `}
-    </div>
-  `;
+    </div>`;
+}
+
+function build_green_tab() {
+  const greens = state.in_stock_greens;
+  const form = greens.length === 0 ? `
+    <div class="card">
+      <div class="section-label">Log a measurement</div>
+      <p class="hint" style="font-style:italic;padding:14px 0">No green coffees in stock. Log a delivery in Stock first.</p>
+    </div>`
+    : build_qc_form("green", "Log a measurement",
+        field("Coffee *", build_select("green", "coffee",
+          greens.map(g => ({ value: g.coffee, label: `${g.coffee} (${g.remaining.toFixed(0)}kg)` })), "— Pick green coffee —")) +
+        field("Date *", date_input("green")));
+  return form + build_qc_log("green", "QC Log");
+}
+
+function build_roasted_tab() {
+  return build_qc_form("agtron", "Log Agtron readings",
+      field("Coffee *", build_select("agtron", "coffee", coffee_options(), "— Pick coffee —")) +
+      field("Date *", date_input("agtron")))
+    + build_qc_log("agtron", "Agtron Log");
+}
+
+function build_shops_tab() {
+  return build_qc_form("tds", "Log TDS readings",
+      field("Shop *", build_select("tds", "shop", state.shops.map(s => ({ value: s, label: s })), "— Pick shop —")) +
+      field("Coffee *", build_select("tds", "coffee", coffee_options(), "— Pick coffee —")) +
+      field("Brew method", build_select("tds", "brew_method", BREW_METHODS.map(b => ({ value: b, label: b })), "—")) +
+      field("Date *", date_input("tds")))
+    + build_qc_log("tds", "TDS Log");
 }
 
 // ── SAMPLE ROASTS ──────────────────────────────────────────────────────────
@@ -551,18 +660,6 @@ function build_samples_tab() {
   `;
 }
 
-function build_roasted_tab() {
-  return `
-    <div class="card">
-      <div class="placeholder">
-        <div class="ph-icon">🔥</div>
-        <div class="ph-title">Roasted QC — coming soon</div>
-        <p class="hint">This is where roasted coffee quality checks (cupping notes, defect counts, etc.) will live.</p>
-      </div>
-    </div>
-  `;
-}
-
 // ── LISTENERS ──────────────────────────────────────────────────────────────
 function attach_listeners() {
   document.getElementById("back-btn")?.addEventListener("click", () => window.location.href = "index.html");
@@ -575,28 +672,32 @@ function attach_listeners() {
     render();
   }));
 
-  // Green form inputs — update form state on input so values survive re-renders
-  const bind = (id, key) => document.getElementById(id)?.addEventListener("input", e => { state.green_form[key] = e.target.value; });
-  bind("qc-coffee", "coffee");
-  bind("qc-date", "measured_at");
-  bind("qc-d1", "density_1");
-  bind("qc-m1", "moisture_1");
-  bind("qc-d2", "density_2");
-  bind("qc-m2", "moisture_2");
-  bind("qc-notes", "notes");
-  document.getElementById("qc-coffee")?.addEventListener("change", e => { state.green_form.coffee = e.target.value; });
-
-  document.getElementById("qc-save-btn")?.addEventListener("click", save_green_qc);
-
-  // Filter
-  document.getElementById("filter-coffee")?.addEventListener("change", e => {
-    state.filter_coffee = e.target.value;
-    render();
+  // ── QC forms (Green, Roasted, Shops) ─────────────────────────────────────
+  // Fields write to state as they change so values survive re-renders.
+  document.querySelectorAll("[data-field]").forEach(el => {
+    const [kind, key] = el.dataset.field.split("|");
+    const store = e => { state.forms[kind][key] = e.target.value; };
+    el.addEventListener("input", store);
+    el.addEventListener("change", store);
   });
 
-  // Delete entry
-  document.querySelectorAll("[data-delete-id]").forEach(btn => btn.addEventListener("click", () => {
-    delete_qc_entry(btn.dataset.deleteId);
+  document.querySelectorAll("[data-reading]").forEach(el => el.addEventListener("input", e => {
+    const [kind, m, i] = el.dataset.reading.split("|");
+    state.forms[kind].readings[m][Number(i)] = e.target.value;
+    // Update the running average in place — a full render would steal focus
+    document.getElementById(`avg-${kind}-${m}`).innerHTML = live_avg_text(kind, m);
+  }));
+
+  document.querySelectorAll("[data-save]").forEach(btn => btn.addEventListener("click", () => save_qc(btn.dataset.save)));
+
+  document.querySelectorAll("[data-filter]").forEach(sel => sel.addEventListener("change", e => {
+    state.filters[sel.dataset.filter] = e.target.value;
+    render();
+  }));
+
+  document.querySelectorAll("[data-delete-qc]").forEach(btn => btn.addEventListener("click", () => {
+    const [kind, id] = btn.dataset.deleteQc.split("|");
+    delete_qc(kind, id);
   }));
 
   // ── Sample roast form ────────────────────────────────────────────────────
