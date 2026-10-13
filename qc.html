@@ -290,6 +290,7 @@ function check_readings(kind) {
 
 async function save_qc(kind) {
   const f = state.forms[kind];
+  if (f.saving) return;   // already saving — ignore a second tap
   const fail = msg => { f.saving = false; f.err = msg; f.ok = false; render(); };
   if (kind === "tds" && !f.shop) return fail("Select a shop.");
   const coffee = coffee_list(kind).find(c => String(c.id) === String(f.coffee_id));
@@ -516,6 +517,7 @@ function build_shops_tab() {
 
 async function save_sample_roast() {
   const f = state.sample_form;
+  if (f.saving) return;   // already saving — ignore a second tap
   if (!f.supplier.trim())  { f.err = "Enter a supplier."; render(); return; }
   if (!f.roasted_on)       { f.err = "Enter the date roasted."; render(); return; }
 

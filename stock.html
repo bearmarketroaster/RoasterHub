@@ -251,6 +251,7 @@ async function load_data() {
 }
 
 async function save_delivery() {
+  if (state.saving) return;   // already saving — ignore a second tap
   state.saving = true; render();
   const d = state.ui.delivery;
   const valid_items = d.items.filter(i => cid(i.coffee_id) != null && Number(i.weight_kg) > 0);
@@ -311,8 +312,12 @@ async function save_delivery() {
   })));
   if (mv_err) {
     // The delivery rows exist but the stock didn't move — say so rather than silently under-counting.
-    state.ui.delivery_err = "Delivery saved but the stock movement failed: " + mv_err.message;
-    state.saving=false; render(); return;
+    // The form is cleared all the same: the delivery IS saved, and saving the form again would log it twice.
+    alert("The delivery was saved, but adding it to the stock level failed: " + mv_err.message
+          + "\n\nDon't log it again — record the amount with Update Stock Level (⚖️ Adjustments) instead.");
+    state.saving=false; state.ui.show_delivery_form=false; state.ui.delivery_err="";
+    state.ui.delivery=new_delivery(); state.ui.pending_invoice_file=null;
+    await load_data(); render(); return;
   }
   state.saving=false; state.ui.show_delivery_form=false; state.ui.delivery_err="";
   state.ui.delivery=new_delivery(); state.ui.pending_invoice_file=null;
@@ -437,6 +442,7 @@ async function download_invoice(invoice_path) {
 }
 
 async function save_adjustment() {
+  if (state.saving) return;   // already saving — ignore a second tap
   state.saving = true;
   const coffee_id = cid(state.ui.adj.coffee_id);
   const coffee = coffee_id == null ? "" : coffee_name_by_id(coffee_id);
@@ -493,6 +499,7 @@ async function ensure_staff_destination() {
 
 async function save_staff_takeaway() {
   const s = state.ui.staff;
+  if (s.saving) return;   // already saving — ignore a second tap
   s.err = "";
   const container = state.containers.find(c => c.id === s.container_id);
   const coffee_id = cid(s.coffee_id);
@@ -538,7 +545,12 @@ async function save_staff_takeaway() {
     kg: bag_kg,
     fp_code,
   });
-  if (line_err) { s.err = "Failed to save takeaway line: " + line_err.message; s.saving = false; render(); return; }
+  if (line_err) {
+    // The takeaway itself is saved — clear the form so it can't be logged twice
+    alert("The takeaway was logged, but its bag details failed to save: " + line_err.message + "\n\nDon't log it again.");
+    state.ui.staff = { coffee_id: "", container_id: "", bag_size: "200g", err: "", saving: false };
+    await load_data(); render(); return;
+  }
 
   // Reset form, reload
   state.ui.staff = { coffee_id: "", container_id: "", bag_size: "200g", err: "", saving: false };
@@ -948,6 +960,7 @@ function build_contracts() {
 }
 
 async function save_contract() {
+  if (state.saving) return;   // already saving — ignore a second tap
   state.saving = true; render();
   const c = state.ui.contract;
   if (!c.supplier || !c.coffee_id || !(Number(c.bag_count) > 0)) {

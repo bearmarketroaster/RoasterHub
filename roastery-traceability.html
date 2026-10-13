@@ -226,7 +226,7 @@ async function set_container_status(container_id, new_status) {
     return;
   }
   if (new_status === "active") {
-    const clash = c && state.containers.find(x => x !== c && x.status === "active" && x.remaining > 0 && x.coffee && c.coffee && x.coffee === c.coffee);
+    const clash = c && state.containers.find(x => x !== c && x.status === "active" && x.remaining > 0 && x.coffee_id && c.coffee_id && x.coffee_id === c.coffee_id);
     if (clash) {
       alert(`${c.coffee} is already active in ${source_label(clash)}.\n\nFinish or empty that before activating another of the same coffee — packing always pulls from the oldest active drum, and two of the same would break that.`);
       render();
@@ -499,7 +499,7 @@ async function load_data() {
     fetch_pages("coffees", () => supabaseClient.from("coffees")
       .select("id, name, retired_at").order("name")),
     fetch_pages("fp_codes", () => supabaseClient.from("fp_codes")
-      .select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code")),
+      .select("fp_code, coffee_id, bag_size, retired_at, coffees(name, retired_at)").order("fp_code")),
     fetch_pages("fp_assignments", () => supabaseClient.from("fp_assignments")
       .select("fp_code, coffee_id, bag_size, effective_start, effective_end, coffees(name)")
       .order("id", { ascending: true })),
@@ -508,7 +508,7 @@ async function load_data() {
     // location and last_shop are derived in the view — see sql/v_bucket_state.sql. Same primary sort as
     // the old direct buckets query, since the fill-suggestion ordering follows it.
     fetch_pages("v_bucket_state", () => supabaseClient.from("v_bucket_state")
-      .select("id, name, coffee, status, retired_at, fill_id, container_id, location, last_shop")
+      .select("id, name, coffee, coffee_id, status, retired_at, fill_id, container_id, location, last_shop")
       .order("created_at", { ascending: false }).order("id", { ascending: true })),
     fetch_pages("v_container_state", () => supabaseClient.from("v_container_state")
       .select("*").order("id", { ascending: true })),
@@ -528,14 +528,15 @@ async function load_data() {
   state.fp_codes = (fp_codes_data||[]).map(f => ({
     fp_code: f.fp_code,
     bag_size: f.bag_size,
+    coffee_id: f.coffee_id,
     coffee_name: f.coffees?.name||"",
-    retired_at: f.retired_at,                       // for scan-time retired detection
+    retired_at: f.retired_at,                      // for scan-time retired detection
     coffee_retired_at: f.coffees?.retired_at,       // parent coffee retired too?
   }));
   // Active-only: FP itself not retired, AND parent coffee not retired
   state.active_fp_codes = (fp_codes_data||[])
     .filter(f => !f.retired_at && !f.coffees?.retired_at)
-    .map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_name: f.coffees?.name||"" }));
+    .map(f => ({ fp_code: f.fp_code, bag_size: f.bag_size, coffee_id: f.coffee_id, coffee_name: f.coffees?.name||"" }));
 
   // Time-versioned FP -> coffee assignments (source of truth for as-of resolution).
   // Seeds are open-ended, so today() resolves to the current coffee — identical to
@@ -559,6 +560,7 @@ async function load_data() {
   const drums = (container_state || []).map(c => ({
     id: c.id,
     coffee: c.coffee,
+    coffee_id: c.coffee_id,
     fill_id: c.fill_id,
     status: c.status,
     status_changed_at: c.status_changed_at,
@@ -1009,6 +1011,7 @@ async function save_filled_buckets() {
     status: "filled",
     container_id: container.id,
     fill_id: container.fill_id,
+    coffee_id: container.coffee_id,
     coffee: container.coffee,
     filled_at: now,
     condition: "clean",
@@ -1016,15 +1019,23 @@ async function save_filled_buckets() {
   }).in("id", bucket_ids);
   if (fill_err) { alert("Failed to save buckets: " + fill_err.message); return; }
 
+  // The fill is saved, so it's no longer unsaved work: clear it (and the kept draft) now, not after the
+  // steps below. Leaving the page part-way through would otherwise bring the same fill back to be
+  // saved again — the duplicate-roast problem of 13 Oct.
+  const filled = fill_state.filled.slice();
+  const dest = fill_state.destination;
+  state.ui.fill_bucket_container = null;
+  reset_fill_state();
+  save_draft();
+
   // Fill & dispatch: send the just-filled buckets straight out. Same records the packing screen makes
   // for buckets — one 5kg Bar line each (tagged with this drum/fill), a dispatch_buckets link, and the
   // bucket flipped to dispatched. The fill above already stamped filled_at, and the links go in after
   // it, so a bucket that was still out at a shop is logged as a clean return against its previous trip
   // (log_refill_return, returns-step1.sql).
-  const dest = fill_state.destination;
   if (dest) {
-    const fp = state.fp_codes.find(f => f.coffee_name === container.coffee && f.bag_size === "Bar 5kg");
-    const lines = fill_state.filled.map(() => ({
+    const fp = state.fp_codes.find(f => f.coffee_id === container.coffee_id && f.bag_size === "Bar 5kg");
+    const lines = filled.map(() => ({
       type: "retail", kg: 5, bags: 1, bag_size: "Bar 5kg",
       container_id: container.id, fill_id: container.fill_id, fp_code: fp?.fp_code || null,
     }));
@@ -1040,12 +1051,10 @@ async function save_filled_buckets() {
   }
 
   // Auto-flip container (every drum, for a combined batch) to "empty" if remaining hits 0
-  const session_kg = fill_state.filled.length * 5;
+  const session_kg = filled.length * 5;
   if (container.remaining - session_kg <= 0.01) {
     await mark_source_empty(container, now);
   }
-  state.ui.fill_bucket_container = null;
-  reset_fill_state();
   await load_data();
   } finally {
     state.saving = false;
@@ -1289,15 +1298,15 @@ function sort_containers_fifo(list) {
   const FAR = "9999-12-31", LAST = "\uffff";
   const oldest_by_coffee = {};
   list.forEach(c => {
-    const key = c.coffee || LAST;
+    const key = c.coffee_id ?? LAST;
     const d = c.fill_start_date || FAR;
     if (!oldest_by_coffee[key] || d < oldest_by_coffee[key]) oldest_by_coffee[key] = d;
   });
   return list.slice().sort((a, b) => {
-    const ka = a.coffee || LAST, kb = b.coffee || LAST;
+    const ka = a.coffee_id ?? LAST, kb = b.coffee_id ?? LAST;
     const ga = oldest_by_coffee[ka], gb = oldest_by_coffee[kb];
     if (ga !== gb) return ga < gb ? -1 : 1;
-    if (ka !== kb) return ka.localeCompare(kb);
+    if (ka !== kb) return (a.coffee || LAST).localeCompare(b.coffee || LAST);
     const da = a.fill_start_date || FAR, db = b.fill_start_date || FAR;
     if (da !== db) return da < db ? -1 : 1;
     return String(a.id).localeCompare(String(b.id));
@@ -1816,12 +1825,13 @@ function process_scan(raw_value) {
   // not on the raw fp_codes row. Today lands on the open version, so this is
   // identical to current behaviour until a real reuse creates a boundary —
   // at which point the packer correctly gets the coffee the code means *now*.
-  const packCoffee = (resolveFp(value, today()) || fp).coffee_name;
+  const packFp = resolveFp(value, today()) || fp;
+  const packCoffee = packFp.coffee_name;
 
   // FIFO: find the oldest active container for this coffee with stock available for this bag size
   const bag_kg = BAG_SIZE_KG[fp.bag_size] || 0;
   const candidates = state.containers
-    .filter(c => c.status === "active" && c.coffee === packCoffee && c.remaining > 0)
+    .filter(c => c.status === "active" && c.coffee_id != null && c.coffee_id === packFp.coffee_id && c.remaining > 0)
     .sort((a,b) => (a.latest_roast_date || "").localeCompare(b.latest_roast_date || ""));  // oldest first
 
   if (candidates.length === 0) {
@@ -2792,7 +2802,9 @@ function attach_listeners() {
     // FLAG: bucket→FP linking — looks up the FP code for (bucket's coffee, "Bar 5kg") and tags the line.
     // If something goes wrong with reports, this can be rolled back by deleting fp_code from these lines.
     packing_state.scanned_buckets.forEach(b => {
-      const matching_fp = state.fp_codes.find(f => f.coffee_name === b.coffee && f.bag_size === "Bar 5kg");
+      // The bucket's coffee id comes from the loaded bucket list (a restored draft may predate coffee ids)
+      const coffee_id = state.buckets.find(x => x.id === b.id)?.coffee_id;
+      const matching_fp = coffee_id != null ? state.fp_codes.find(f => f.coffee_id === coffee_id && f.bag_size === "Bar 5kg") : null;
       lines.push({
         type: "retail", kg: 5, bags: 1, bag_size: "Bar 5kg",
         container_id: b.container_id, fill_id: b.fill_id,
@@ -2833,6 +2845,9 @@ function attach_listeners() {
       primary_fill_id = packing_state.batch.fill_id;
     }
     const dispatch_id = await save_dispatch_v2(primary_container_id, primary_fill_id, packing_state.shop, lines, total_kg);
+    // Saved, so it's no longer unsaved work: drop the kept draft now, not after the steps below.
+    // Leaving the page part-way through would otherwise bring the same packing back to be saved again.
+    if (dispatch_id) { packing_state.step = "done"; save_draft(); }
     if (dispatch_id && packing_state.scanned_buckets.length > 0) {
       // Record bucket → dispatch link and flip the buckets to dispatched. Independent writes, so both
       // requests go out together rather than one after the other.
