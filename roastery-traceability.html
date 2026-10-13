@@ -144,7 +144,7 @@ const state = {
     fill_bucket_container: null,  // Container ID currently being filled with buckets
     bucket_return_open: false,
     empty_choice: null,  // Container ID pending the empty-via-samples-or-writeoff choice
-    bucket_return_condition: "clean",
+    bucket_return_condition: "dirty",   // Report a problem bucket: "dirty" | "damaged"
   },
 };
 
@@ -710,7 +710,7 @@ function restore_draft() {
   if (d.returning) {
     reset_return_state();
     return_state.returned = d.returning.returned || [];
-    state.ui.bucket_return_condition = d.returning.condition || "clean";
+    state.ui.bucket_return_condition = d.returning.condition === "damaged" ? "damaged" : "dirty";
     state.ui.bucket_return_open = true;
     return true;
   }
@@ -833,6 +833,8 @@ function process_fill_scan(raw_value) {
     container_id: container.id,
     fill_id: container.fill_id,
     coffee: container.coffee,
+    // Still out at a shop: refilling it logs it as returned clean (log_refill_return, returns-step1.sql)
+    back_from: bucket.status === "dispatched" ? (bucket.last_shop || "a shop") : null,
   });
   flash_fill_scan(`✓ ${bucket_label(value)} filled with ${container.coffee||"?"}`, "success");
   update_fill_panel();
@@ -864,7 +866,7 @@ function update_fill_panel() {
   const session_kg = fill_state.filled.length * 5;
   const remaining_after = container ? kgfloor(container.remaining - session_kg) : "?";
   const list = fill_state.filled.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">🪣 ${esc(b.name||b.id)}</div><div class="hint" style="font-size:11px">5kg · ${esc(b.coffee||"?")}${b.name?` · <span style="font-family:monospace">${esc(b.id)}</span>`:""}</div></div>
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">🪣 ${esc(b.name||b.id)}</div><div class="hint" style="font-size:11px">5kg · ${esc(b.coffee||"?")}${b.name?` · <span style="font-family:monospace">${esc(b.id)}</span>`:""}</div>${b.back_from?`<div style="font-size:11px;color:#16a34a;margin-top:2px">↩ back from ${esc(b.back_from)} — logged as a clean return</div>`:""}</div>
     <button data-unfill="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
   panel.innerHTML = `
@@ -1036,15 +1038,14 @@ function process_return_scan(raw_value) {
     flash_return_scan(`${bucket_label(value)} is retired`, "error");
     return;
   }
-  // A FILLED bucket holds coffee in the system — returning it clears that fill. Confirm before discarding.
-  if (bucket.status === "filled") {
-    if (!confirm(`${bucket_label(value)} is marked FILLED${bucket.coffee ? ` with ${bucket.coffee}` : ""}. Returning it clears that fill and marks it empty. Continue?`)) return;
+  // Only buckets out at a shop come back. Clean ones need nothing — refilling logs them as a clean
+  // return (log_refill_return in returns-step1.sql); this screen is just for the problem ones.
+  if (bucket.status !== "dispatched") {
+    flash_return_scan(`${bucket_label(value)} isn't out at a shop (${bucket.status || "?"})`, "error");
+    return;
   }
-  // Accept it back. Legacy buckets that were sent out before the scan-out flow existed have no
-  // "dispatched" status — accept them anyway so they can be brought back into the system.
-  const legacy = bucket.status !== "dispatched";
-  return_state.returned.push({ id: value, name: bucket.name || null, prev_status: bucket.status, prev_coffee: bucket.coffee });
-  flash_return_scan(legacy ? `✓ ${bucket_label(value)} accepted back (no prior dispatch on record)` : `✓ ${bucket_label(value)} marked returned`, "success");
+  return_state.returned.push({ id: value, name: bucket.name || null, shop: bucket.last_shop || null });
+  flash_return_scan(`⚠️ ${bucket_label(value)}${bucket.last_shop ? ` — from ${bucket.last_shop}` : ""}`, "success");
   update_return_panel();
 }
 
@@ -1071,12 +1072,12 @@ function update_return_panel() {
   const panel = document.getElementById("return-panel");
   if (!panel) { render(); return; }
   const list = return_state.returned.map(b => `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">🪣 ${esc(b.name||b.id)}</div><div class="hint" style="font-size:11px">Previously: ${esc(b.prev_status||"?")}${b.prev_coffee?` · ${esc(b.prev_coffee)}`:""}${b.name?` · <span style="font-family:monospace">${esc(b.id)}</span>`:""}</div></div>
+    <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">🪣 ${esc(b.name||b.id)}</div><div class="hint" style="font-size:11px">${b.shop?`from ${esc(b.shop)}`:"shop unknown"}${b.name?` · <span style="font-family:monospace">${esc(b.id)}</span>`:""}</div></div>
     <button data-unreturn="${esc(b.id)}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:18px;line-height:1;padding:4px 6px">✕</button>
   </div>`).join("");
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div style="font-weight:700;font-size:13px">RETURNED (${return_state.returned.length})</div>
+      <div style="font-weight:700;font-size:13px">TO REPORT (${return_state.returned.length})</div>
     </div>
     ${return_state.returned.length ? list : `<p class="hint" style="text-align:center;font-style:italic;font-size:13px;padding:12px 0">No buckets scanned — ${return_state.scan_mode==="camera"?"scan returning bucket QRs":"scan or type a bucket ID to begin"}</p>`}
   `;
@@ -1085,24 +1086,35 @@ function update_return_panel() {
     update_return_panel();
   }));
   const confirmBtn = document.getElementById("return-confirm-btn");
-  if (confirmBtn) confirmBtn.disabled = return_state.returned.length === 0;
+  if (confirmBtn) {
+    confirmBtn.disabled = return_state.returned.length === 0;
+    confirmBtn.textContent = `⚠️ Report ${return_state.returned.length || ""} as ${state.ui.bucket_return_condition === "damaged" ? "damaged" : "dirty"}`;
+  }
+}
+
+function return_cond_hint(condition) {
+  return condition === "damaged"
+    ? "Logged against the shop, and the bucket is retired so it can't be filled again."
+    : "Logged against the shop. The bucket's back at the roastery and can be filled again once it's cleaned.";
 }
 
 function build_bucket_return_overlay() {
-  const condition = state.ui.bucket_return_condition || "clean";
+  const condition = state.ui.bucket_return_condition === "damaged" ? "damaged" : "dirty";
   const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${return_state.scanner_msg ? `background:${return_state.scanner_msg_type==="success"?"#16a34a":return_state.scanner_msg_type==="error"?"#dc2626":"#1a1a1a"}` : "display:none"}`;
+  const cond_btn = (c, label) => `<button class="btn ${condition===c?"btn-dark":"btn-ghost"} btn-sm" data-set-condition="${c}" style="${condition===c?"color:#fff":""};padding:10px">${label}</button>`;
   return `<div class="overlay"><div class="modal" style="max-width:480px">
     <div style="text-align:center;margin-bottom:14px">
-      <div style="font-size:40px">↩️</div>
-      <h2 style="margin:8px 0 2px">Mark Buckets Returned</h2>
-      <div class="hint" style="font-size:13px;margin-top:4px">Scan each bucket coming back from a shop</div>
+      <div style="font-size:40px">⚠️</div>
+      <h2 style="margin:8px 0 2px">Report a Problem Bucket</h2>
+      <div class="hint" style="font-size:13px;margin-top:4px">Only buckets that came back dirty or damaged. Clean ones need nothing — they're logged as returned when they're refilled.</div>
     </div>
 
     <div style="margin-bottom:14px">
-      <label class="lbl" style="font-size:13px;margin-bottom:6px;display:block">Condition for these buckets</label>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
-        ${["clean","dirty","damaged","lost"].map(c => `<button class="btn ${condition===c?"btn-dark":"btn-ghost"} btn-sm" data-set-condition="${c}" style="${condition===c?"color:#fff":""};text-transform:capitalize">${c}</button>`).join("")}
+      <label class="lbl" style="font-size:13px;margin-bottom:6px;display:block">What's wrong with these buckets?</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        ${cond_btn("dirty", "🧽 Dirty")}${cond_btn("damaged", "💥 Damaged")}
       </div>
+      <div class="hint" id="return-cond-hint" style="font-size:12px;margin-top:6px">${return_cond_hint(condition)}</div>
     </div>
 
     <div style="display:flex;gap:6px;margin-bottom:10px;background:#f4f2ed;padding:4px;border-radius:8px">
@@ -1123,7 +1135,7 @@ function build_bucket_return_overlay() {
 
     <div style="position:relative;margin-bottom:14px">
       <div style="display:flex;gap:8px">
-        <input id="return-manual-input" placeholder="Search dispatched buckets by name or ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
+        <input id="return-manual-input" placeholder="Search buckets out at shops by name or ID..." style="flex:1;font-size:14px;padding:10px 12px" autocomplete="off" />
         <button class="btn btn-dark btn-sm" id="return-manual-btn">Add</button>
       </div>
       <div id="return-suggestions" style="position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e8e6e1;border-radius:8px;margin-top:4px;max-height:240px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:20;display:none"></div>
@@ -1135,7 +1147,7 @@ function build_bucket_return_overlay() {
 
     <div class="grid-2">
       <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="return-cancel">← Cancel</button>
-      <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="return-confirm-btn" disabled>✓ Mark ${return_state.returned.length} Returned</button>
+      <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="return-confirm-btn" disabled>⚠️ Report ${return_state.returned.length || ""} as ${condition}</button>
     </div>
   </div></div>`;
 }
@@ -1143,19 +1155,15 @@ function build_bucket_return_overlay() {
 async function save_returned_buckets() {
   if (return_state.returned.length === 0) return;
   state.saving = true; render();
-  const condition = state.ui.bucket_return_condition || "clean";
-  const now = new Date().toISOString();
-  const ids = return_state.returned.map(b => b.id);
-  // Mark returned: status → empty (ready for refill), condition, returned_at
-  // Clear contents (container_id, fill_id, coffee) since bucket is now empty
-  await supabaseClient.from("buckets").update({
-    status: "empty",
-    condition,
-    returned_at: now,
-    container_id: null,
-    fill_id: null,
-    coffee: null,
-  }).in("id", ids);
+  const condition = state.ui.bucket_return_condition === "damaged" ? "damaged" : "dirty";
+  // Each one is logged in the return history against the shop that had it, and the bucket is
+  // marked back at the roastery (and retired if damaged) — see report_bucket_problem in returns-step1.sql
+  const failed = [];
+  for (const b of return_state.returned) {
+    const { error } = await supabaseClient.rpc("report_bucket_problem", { p_bucket_id: b.id, p_condition: condition });
+    if (error) failed.push(`${b.name || b.id}: ${error.message}`);
+  }
+  if (failed.length) alert(`Some buckets couldn't be reported:\n\n${failed.join("\n")}`);
   state.saving = false;
   state.ui.bucket_return_open = false;
   reset_return_state();
@@ -1425,7 +1433,7 @@ function build_buckets_tab() {
   return `
     <div class="flex-between mb-16">
       <h2 style="margin:0">Buckets</h2>
-      <button class="btn btn-dark" id="bucket-returns-btn" style="padding:12px 18px;font-size:15px">&#8617;&#65039; Return buckets${buckets_out > 0 ? ` (${buckets_out} out)` : ""}</button>
+      <button class="btn btn-dark" id="bucket-returns-btn" style="padding:12px 18px;font-size:15px">⚠️ Report a problem bucket</button>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
       ${stat(buckets_filled, "Filled", "#16a34a")}
@@ -2411,7 +2419,7 @@ function attach_listeners() {
   // ── Bucket Returns listeners ──
   app.querySelector("#bucket-returns-btn")?.addEventListener("click", () => {
     state.ui.bucket_return_open = true;
-    state.ui.bucket_return_condition = "clean";
+    state.ui.bucket_return_condition = "dirty";
     reset_return_state();
     render();
   });
@@ -2455,7 +2463,7 @@ function attach_listeners() {
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
     const matches = rank_bucket_matches(
-      state.buckets.filter(b => !b.retired_at),
+      state.buckets.filter(b => !b.retired_at && b.status === "dispatched"),
       q, new Set(return_state.returned.map(x => x.id))
     );
     if (matches.length === 0) {
@@ -2491,6 +2499,9 @@ function attach_listeners() {
       b.classList.toggle("btn-ghost", !active);
       b.style.color = active ? "#fff" : "";
     });
+    const hint = document.getElementById("return-cond-hint");
+    if (hint) hint.textContent = return_cond_hint(state.ui.bucket_return_condition);
+    update_return_panel();   // refreshes the Report button's wording
   }));
   app.querySelector("#return-confirm-btn")?.addEventListener("click", () => {
     stop_return_scanner();

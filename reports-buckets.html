@@ -173,7 +173,20 @@ async function load() {
       scanned_at: row.scanned_at,
     });
   });
+  // Return history: one row per return (see returns-step1.sql). Clean returns are logged when a
+  // bucket is refilled; dirty / damaged ones from "Report a problem bucket" in Traceability.
+  const { data: returns } = await supabaseClient.from("bucket_returns")
+    .select("bucket_id, dispatch_id, shop, returned_at, condition, method").order("returned_at", { ascending: false });
+  state.returns = returns || [];
+  state.return_by_trip = {};   // "bucket|dispatch" → its return
+  state.returns.forEach(r => { if (r.dispatch_id) state.return_by_trip[`${r.bucket_id}|${r.dispatch_id}`] = r; });
   state.loaded = true;
+}
+
+// When a returned bucket went out on the trip it came back from
+function trip_sent_at(r) {
+  const h = (state.per_bucket_history[r.bucket_id] || []).find(x => x.dispatch_id === r.dispatch_id);
+  return h ? h.scanned_at : null;
 }
 
 // ── Date range helpers ───────────────────────────────────────────────────────
@@ -306,20 +319,18 @@ function build_currently_out() {
 // ── Section 2: Recently Returned ────────────────────────────────────────────
 function build_recently_returned() {
   const rows = [];
-  state.buckets.forEach(b => {
-    if (!b.returned_at) return;
-    if (!in_range(b.returned_at)) return;
-    const history = state.per_bucket_history[b.id] || [];
-    const latest = history[0];
-    if (!latest) return;
-    const time_out = days_between(latest.scanned_at, b.returned_at);
+  state.returns.forEach(r => {
+    if (!in_range(r.returned_at)) return;
+    const b = state.buckets.find(x => x.id === r.bucket_id);
+    if (!b) return;
+    const sent = trip_sent_at(r);
     rows.push({
       bucket: b,
-      shop: latest.shop,
-      coffee: latest.shop ? (b.coffee || "") : "",
-      time_out,
-      condition: b.condition || "clean",
-      returned_at: b.returned_at,
+      shop: r.shop || "",
+      coffee: "",
+      time_out: sent ? days_between(sent, r.returned_at) : null,
+      condition: r.condition || "clean",
+      returned_at: r.returned_at,
     });
   });
   rows.sort((a, b) => new Date(b.returned_at).getTime() - new Date(a.returned_at).getTime());
@@ -367,18 +378,15 @@ function build_shop_stats() {
     if (days_out !== null && days_out > 30) s.lost_count += 1;
   });
 
-  // Returns in range
-  state.buckets.forEach(b => {
-    if (!b.returned_at) return;
-    if (!in_range(b.returned_at)) return;
-    const history = state.per_bucket_history[b.id] || [];
-    const latest = history[0];
-    if (!latest) return;
-    const s = ensure(latest.shop);
+  // Returns in range — from the return history, so every trip counts, not just each bucket's latest
+  state.returns.forEach(r => {
+    if (!r.shop || !in_range(r.returned_at)) return;
+    const s = ensure(r.shop);
     s.returned_count += 1;
-    const days = days_between(latest.scanned_at, b.returned_at);
+    const sent = trip_sent_at(r);
+    const days = sent ? days_between(sent, r.returned_at) : null;
     if (days !== null && days >= 0) s.return_times.push(days);
-    const cond = b.condition || "clean";
+    const cond = r.condition || "clean";
     if (s.condition_counts[cond] !== undefined) s.condition_counts[cond] += 1;
   });
 
@@ -421,25 +429,21 @@ function build_history_modal() {
   const rows = history.length === 0
     ? `<p class="hint">No dispatch history.</p>`
     : `<table>
-        <thead><tr><th>Date</th><th>Shop</th><th>Confirmed</th><th>Time Out</th></tr></thead>
+        <thead><tr><th>Date</th><th>Shop</th><th>Confirmed</th><th>Time Out</th><th>Came back</th></tr></thead>
         <tbody>
           ${history.map((h, i) => {
+            // The trip's return from the return history; older trips from before it existed fall back to
+            // the old approximation (the next dispatch, or the bucket's latest returned_at).
+            const ret = state.return_by_trip[`${b.id}|${h.dispatch_id}`];
             const next_dispatch = history[i-1];                       // next-newer dispatch (history is newest-first)
-            // For all but the latest, the "return" happened when the next dispatch (or refill) occurred —
-            // we approximate by using bucket.filled_at if this is the latest, or the next dispatch's date.
-            // For the latest dispatch, if bucket has returned_at, that's the return time.
-            let returned_ts = null;
-            if (i === 0) {
-              returned_ts = b.returned_at;
-            } else {
-              returned_ts = next_dispatch?.scanned_at;
-            }
+            const returned_ts = ret ? ret.returned_at : (i === 0 ? b.returned_at : next_dispatch?.scanned_at);
             const time_out = returned_ts ? days_between(h.scanned_at, returned_ts) : days_between(h.scanned_at, new Date());
             return `<tr>
               <td>${esc(new Date(h.scanned_at).toLocaleDateString())}</td>
               <td>${esc(h.shop || "—")}</td>
               <td>${h.confirmed_at ? `<span style="color:#16a34a">✓ ${esc(new Date(h.confirmed_at).toLocaleDateString())}</span>` : `<span style="color:#999">—</span>`}</td>
               <td>${returned_ts ? fmt_days(time_out) : `<em style="color:#999">still out (${fmt_days(time_out)})</em>`}</td>
+              <td>${ret ? `<span class="tag tag-${esc(ret.condition)}">${esc(ret.condition)}</span>` : `<span style="color:#999">—</span>`}</td>
             </tr>`;
           }).join("")}
         </tbody>
