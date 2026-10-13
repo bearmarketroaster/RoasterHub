@@ -233,6 +233,21 @@ async function load_data() {
   // Load recent staff takeaways for display in the staff tab
   const { data: staff_disps } = await supabaseClient.from("dispatches").select("id, shop, date, total_kg, container_id, fill_id, dispatch_lines(*)").eq("shop", "Staff").order("date", { ascending: false }).limit(50);
   state.staff_dispatches = (staff_disps || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
+
+  // The coffee each takeaway was: from the bag's FP code, or else from the roast its drum fill came from
+  // (dispatch lines don't store the coffee themselves)
+  const staff_fills = [...new Set(state.staff_dispatches.flatMap(d => d.lines.map(l => l.fill_id || d.fill_id)).filter(Boolean))];
+  const [{ data: fps }, { data: fill_roasts }] = await Promise.all([
+    supabaseClient.from("fp_codes").select("fp_code, coffee_id"),
+    staff_fills.length ? supabaseClient.from("roast_sessions").select("fill_id, coffee_id").in("fill_id", staff_fills) : Promise.resolve({ data: [] }),
+  ]);
+  const fp_coffee = Object.fromEntries((fps || []).map(f => [f.fp_code, f.coffee_id]));
+  const fill_coffee = Object.fromEntries((fill_roasts || []).map(r => [r.fill_id, r.coffee_id]));
+  state.staff_dispatches.forEach(d => {
+    const l = d.lines[0] || {};
+    const id = fp_coffee[l.fp_code] ?? fill_coffee[l.fill_id || d.fill_id];
+    d.coffee = id != null ? coffee_name_by_id(id) : null;
+  });
 }
 
 async function save_delivery() {
@@ -1132,7 +1147,7 @@ function build_staff() {
           const line = (d.lines || [])[0] || {};
           return `<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:8px 12px;border-top:1px solid #f0eee9;font-size:13px">
             <span class="tag" style="background:#f4f2ed;color:#666;min-width:70px;text-align:center;font-weight:600">${esc(line.bag_size || "?")}</span>
-            <span style="font-weight:500">${esc(line.coffee || d.shop)}</span>
+            <span style="font-weight:500">${esc(d.coffee || "Unknown coffee")}</span>
             <span style="color:#666;font-family:monospace;font-size:12px">${esc(d.container_id || "—")}</span>
             <span style="color:#666">${d.date}</span>
           </div>`;

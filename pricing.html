@@ -662,10 +662,11 @@ async function save_green(coffeeId, raw) {
   const price = (val === "" || isNaN(Number(val))) ? null : Number(val);
   if (price == null) delete state.green_override[id]; else state.green_override[id] = price;
   // Upsert (don't delete the row) so a per-coffee shipping value is preserved when green is cleared.
-  await supabaseClient.from("pricing_green").upsert(
+  const { error } = await supabaseClient.from("pricing_green").upsert(
     { coffee_id: id, coffee: name, green_price: price, updated_at: new Date().toISOString() },
     { onConflict: "coffee_id" }
   );
+  if (error) alert(`Couldn't save the green price for ${name || "this coffee"}: ${error.message}\n\nIt's showing here but isn't saved — try again.`);
   render_results();
 }
 
@@ -676,10 +677,11 @@ async function save_shipping(coffeeId, raw) {
   const val = String(raw).trim();
   const ship = (val === "" || isNaN(Number(val))) ? null : Number(val);
   if (ship == null) delete state.shipping_override[id]; else state.shipping_override[id] = ship;
-  await supabaseClient.from("pricing_green").upsert(
+  const { error } = await supabaseClient.from("pricing_green").upsert(
     { coffee_id: id, coffee: name, shipping_per_kg: ship, updated_at: new Date().toISOString() },
     { onConflict: "coffee_id" }
   );
+  if (error) alert(`Couldn't save the shipping cost for ${name || "this coffee"}: ${error.message}\n\nIt's showing here but isn't saved — try again.`);
   render_results();
 }
 
