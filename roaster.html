@@ -103,6 +103,9 @@
     .wl-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
     .wl-badge.done { background: #16a34a; color: #fff; }
     .wl-badge.skip { background: #999; color: #fff; }
+    .wl-combine { margin-left: 6px; background: #fff; border: 1px solid #c7d7f5; color: #2563eb; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; cursor: pointer; }
+    .wl-combine.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+    .wl-lot { margin-left: 6px; font-size: 11px; font-weight: 700; color: #2563eb; }
     .wl-act { display: flex; align-items: center; gap: 6px; }
     .wl-start { background: #16a34a; color: #fff; text-decoration: none; font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
     .wl-skip { background: #fff; border: 1px solid #ddd; font-size: 12px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
@@ -437,6 +440,15 @@ function render() {
   // ---- Today's plan as an ordered, persistent worklist ----
   const drum_size = (cid) => (String(cid||"").match(/^([A-Za-z]+)/) || [,""])[1].toUpperCase();
   const max_for = (cid) => max_roasts(drum_size(cid)) || 99;
+  // 🔗 Combine — at the roaster's discretion: planned drums of the same coffee toggled on form one lot
+  // (several drums = one source for filling buckets; see roastery-traceability.html). Offered once the
+  // plan has 2+ drums of that coffee; the Roasts page reads it at ▶ Start and can still be changed there.
+  const same_coffee = coffee => items.filter(i => i.coffee === coffee && i.status !== "skipped").length;
+  const combine_ctl = it => {
+    if (it.status === "done") return it.combine_fill_id ? `<span class="wl-lot">🔗 in lot</span>` : "";
+    if (it.status !== "planned" || (same_coffee(it.coffee) < 2 && !it.combine_fill_id)) return "";
+    return `<button class="wl-combine ${it.combine_fill_id ? "on" : ""}" data-combine="${it.id}" title="${it.combine_fill_id ? "Part of a combined lot — tap to roast it as a normal drum" : "Combine with the other drums of this coffee"}">🔗 ${it.combine_fill_id ? "Combined" : "Combine"}</button>`;
+  };
   const worklist = items.length ? items.map((it, idx) => {
     const g = state.green_per_roast[it.coffee];
     const mx = max_for(it.container_id);
@@ -447,7 +459,7 @@ function render() {
         <button class="wl-mv" data-move="${it.id}|1" ${idx===items.length-1?"disabled":""}>▼</button>
       </div>
       <div class="wl-body">
-        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee">${esc(it.coffee)}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""}</div>
+        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee">${esc(it.coffee)}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""} ${combine_ctl(it)}</div>
         <div class="wl-sub">${(done||skip)?`${it.batches} batch${it.batches!=1?"es":""}`:`<span class="stepper"><button data-pbatch="${it.id}|-1">−</button><span>${it.batches}</span><button data-pbatch="${it.id}|1">+</button> <span class="slot-max">/ ${mx} batches</span></span>`}${g>0?` · ≈ ${kg(g*it.batches)} green`:""}</div>
       </div>
       <div class="wl-act">
@@ -553,6 +565,21 @@ function render() {
     const a = arr[idx], c = arr[j];
     await supabaseClient.from("roast_plan").update({ seq: c.seq }).eq("id", a.id);
     await supabaseClient.from("roast_plan").update({ seq: a.seq }).eq("id", c.id);
+    await load_plan(); render();
+  }));
+  // 🔗 Combine toggle. Joining reuses the lot id already given to today's drums of that coffee
+  // (so a drum added later can join a lot that's started); otherwise this starts a new lot id.
+  app.querySelectorAll("[data-combine]").forEach(b => b.addEventListener("click", async () => {
+    const it = state.plan_items.find(i => i.id === b.dataset.combine); if (!it) return;
+    let lot = null;
+    if (!it.combine_fill_id) {
+      lot = state.plan_items.find(i => i.coffee === it.coffee && i.combine_fill_id && i.status !== "skipped")?.combine_fill_id;
+      if (!lot) {
+        const slug = (it.coffee || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        lot = `CB-${today_str().replace(/-/g, "")}${slug ? `-${slug}` : ""}-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
+      }
+    }
+    await supabaseClient.from("roast_plan").update({ combine_fill_id: lot, updated_at: new Date().toISOString() }).eq("id", it.id);
     await load_plan(); render();
   }));
   app.querySelectorAll("[data-skip]").forEach(b => b.addEventListener("click", async () => {

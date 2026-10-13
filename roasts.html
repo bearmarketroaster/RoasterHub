@@ -190,16 +190,26 @@ async function save_session() {
   // Combined batch: every drum in it shares one fill, which is what makes Traceability treat
   // them as a single source. Joining uses the batch's fill; starting one creates the batch first.
   if (container_id && s.combine) {
-    if (s.combine_with) {
+    // Joining an open lot uses its fill. A lot planned on the Roaster page that hasn't started yet
+    // already has its fill id, so the first drum creates the lot under that id; otherwise a new id.
+    const joining = s.combine_with && (state.open_batches || []).some(b => b.fill_id === s.combine_with);
+    if (joining) {
       fill_id = s.combine_with;
     } else {
-      fill_id = `CB-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
+      fill_id = s.combine_with || `CB-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
       const d = new Date(s.date + "T12:00:00");
       const part = opt => d.toLocaleDateString("en-IE", opt);
       const name = `${s.coffee} · ${part({ weekday: "short" })} ${d.getDate()} ${part({ month: "short" })}`;   // e.g. "Holy Roast · Mon 12 Oct"
       const { error: batch_err } = await supabaseClient.from("combined_batches")
         .insert({ fill_id, name, coffee: s.coffee, coffee_id, roast_date: s.date });
-      if (batch_err) { state.saving = false; alert("Couldn't start the combined batch: " + batch_err.message); render(); return; }
+      if (batch_err) {
+        state.saving = false;
+        alert(batch_err.code === "23505"
+          // the planned lot already exists but isn't open to join — it's down to its last drum, or emptied
+          ? "That lot is already being packed out or has been emptied, so this drum can't join it.\n\nOn step 1, untick Combine to roast it as a normal drum, or start a new combined batch."
+          : "Couldn't start the combined batch: " + batch_err.message);
+        render(); return;
+      }
     }
   }
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
@@ -263,6 +273,8 @@ async function init() {
       state.session.coffee = p.coffee || "";
       state.session.container_id = p.container_id || "";
       state.session.batch_count = Math.max(1, Number(p.batches) || 1);
+      // 🔗 planned as part of a combined lot — pre-set, but still the roaster's call on step 1
+      if (p.combine_fill_id) { state.session.combine = true; state.session.combine_with = p.combine_fill_id; }
       state.from_plan_id = p.id;
       state.view = "new";
       state.ui.step = 1;   // land on step 1 so the roaster can confirm coffee/drum/batches before weighing
@@ -421,6 +433,8 @@ function build_step1() {
 function build_combine_option(s) {
   const matching = (state.open_batches || []).filter(b => b.coffee === s.coffee);
   const chosen = matching.find(b => b.fill_id === s.combine_with);
+  // A lot planned on the Roaster page that hasn't been started yet: this drum will start it
+  const planned_new = s.combine_with && !chosen ? s.combine_with : null;
   const date_note = chosen && chosen.roast_date && chosen.roast_date !== s.date
     ? `<p class="hint" style="font-size:12px;margin-top:6px;color:#d97706">Heads up: ${esc(chosen.name)} was roasted on ${esc(chosen.roast_date)} — you're logging ${esc(s.date)}.</p>` : "";
   return `
@@ -436,6 +450,7 @@ function build_combine_option(s) {
         <label class="lbl">Combined batch</label>
         ${s.coffee ? `
           <select id="s1-combine-with">
+            ${planned_new ? `<option value="${esc(planned_new)}" selected>📋 Start today's planned lot</option>` : ""}
             <option value="" ${!s.combine_with?"selected":""}>➕ Start a new combined batch</option>
             ${matching.map(b => `<option value="${esc(b.fill_id)}" ${s.combine_with===b.fill_id?"selected":""}>Add to ${esc(b.name)} · ${esc(b.drums.join(", "))}</option>`).join("")}
           </select>
