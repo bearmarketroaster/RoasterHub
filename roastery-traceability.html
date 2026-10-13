@@ -306,7 +306,7 @@ async function release_drum(drum_id) {
   const c = source_of(drum_id);
   if (!c || !c.combined) return;
   if (c.drums.length <= 1) {
-    alert(`${drum_id} is the last drum in ${c.batch_name || "this lot"}.\n\nUse 🗑️ Empty on it instead, so whatever's left is recorded.`);
+    alert(`${drum_id} is the last drum of the combined ${c.batch_name || "roast"}.\n\nUse 🗑️ Empty on it instead, so whatever's left is recorded.`);
     return;
   }
   await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", drum_id);
@@ -1258,7 +1258,7 @@ function build_empty_drum_overlay() {
   return `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1000">
     <div style="background:#fff;border-radius:14px;padding:24px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3)">
       <h2 style="margin:0 0 6px">Which drum is empty?</h2>
-      <p style="font-size:14px;color:#444;margin:0 0 18px">${esc(c.batch_name || "This lot")} — the drum you pick comes off the lot's list. Nothing is written off: its coffee is already counted in the lot, which carries on in the other drums.</p>
+      <p style="font-size:14px;color:#444;margin:0 0 18px">Combined ${esc(c.batch_name || "roast")} — the drum you pick comes off its list. Nothing is written off: its coffee is already counted in the combined total, which carries on in the other drums.</p>
       ${c.drums.map(d => `<button class="btn" data-empty-drum="${esc(d)}" style="width:100%;padding:14px;font-size:16px;font-weight:700;margin-bottom:10px;background:#fdf5f5;color:#dc2626;border:1px solid #f3d4d4">🗑️ ${esc(d)} is empty</button>`).join("")}
       <button class="btn btn-ghost" id="empty-drum-cancel" style="width:100%;padding:12px;font-size:14px">Cancel</button>
     </div>
@@ -1360,7 +1360,7 @@ function build_empty_choice_overlay() {
   const remaining = c.remaining || 0;
   const bags = Math.floor(remaining * 1000 / 30);
   const intro = c.combined
-    ? `${esc(c.drums[0])} is the last drum of ${esc(c.batch_name || "this lot")}. By the system's count there's about <strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} left — emptying finishes the lot, and whatever's left is recorded as the lot's loss. Bag it as samples, or just empty it.`
+    ? `${esc(c.drums[0])} is the last drum of the combined ${esc(c.batch_name || "roast")}. By the system's count there's about <strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} left — emptying finishes the combined roast, and whatever's left is recorded as its loss. Bag it as samples, or just empty it.`
     : `There's about <strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} left loose in this drum. Bag it as samples, or just empty the drum.`;
   return `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1000">
     <div style="background:#fff;border-radius:14px;padding:24px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3)">

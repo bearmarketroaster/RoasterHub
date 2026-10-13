@@ -64,6 +64,13 @@
     .empty .icon { font-size: 36px; margin-bottom: 8px; }
     .loading { text-align: center; padding: 60px 20px; color: #999; font-size: 15px; }
     .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
+    /* 🔗 Combined roasts on step 1 */
+    .combine-banner { margin-top: 16px; padding: 12px 14px; background: #eef4ff; border: 1px solid #2563eb; border-radius: 8px; }
+    .link-btn { background: none; border: none; padding: 0; margin-top: 8px; color: #2563eb; font-size: 13px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+    .combine-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+    .combine-card { text-align: left; background: #fff; border: 1px solid #e8e6e1; border-radius: 8px; padding: 10px 12px; font-size: 14px; cursor: pointer; }
+    .combine-card span { display: block; font-size: 12px; color: #666; margin-top: 2px; }
+    .combine-card.sel { border: 2px solid #2563eb; background: #eef4ff; }
     .header-actions { display: flex; gap: 8px; align-items: center; }
     @media (max-width: 600px) {
       .grid-2 { grid-template-columns: 1fr; }
@@ -205,8 +212,8 @@ async function save_session() {
       if (batch_err) {
         state.saving = false;
         alert(batch_err.code === "23505"
-          // the planned lot already exists but isn't open to join — it's down to its last drum, or emptied
-          ? "That lot is already being packed out or has been emptied, so this drum can't join it.\n\nOn step 1, untick Combine to roast it as a normal drum, or start a new combined batch."
+          // the planned combined roast already exists but isn't open to join — it's down to its last drum, or emptied
+          ? "That combined roast is already being packed out or has been emptied, so this drum can't join it.\n\nOn step 1, choose \"Roast as a normal drum instead\", or start a new combined roast."
           : "Couldn't start the combined batch: " + batch_err.message);
         render(); return;
       }
@@ -273,8 +280,18 @@ async function init() {
       state.session.coffee = p.coffee || "";
       state.session.container_id = p.container_id || "";
       state.session.batch_count = Math.max(1, Number(p.batches) || 1);
-      // 🔗 planned as part of a combined lot — pre-set, but still the roaster's call on step 1
-      if (p.combine_fill_id) { state.session.combine = true; state.session.combine_with = p.combine_fill_id; }
+      // 🔗 Planned as combined on the Roaster page. It only counts as combined with 2+ drums planned
+      // into it (or once it's under way) — one on its own is a normal roast. Still changeable on step 1.
+      if (p.combine_fill_id) {
+        const { data: sibs } = await supabaseClient.from("roast_plan").select("id, status").eq("combine_fill_id", p.combine_fill_id);
+        const planned = (sibs || []).filter(x => x.status !== "skipped").length;
+        const underway = (state.open_batches || []).some(b => b.fill_id === p.combine_fill_id);
+        if (planned >= 2 || underway) {
+          state.session.combine = true;
+          state.session.combine_with = p.combine_fill_id;
+          state.session.combine_planned = true;
+        }
+      }
       state.from_plan_id = p.id;
       state.view = "new";
       state.ui.step = 1;   // land on step 1 so the roaster can confirm coffee/drum/batches before weighing
@@ -433,30 +450,35 @@ function build_step1() {
 function build_combine_option(s) {
   const matching = (state.open_batches || []).filter(b => b.coffee === s.coffee);
   const chosen = matching.find(b => b.fill_id === s.combine_with);
-  // A lot planned on the Roaster page that hasn't been started yet: this drum will start it
-  const planned_new = s.combine_with && !chosen ? s.combine_with : null;
   const date_note = chosen && chosen.roast_date && chosen.roast_date !== s.date
     ? `<p class="hint" style="font-size:12px;margin-top:6px;color:#d97706">Heads up: ${esc(chosen.name)} was roasted on ${esc(chosen.roast_date)} — you're logging ${esc(s.date)}.</p>` : "";
+
+  // Planned as combined on the Roaster page: just say so. Nothing to pick, but still the roaster's call.
+  if (s.combine && s.combine_planned && s.combine_with) {
+    return `<div class="combine-banner">
+      <div style="font-size:15px">🔗 <strong>${chosen ? `This drum joins the combined ${esc(chosen.name)}` : `This drum starts today's combined ${esc(s.coffee)}`}</strong>${chosen ? ` <span style="color:#666">(with ${esc(chosen.drums.join(", "))})</span>` : ""}</div>
+      <div class="hint" style="font-size:12px;margin-top:4px">Planned on the Roaster page. Combined drums are one source for filling buckets; leftovers are settled once, when it's all emptied.</div>
+      ${date_note}
+      <button type="button" class="link-btn" id="s1-uncombine">Roast as a normal drum instead</button>
+    </div>`;
+  }
+
+  // Without a plan: optional, off by default. The choices are cards rather than a dropdown.
   return `
     <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:${s.combine?'#eef4ff':'#f4f2ed'};border:1px solid ${s.combine?'#2563eb':'#e8e6e1'};border-radius:8px;margin-top:16px;cursor:pointer">
       <input type="checkbox" id="s1-combine" ${s.combine?"checked":""} style="width:18px;height:18px;cursor:pointer" />
       <div style="flex:1">
         <div style="font-weight:600;font-size:14px">🔗 Combine with other drums of this roast</div>
-        <div style="font-size:12px;color:#666;margin-top:2px">The drums become one source for filling buckets and packing. Leftovers are settled once, when the whole batch is emptied.</div>
+        <div style="font-size:12px;color:#666;margin-top:2px">For bigger roasts across several drums: they become one source for filling buckets, and leftovers are settled once, when it's all emptied.</div>
       </div>
     </label>
-    ${s.combine ? `
-      <div style="margin-top:10px">
-        <label class="lbl">Combined batch</label>
-        ${s.coffee ? `
-          <select id="s1-combine-with">
-            ${planned_new ? `<option value="${esc(planned_new)}" selected>📋 Start today's planned lot</option>` : ""}
-            <option value="" ${!s.combine_with?"selected":""}>➕ Start a new combined batch</option>
-            ${matching.map(b => `<option value="${esc(b.fill_id)}" ${s.combine_with===b.fill_id?"selected":""}>Add to ${esc(b.name)} · ${esc(b.drums.join(", "))}</option>`).join("")}
-          </select>
-          ${date_note}`
-        : `<p class="hint" style="font-size:12px">Pick the coffee first.</p>`}
-      </div>` : ""}`;
+    ${s.combine ? (s.coffee ? `
+      <div class="combine-cards">
+        <button type="button" class="combine-card ${!s.combine_with?"sel":""}" data-combine-with="">➕ <strong>Start a new combined ${esc(s.coffee)}</strong><span>this drum is the first one</span></button>
+        ${matching.map(b => `<button type="button" class="combine-card ${s.combine_with===b.fill_id?"sel":""}" data-combine-with="${esc(b.fill_id)}">🔗 <strong>Add to the combined ${esc(b.name)}</strong><span>with ${esc(b.drums.join(", "))}</span></button>`).join("")}
+      </div>
+      ${date_note}`
+      : `<p class="hint" style="font-size:12px;margin-top:8px">Pick the coffee first.</p>`) : ""}`;
 }
 
 function build_step2() {
@@ -608,7 +630,11 @@ function attach_listeners() {
     if (!e.target.checked) state.session.combine_with = "";
     render();
   });
-  app.querySelector("#s1-combine-with")?.addEventListener("change", e => { state.session.combine_with = e.target.value; render(); });
+  app.querySelectorAll("[data-combine-with]").forEach(b => b.addEventListener("click", () => { state.session.combine_with = b.dataset.combineWith; render(); }));
+  app.querySelector("#s1-uncombine")?.addEventListener("click", () => {
+    Object.assign(state.session, { combine: false, combine_with: "", combine_planned: false });
+    render();
+  });
   app.querySelector("#s1-container")?.addEventListener("change", e => { state.session.container_id = e.target.value.trim(); });
   app.querySelector("#s1-count")?.addEventListener("input",   e => { state.session.batch_count = Number(e.target.value) || 0; });
 

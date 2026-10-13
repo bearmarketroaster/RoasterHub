@@ -103,9 +103,21 @@
     .wl-badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
     .wl-badge.done { background: #16a34a; color: #fff; }
     .wl-badge.skip { background: #999; color: #fff; }
-    .wl-combine { margin-left: 6px; background: #fff; border: 1px solid #c7d7f5; color: #2563eb; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; cursor: pointer; }
-    .wl-combine.on { background: #2563eb; border-color: #2563eb; color: #fff; }
+    /* Combined roasts: the drop box under "Add to plan", and the grouped block in the plan */
+    .wl[draggable="true"] { cursor: grab; }
+    .wl-group { border: 2px solid #2563eb; border-radius: 10px; padding: 8px; background: #f3f7ff; display: flex; flex-direction: column; gap: 6px; }
+    .wl-group-h { font-size: 13px; font-weight: 800; color: #2563eb; }
+    .wl-group-h span { font-weight: 500; color: #666; margin-left: 4px; }
+    .wl-single { margin-left: 6px; background: #fff; border: 1px solid #c7d7f5; color: #2563eb; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; cursor: pointer; }
     .wl-lot { margin-left: 6px; font-size: 11px; font-weight: 700; color: #2563eb; }
+    .combo-box { border: 2px dashed #9db8ea; border-radius: 10px; padding: 12px; margin-bottom: 14px; background: #f7faff; cursor: pointer; transition: background .1s, border-color .1s; }
+    .combo-box.armed { border-style: solid; border-color: #2563eb; background: #eaf1ff; }
+    .combo-box.over { border-color: #2563eb; background: #dce8ff; }
+    .combo-h { font-weight: 800; font-size: 14px; color: #2563eb; }
+    .combo-sub { font-size: 12px; color: #666; margin-top: 3px; }
+    .combo-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .combo-chip { background: #2563eb; color: #fff; font-weight: 700; font-size: 12px; padding: 3px 9px; border-radius: 999px; font-family: ui-monospace, monospace; }
+    .slot.empty.go[draggable="true"] { cursor: grab; }
     .wl-act { display: flex; align-items: center; gap: 6px; }
     .wl-start { background: #16a34a; color: #fff; text-decoration: none; font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
     .wl-skip { background: #fff; border: 1px solid #ddd; font-size: 12px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
@@ -160,6 +172,33 @@ const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function kg(n) { return (Math.round((Number(n)||0)*10)/10).toFixed(1) + "kg"; }
 function r1(n) { return Math.round((Number(n)||0)*10)/10; }
+
+// ---- 🔗 Combined roasts on the plan ----
+// Planned drums of one coffee that share a combine_fill_id are roasted as one combined source (the
+// Roasts page creates it with this id on the first drum, the rest join it). Today's id for a coffee
+// is reused, so a drum added later joins the same combined roast.
+function combined_id_for(coffee) {
+  return state.plan_items.find(i => i.coffee === coffee && i.combine_fill_id && i.status !== "skipped")?.combine_fill_id || null;
+}
+function new_combined_id(coffee) {
+  const slug = (coffee || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `CB-${today_str().replace(/-/g, "")}${slug ? `-${slug}` : ""}-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
+}
+// Put an empty drum on today's plan for the picked coffee — as a normal roast, or combined
+async function plan_drum(id, combined) {
+  const coffee = state.selected_coffee;
+  if (!coffee || !id) return;
+  if (state.plan_items.find(i => i.container_id === id && i.status !== "skipped")) return; // already planned
+  const d = state.empty_drums.find(x => x.id === id);
+  const seq = state.plan_items.length ? Math.max(...state.plan_items.map(i => Number(i.seq) || 0)) + 1 : 0;
+  await supabaseClient.from("roast_plan").insert({
+    id: gen_plan_id(), plan_date: today_str(), seq,
+    container_id: id, coffee, coffee_id: null,
+    batches: d ? d.max : 1, status: "planned",
+    combine_fill_id: combined ? (combined_id_for(coffee) || new_combined_id(coffee)) : null,
+  });
+  await load_plan(); render();
+}
 
 // ---- Persistent roast plan (roast_plan table) ----
 function today_str() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
@@ -421,7 +460,7 @@ function render() {
               <div class="slot-hint" style="color:#166534">✓ ${planned.status === "done" ? "done" : "in plan"}</div>
             </div>`;
           }
-          return `<button class="slot empty ${assignable ? "go" : ""}" data-assign="${esc(d.id)}">
+          return `<button class="slot empty ${assignable ? "go" : ""}" data-assign="${esc(d.id)}" ${assignable ? `draggable="true" data-drag-drum="${esc(d.id)}"` : ""}>
             <div class="slot-id">${esc(d.id)}</div>
             <div class="slot-cap">holds ${d.max} batches</div>
             <div class="slot-hint">${assignable ? `+ ${esc(state.selected_coffee)}` : "empty"}</div>
@@ -440,20 +479,21 @@ function render() {
   // ---- Today's plan as an ordered, persistent worklist ----
   const drum_size = (cid) => (String(cid||"").match(/^([A-Za-z]+)/) || [,""])[1].toUpperCase();
   const max_for = (cid) => max_roasts(drum_size(cid)) || 99;
-  // 🔗 Combine — at the roaster's discretion: planned drums of the same coffee toggled on form one lot
-  // (several drums = one source for filling buckets; see roastery-traceability.html). Offered once the
-  // plan has 2+ drums of that coffee; the Roasts page reads it at ▶ Start and can still be changed there.
-  const same_coffee = coffee => items.filter(i => i.coffee === coffee && i.status !== "skipped").length;
+  // 🔗 Combined — the roaster's choice: drums dragged into the Combined box (same coffee) share a
+  // combine_fill_id and are roasted into one combined source for filling buckets (see
+  // roastery-traceability.html). Two or more make it combined; one on its own is just a normal drum.
+  const combined_size = id => items.filter(i => i.combine_fill_id === id && i.status !== "skipped").length;
+  const is_combined = it => !!it.combine_fill_id && combined_size(it.combine_fill_id) >= 2;
   const combine_ctl = it => {
-    if (it.status === "done") return it.combine_fill_id ? `<span class="wl-lot">🔗 in lot</span>` : "";
-    if (it.status !== "planned" || (same_coffee(it.coffee) < 2 && !it.combine_fill_id)) return "";
-    return `<button class="wl-combine ${it.combine_fill_id ? "on" : ""}" data-combine="${it.id}" title="${it.combine_fill_id ? "Part of a combined lot — tap to roast it as a normal drum" : "Combine with the other drums of this coffee"}">🔗 ${it.combine_fill_id ? "Combined" : "Combine"}</button>`;
+    if (!it.combine_fill_id) return "";
+    if (!is_combined(it)) return `<span class="wl-lot" title="Only one drum in the Combined box, so it roasts as a normal drum">🔗 needs a 2nd drum</span>`;
+    return it.status === "planned" ? `<button class="wl-single" data-make-single="${it.id}" title="Take this drum out of the combined roast">make single</button>` : "";
   };
-  const worklist = items.length ? items.map((it, idx) => {
+  const row_html = (it, idx) => {
     const g = state.green_per_roast[it.coffee];
     const mx = max_for(it.container_id);
     const done = it.status === "done", skip = it.status === "skipped";
-    return `<div class="wl ${it.status}">
+    return `<div class="wl ${it.status}" ${it.status === "planned" ? `draggable="true" data-drag-plan="${it.id}"` : ""}>
       <div class="wl-ord">
         <button class="wl-mv" data-move="${it.id}|-1" ${idx===0?"disabled":""}>▲</button>
         <button class="wl-mv" data-move="${it.id}|1" ${idx===items.length-1?"disabled":""}>▼</button>
@@ -468,7 +508,36 @@ function render() {
         <button class="wl-x" data-remove="${it.id}" title="Remove from plan">✕</button>
       </div>
     </div>`;
-  }).join("") : "";
+  };
+  // The Combined box for the picked coffee: drag drums in (or click it, then click drums). Its chips
+  // are that coffee's drums already planned as combined today.
+  const combo_box_html = () => {
+    const coffee = state.selected_coffee;
+    const lot = combined_id_for(coffee);
+    const in_box = lot ? items.filter(i => i.combine_fill_id === lot && i.status !== "skipped") : [];
+    return `<div class="combo-box ${state.combine_mode ? "armed" : ""}" id="combo-box" data-combo-drop>
+      <div class="combo-h">🔗 Combined · ${esc(coffee)}</div>
+      <div class="combo-sub">${state.combine_mode
+        ? "Now click drums below to add them — click here again when you're done."
+        : "Drag 2 or more drums here to roast them as one combined source for filling buckets (or click here, then click drums). One drum on its own is just a normal roast."}</div>
+      ${in_box.length ? `<div class="combo-chips">${in_box.map(i => `<span class="combo-chip">${esc(i.container_id)}</span>`).join("")}${in_box.length === 1 ? `<span style="font-size:12px;color:#666;align-self:center">add another drum to combine</span>` : ""}</div>` : ""}
+    </div>`;
+  };
+
+  // Plan order is kept; a combined roast is drawn as one block where its first drum falls in the
+  // order, with all its drums inside, under a "🔗 Combined · coffee" heading.
+  const shown = new Set();
+  const worklist = items.map((it, idx) => {
+    if (shown.has(it.id)) return "";
+    if (!is_combined(it)) { shown.add(it.id); return row_html(it, idx); }
+    const members = items.filter(m => m.combine_fill_id === it.combine_fill_id);
+    members.forEach(m => shown.add(m.id));
+    const n = members.filter(m => m.status !== "skipped").length;
+    return `<div class="wl-group">
+      <div class="wl-group-h">🔗 Combined · ${esc(it.coffee)} <span>${n} drums · filled as one</span></div>
+      ${members.map(m => row_html(m, items.indexOf(m))).join("")}
+    </div>`;
+  }).join("");
 
   app.innerHTML = `
     <div class="header">
@@ -512,7 +581,8 @@ function render() {
             ? `<div class="plan-summary">${done_count} of ${active.length} done${total_batches?` · ${total_batches} batch${total_batches!=1?"es":""}`:""}${plan_green>0?` · ≈ ${kg(plan_green)} green${green_known?"":" (some unknown)"}`:""}</div>
                <div class="worklist">${worklist}</div>`
             : `<div class="plan-summary" style="background:#f0faf3;color:#166534">Pick a coffee on the left, then tap an empty drum below to add it to the plan.</div>`}
-          <div class="panel-h" style="margin-top:16px;font-size:13px">➕ Add to plan <span class="panel-hint">${assignable ? "tap an empty drum" : "pick a coffee first"}</span></div>
+          <div class="panel-h" style="margin-top:16px;font-size:13px">➕ Add to plan <span class="panel-hint">${assignable ? (state.combine_mode ? "click drums to add them to Combined" : "click a drum for a normal roast, or drag drums into Combined") : "pick a coffee first"}</span></div>
+          ${assignable ? combo_box_html() : ""}
           ${rooms}
           <div class="bucket-bar">🪣 Empty buckets: ${bkt_bar}</div>
           <div class="unplanned"><a href="roasts.html">＋ Roast without a plan — log a one-off →</a></div>
@@ -532,19 +602,42 @@ function render() {
   app.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
     const c = b.dataset.pick;
     state.selected_coffee = state.selected_coffee === c ? null : c;
+    state.combine_mode = false;   // the Combined box is per coffee
     render();
   }));
+  // Click an empty drum: a normal roast — or, with the Combined box armed, a combined one
   app.querySelectorAll("[data-assign]").forEach(b => b.addEventListener("click", async () => {
     if (!state.selected_coffee) return;
-    const id = b.dataset.assign;
-    if (state.plan_items.find(i => i.container_id === id && i.status !== "skipped")) return; // already planned
-    const d = state.empty_drums.find(x => x.id === id);
-    const seq = state.plan_items.length ? Math.max(...state.plan_items.map(i => Number(i.seq) || 0)) + 1 : 0;
-    await supabaseClient.from("roast_plan").insert({
-      id: gen_plan_id(), plan_date: today_str(), seq,
-      container_id: id, coffee: state.selected_coffee, coffee_id: null,
-      batches: d ? d.max : 1, status: "planned",
+    await plan_drum(b.dataset.assign, !!state.combine_mode);
+  }));
+
+  // 🔗 Combined box: click to arm/disarm click-to-add; drop drums (or planned drums of this coffee) on it
+  const box = document.getElementById("combo-box");
+  if (box) {
+    box.addEventListener("click", () => { state.combine_mode = !state.combine_mode; render(); });
+    box.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; box.classList.add("over"); });
+    box.addEventListener("dragleave", () => box.classList.remove("over"));
+    box.addEventListener("drop", async e => {
+      e.preventDefault(); box.classList.remove("over");
+      const [kind, id] = (e.dataTransfer.getData("text/plain") || "").split(":");
+      if (kind === "drum") await plan_drum(id, true);
+      else if (kind === "plan") {
+        const it = state.plan_items.find(i => i.id === id);
+        if (!it) return;
+        if (it.coffee !== state.selected_coffee) { alert(`${it.container_id} is planned for ${it.coffee} — only ${state.selected_coffee} drums can go in this Combined box.`); return; }
+        await supabaseClient.from("roast_plan").update({ combine_fill_id: combined_id_for(it.coffee) || new_combined_id(it.coffee), updated_at: new Date().toISOString() }).eq("id", it.id);
+        await load_plan(); render();
+      }
     });
+  }
+  app.querySelectorAll("[data-drag-drum]").forEach(el => el.addEventListener("dragstart", e => {
+    e.dataTransfer.setData("text/plain", "drum:" + el.dataset.dragDrum); e.dataTransfer.effectAllowed = "move";
+  }));
+  app.querySelectorAll("[data-drag-plan]").forEach(el => el.addEventListener("dragstart", e => {
+    e.dataTransfer.setData("text/plain", "plan:" + el.dataset.dragPlan); e.dataTransfer.effectAllowed = "move";
+  }));
+  app.querySelectorAll("[data-make-single]").forEach(b => b.addEventListener("click", async () => {
+    await supabaseClient.from("roast_plan").update({ combine_fill_id: null, updated_at: new Date().toISOString() }).eq("id", b.dataset.makeSingle);
     await load_plan(); render();
   }));
   app.querySelectorAll("[data-pbatch]").forEach(b => b.addEventListener("click", async () => {
@@ -565,21 +658,6 @@ function render() {
     const a = arr[idx], c = arr[j];
     await supabaseClient.from("roast_plan").update({ seq: c.seq }).eq("id", a.id);
     await supabaseClient.from("roast_plan").update({ seq: a.seq }).eq("id", c.id);
-    await load_plan(); render();
-  }));
-  // 🔗 Combine toggle. Joining reuses the lot id already given to today's drums of that coffee
-  // (so a drum added later can join a lot that's started); otherwise this starts a new lot id.
-  app.querySelectorAll("[data-combine]").forEach(b => b.addEventListener("click", async () => {
-    const it = state.plan_items.find(i => i.id === b.dataset.combine); if (!it) return;
-    let lot = null;
-    if (!it.combine_fill_id) {
-      lot = state.plan_items.find(i => i.coffee === it.coffee && i.combine_fill_id && i.status !== "skipped")?.combine_fill_id;
-      if (!lot) {
-        const slug = (it.coffee || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-        lot = `CB-${today_str().replace(/-/g, "")}${slug ? `-${slug}` : ""}-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
-      }
-    }
-    await supabaseClient.from("roast_plan").update({ combine_fill_id: lot, updated_at: new Date().toISOString() }).eq("id", it.id);
     await load_plan(); render();
   }));
   app.querySelectorAll("[data-skip]").forEach(b => b.addEventListener("click", async () => {
