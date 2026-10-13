@@ -672,7 +672,7 @@ function save_draft() {
         step: p.step, shop: p.shop, scanned_items: p.scanned_items, scanned_buckets: p.scanned_buckets,
         samples: p.samples, batch: p.batch, shop_groups_open: p.shop_groups_open,
       } : null,
-      filling: filling ? { container_id: state.ui.fill_bucket_container, filled: fill_state.filled } : null,
+      filling: filling ? { container_id: state.ui.fill_bucket_container, filled: fill_state.filled, destination: fill_state.destination } : null,
       returning: returning ? { returned: return_state.returned, condition: state.ui.bucket_return_condition } : null,
     }));
   } catch (_) { /* storage unavailable (private mode etc.) — nothing to keep */ }
@@ -704,6 +704,7 @@ function restore_draft() {
   if (d.filling && state.containers.some(c => c.id === d.filling.container_id)) {
     reset_fill_state();
     fill_state.filled = d.filling.filled || [];
+    fill_state.destination = d.filling.destination || "";
     state.ui.fill_bucket_container = d.filling.container_id;
     return true;
   }
@@ -775,6 +776,7 @@ function bucket_label(id) {
 
 const fill_state = {
   filled: [],          // [{ id, name, container_id, fill_id, coffee }]
+  destination: "",     // "" = keep in stock (dispatch later); otherwise the shop they're filled & dispatched to
   err: "",
   scanner_msg: "",
   scanner_msg_type: "info",
@@ -783,6 +785,7 @@ const fill_state = {
 
 function reset_fill_state() {
   fill_state.filled = [];
+  fill_state.destination = "";
   fill_state.err = "";
   fill_state.scanner_msg = "";
   fill_state.scan_mode = "scanner";
@@ -881,7 +884,10 @@ function update_fill_panel() {
     update_fill_panel();
   }));
   const confirmBtn = document.getElementById("fill-confirm-btn");
-  if (confirmBtn) confirmBtn.disabled = state.saving || fill_state.filled.length === 0;
+  if (confirmBtn) {
+    confirmBtn.disabled = state.saving || fill_state.filled.length === 0;
+    if (!state.saving) confirmBtn.textContent = fill_confirm_label();
+  }
 }
 
 // Rank bucket suggestions so the exact match always surfaces above the result cap.
@@ -910,6 +916,21 @@ function rank_bucket_matches(pool, q, exclude_ids, limit) {
   return scored.slice(0, limit || 8).map(s => s.b);
 }
 
+// Destinations a bucket can go to straight from the Fill screen — the same as packing allows:
+// everywhere except online orders (and the internal staff / samples sinks)
+function bucket_destinations() {
+  const seen = new Set();
+  return state.shop_mappings
+    .filter(m => m.master_name && !["online", "staff", "samples"].includes(m.kind || "shop"))
+    .filter(m => !seen.has(m.master_name) && seen.add(m.master_name))
+    .map(m => ({ name: m.master_name, kind: m.kind || "shop" }))
+    .sort((a, b) => (a.kind === "shop" ? 0 : 1) - (b.kind === "shop" ? 0 : 1) || a.name.localeCompare(b.name));
+}
+function fill_confirm_label() {
+  const n = fill_state.filled.length;
+  return fill_state.destination ? `✓ Fill & dispatch ${n || ""} to ${fill_state.destination}` : "✓ Save";
+}
+
 function build_fill_buckets_overlay() {
   const container = state.containers.find(c => c.id === state.ui.fill_bucket_container);
   if (!container) {
@@ -917,11 +938,22 @@ function build_fill_buckets_overlay() {
     return `<div class="overlay"><div class="modal" style="text-align:center"><p>Container not found.</p><button class="btn btn-dark mt-16" id="fill-cancel">Close</button></div></div>`;
   }
   const flash_style = `position:absolute;top:8px;left:50%;transform:translateX(-50%);color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.2);z-index:10;${fill_state.scanner_msg ? `background:${fill_state.scanner_msg_type==="success"?"#16a34a":fill_state.scanner_msg_type==="error"?"#dc2626":"#1a1a1a"}` : "display:none"}`;
+  // Where the buckets are going: keep in stock (dispatch later), or fill & dispatch in one step
+  const dest = fill_state.destination;
+  const dests = bucket_destinations();
   return `<div class="overlay"><div class="modal" style="max-width:480px">
     <div style="text-align:center;margin-bottom:14px">
       <div style="font-size:40px">🪣</div>
-      <h2 style="margin:8px 0 2px">Fill Buckets</h2>
+      <h2 id="fill-title" style="margin:8px 0 2px">${dest ? "Fill &amp; Dispatch" : "Fill Buckets"}</h2>
       <div class="hint" style="font-size:13px;margin-top:4px">From ${esc(source_label(container))} · ${esc(container.coffee||"?")} · ${kgfloor(container.remaining)}kg available</div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <label class="lbl" style="font-size:13px;margin-bottom:6px;display:block">Where are these going?</label>
+      <select id="fill-destination" style="width:100%;font-size:15px;padding:10px 12px">
+        <option value="" ${!dest?"selected":""}>📦 Keep in stock — dispatch later</option>
+        ${dests.map(d => `<option value="${esc(d.name)}" ${dest===d.name?"selected":""}>🚚 ${esc(d.name)}${d.kind !== "shop" ? ` (${esc(d.kind)})` : ""}</option>`).join("")}
+      </select>
     </div>
 
     <div style="display:flex;gap:6px;margin-bottom:10px;background:#f4f2ed;padding:4px;border-radius:8px">
@@ -956,7 +988,7 @@ function build_fill_buckets_overlay() {
 
     <div class="grid-2">
       <button class="btn btn-grey" style="padding:14px;font-size:15px;border-radius:10px" id="fill-cancel">← Cancel</button>
-      <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="fill-confirm-btn" ${(state.saving || fill_state.filled.length === 0)?"disabled":""}>${state.saving?"Saving…":"✓ Save"}</button>
+      <button class="btn btn-green" style="padding:14px;font-size:15px;border-radius:10px" id="fill-confirm-btn" ${(state.saving || fill_state.filled.length === 0)?"disabled":""}>${state.saving?"Saving…":fill_confirm_label()}</button>
     </div>
   </div></div>`;
 }
@@ -983,6 +1015,30 @@ async function save_filled_buckets() {
     returned_at: null,
   }).in("id", bucket_ids);
   if (fill_err) { alert("Failed to save buckets: " + fill_err.message); return; }
+
+  // Fill & dispatch: send the just-filled buckets straight out. Same records the packing screen makes
+  // for buckets — one 5kg Bar line each (tagged with this drum/fill), a dispatch_buckets link, and the
+  // bucket flipped to dispatched. The fill above already stamped filled_at, and the links go in after
+  // it, so a bucket that was still out at a shop is logged as a clean return against its previous trip
+  // (log_refill_return, returns-step1.sql).
+  const dest = fill_state.destination;
+  if (dest) {
+    const fp = state.fp_codes.find(f => f.coffee_name === container.coffee && f.bag_size === "Bar 5kg");
+    const lines = fill_state.filled.map(() => ({
+      type: "retail", kg: 5, bags: 1, bag_size: "Bar 5kg",
+      container_id: container.id, fill_id: container.fill_id, fp_code: fp?.fp_code || null,
+    }));
+    const dispatch_id = await save_dispatch_v2(container.id, container.fill_id, dest, lines, lines.length * 5);
+    if (!dispatch_id) {
+      alert(`The buckets were filled, but the dispatch to ${dest} couldn't be saved.\n\nThey're in stock as filled — send them from + New Dispatch.`);
+    } else {
+      await Promise.all([
+        supabaseClient.from("dispatch_buckets").insert(bucket_ids.map(id => ({ dispatch_id, bucket_id: id }))),
+        supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids),
+      ]);
+    }
+  }
+
   // Auto-flip container (every drum, for a combined batch) to "empty" if remaining hits 0
   const session_kg = fill_state.filled.length * 5;
   if (container.remaining - session_kg <= 0.01) {
@@ -2322,6 +2378,15 @@ function attach_listeners() {
   });
 
   // ── Fill Buckets listeners ──
+  // Destination: updated in place (a full render would tear down a live camera), then focus goes back to
+  // the bucket box so a barcode scanner's input doesn't land in the dropdown
+  app.querySelector("#fill-destination")?.addEventListener("change", e => {
+    fill_state.destination = e.target.value;
+    const title = document.getElementById("fill-title");
+    if (title) title.textContent = fill_state.destination ? "Fill & Dispatch" : "Fill Buckets";
+    update_fill_panel();   // refreshes the button wording and the unsaved-work copy
+    setTimeout(() => document.getElementById("fill-manual-input")?.focus(), 0);
+  });
   app.querySelectorAll("[data-fill-buckets]").forEach(btn => btn.addEventListener("click", () => {
     state.ui.fill_bucket_container = btn.dataset.fillBuckets;
     reset_fill_state();
