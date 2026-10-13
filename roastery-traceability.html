@@ -216,28 +216,113 @@ function gen_id(prefix) {
 async function set_container_status(container_id, new_status) {
   // One-container-per-coffee rule for Active: enforced here so EVERY path (rooms drag,
   // rooms buttons, detailed-view button) is covered, not just the board.
+  // A combined batch counts as ONE source, so its own drums never clash with each other
+  const c = source_of(container_id);
+  // A combined batch is for filling buckets. It only goes Active (to be packed from) once it's down
+  // to its last drum — the packer packs from single drums.
+  if (new_status === "active" && c && c.combined && c.drums.length > 1) {
+    alert(`${c.batch_name || "This batch"} still has ${c.drums.length} drums (${c.drums.join(", ")}).\n\nCombined batches are for filling buckets. Release drums as you empty them — it can go Active once only one is left.`);
+    render();
+    return;
+  }
   if (new_status === "active") {
-    const c = state.containers.find(x => x.id === container_id);
-    const clash = c && state.containers.find(x => x.id !== container_id && x.status === "active" && x.remaining > 0 && x.coffee && c.coffee && x.coffee === c.coffee);
+    const clash = c && state.containers.find(x => x !== c && x.status === "active" && x.remaining > 0 && x.coffee && c.coffee && x.coffee === c.coffee);
     if (clash) {
-      alert(`${c.coffee} is already active in ${clash.id}.\n\nFinish or empty that drum before activating another of the same coffee — packing always pulls from the oldest active drum, and two of the same would break that.`);
+      alert(`${c.coffee} is already active in ${source_label(clash)}.\n\nFinish or empty that before activating another of the same coffee — packing always pulls from the oldest active drum, and two of the same would break that.`);
       render();
       return;
     }
   }
-  // Make sure the container row exists, then update status
-  await supabaseClient.from("containers").upsert({ id: container_id, status: new_status, status_changed_at: new Date().toISOString() }, { onConflict: "id" });
+  const now = new Date().toISOString();
+  if (c && c.combined) {
+    // Every drum still holding the batch moves together
+    await supabaseClient.from("containers").update({ status: new_status, status_changed_at: now }).in("id", c.drums);
+  } else {
+    // Make sure the container row exists, then update status
+    await supabaseClient.from("containers").upsert({ id: container_id, status: new_status, status_changed_at: now }, { onConflict: "id" });
+  }
+  await load_data();
+  render();
+}
+
+// ── COMBINED BATCHES ─────────────────────────────────────────────────────────
+// A combined batch is several drums roasted together that share one fill_id (see the
+// Roasts page and combined_batches). v_container_state already gives every drum in the
+// batch the batch's pooled numbers, so here the batch becomes ONE source: one card, one
+// Active slot for its coffee, one thing packing / bucket filling / samples draw from.
+//
+// The source keeps the id of its first live drum (its "lead"); every line, bucket and
+// dispatch records that id plus the shared fill_id, and the fill is what the stock maths
+// and the reports key on. `drums` lists the drums still holding coffee — status changes
+// apply to all of them. A drum released mid-batch (physically empty) shows as an ordinary
+// empty drum: its coffee was already counted in the batch.
+function collapse_combined_batches(drums) {
+  const out = [], by_fill = {};
+  for (const d of drums) {
+    if (d.combined && d.fill_id) (by_fill[d.fill_id] = by_fill[d.fill_id] || []).push(d);
+    else out.push({ ...d, drums: [d.id] });
+  }
+  for (const members of Object.values(by_fill)) {
+    members.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const live = members.filter(m => m.status !== "empty");
+    const lead = live[0] || members[0];
+    out.push({ ...lead, status: live.length ? lead.status : "empty", drums: (live.length ? live : members).map(m => m.id) });
+    if (live.length) {
+      members.filter(m => m.status === "empty").forEach(m => out.push({
+        ...m, combined: false, released_from: lead.batch_name,
+        total_roasted: 0, packed_kg: 0, held_kg: 0, remaining: 0, drums: [m.id],
+      }));
+    }
+  }
+  return out;
+}
+
+// The source a drum belongs to (its batch, if combined), and the drums a status change applies to
+function source_of(id) {
+  return state.containers.find(c => c.id === id) || state.containers.find(c => (c.drums || []).includes(id)) || null;
+}
+function drums_of(id) {
+  const s = source_of(id);
+  return s && s.drums && s.drums.length ? s.drums : [id];
+}
+// How a source is named on screen: the batch name, or the drum id
+function source_label(c) {
+  return c && c.combined ? `${c.batch_name || c.coffee} (${c.drums.length} drum${c.drums.length === 1 ? "" : "s"})` : (c ? c.id : "?");
+}
+
+// Mark a source's drums empty; for a combined batch also record the batch as finished
+async function mark_source_empty(c, now) {
+  await supabaseClient.from("containers").update({ status: "empty", status_changed_at: now }).in("id", c.drums);
+  if (c.combined && c.fill_id) {
+    await supabaseClient.from("combined_batches")
+      .update({ finished_at: now, finished_by: state.user_id || null }).eq("fill_id", c.fill_id).is("finished_at", null);
+  }
+}
+
+// A drum in a combined lot has been scooped empty: it comes off the lot's list and is free to
+// roast into again. No accounting — its coffee is already counted in the lot, which carries on
+// in the other drums. (Chosen from the lot's own 🗑️ Empty — see request_empty.)
+async function release_drum(drum_id) {
+  const c = source_of(drum_id);
+  if (!c || !c.combined) return;
+  if (c.drums.length <= 1) {
+    alert(`${drum_id} is the last drum in ${c.batch_name || "this lot"}.\n\nUse 🗑️ Empty on it instead, so whatever's left is recorded.`);
+    return;
+  }
+  await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", drum_id);
+  state.ui.empty_drum_choice = null;
   await load_data();
   render();
 }
 
 // Send remaining contents of a container to samples (30g bags)
 async function send_to_samples(container_id, skip_confirm) {
-  const c = state.containers.find(x => x.id === container_id);
+  const c = source_of(container_id);
   if (!c || c.remaining <= 0) return;
+  container_id = c.id;
   const remaining = c.remaining;
   const bags = Math.floor(remaining * 1000 / 30);
-  if (!skip_confirm && !confirm(`Empty ${container_id}? ${remaining.toFixed(2)}kg of ${c.coffee} will be logged as ${bags} × 30g sample bags.`)) return;
+  if (!skip_confirm && !confirm(`Empty ${source_label(c)}? ${remaining.toFixed(2)}kg of ${c.coffee} will be logged as ${bags} × 30g sample bags.`)) return;
 
   const dispatch_id = gen_id("DSP");
   const fill_id = c.fill_id || null;
@@ -251,8 +336,8 @@ async function send_to_samples(container_id, skip_confirm) {
     kg: remaining, bags, bag_size: "30g sample",
     container_id, fill_id,
   });
-  // Auto-flip container to empty
-  await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", container_id);
+  // Auto-flip container (every drum, for a combined batch) to empty
+  await mark_source_empty(c, new Date().toISOString());
   await load_data();
   render();
 }
@@ -260,11 +345,12 @@ async function send_to_samples(container_id, skip_confirm) {
 // and not already dispatched) and marks the container empty. Does NOT delete roast history,
 // touch filled buckets, or alter real dispatches — so it's safe to reuse the container after.
 async function empty_container(container_id, skip_confirm) {
-  const c = state.containers.find(x => x.id === container_id);
+  const c = source_of(container_id);
   if (!c) return;
+  container_id = c.id;
   const remaining = c.remaining || 0;
-  const held = state.buckets.filter(b => b.status === "filled" && b.container_id === container_id).length;
-  let msg = `Empty container ${container_id}?`;
+  const held = state.buckets.filter(b => b.status === "filled" && (c.fill_id ? b.fill_id === c.fill_id : b.container_id === container_id)).length;
+  let msg = `Empty ${c.combined ? source_label(c) : `container ${container_id}`}?`;
   if (remaining > 0) msg += `\n\n${remaining.toFixed(2)}kg of ${c.coffee || "coffee"} still loose in it will be written off and the container marked empty.`;
   else msg += `\n\nIt will be marked empty.`;
   if (held > 0) msg += `\n\n${held} filled bucket(s) from this container are NOT affected — they stay as stock.`;
@@ -285,7 +371,7 @@ async function empty_container(container_id, skip_confirm) {
       container_id, fill_id,
     });
   }
-  await supabaseClient.from("containers").update({ status: "empty", status_changed_at: new Date().toISOString() }).eq("id", container_id);
+  await mark_source_empty(c, new Date().toISOString());
   await load_data();
   render();
 }
@@ -305,12 +391,16 @@ async function revert_dispatch(dispatch_id) {
   // Delete the lines (returns kg to each container) then the dispatch row
   await supabaseClient.from("dispatch_lines").delete().eq("dispatch_id", dispatch_id);
   await supabaseClient.from("dispatches").delete().eq("id", dispatch_id);
-  // Any container this dispatch had emptied (e.g. Send to Samples) → back to Waiting now it has stock again
+  // Any container this dispatch had emptied (e.g. Send to Samples) → back to Waiting now it has stock again.
+  // For a combined batch that's every drum it had, and the batch is reopened.
   const cids = [...new Set([d.container_id, ...(d.lines||[]).map(l => l.container_id)].filter(Boolean))];
   for (const cid of cids) {
-    const c = state.containers.find(x => x.id === cid);
+    const c = source_of(cid);
     if (c && c.status === "empty") {
-      await supabaseClient.from("containers").update({ status: "waiting", status_changed_at: new Date().toISOString() }).eq("id", cid);
+      await supabaseClient.from("containers").update({ status: "waiting", status_changed_at: new Date().toISOString() }).in("id", c.drums);
+      if (c.combined && c.fill_id) {
+        await supabaseClient.from("combined_batches").update({ finished_at: null, finished_by: null }).eq("fill_id", c.fill_id);
+      }
     }
   }
   await load_data();
@@ -466,7 +556,7 @@ async function load_data() {
   // Drum state straight from the view. PostgREST can serialise numeric as a string, so the kg fields are
   // coerced once here and every consumer downstream can treat them as numbers.
   const as_kg = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-  state.containers = (container_state || []).map(c => ({
+  const drums = (container_state || []).map(c => ({
     id: c.id,
     coffee: c.coffee,
     fill_id: c.fill_id,
@@ -478,7 +568,10 @@ async function load_data() {
     packed_kg: as_kg(c.packed_kg),
     held_kg: as_kg(c.held_kg),
     remaining: as_kg(c.remaining),
+    combined: !!c.combined,
+    batch_name: c.batch_name || null,
   }));
+  state.containers = collapse_combined_batches(drums);
 
   // Newest-first, matching the order the original single dispatches query returned.
   state.dispatches = (dispatch_rows || [])
@@ -637,6 +730,7 @@ function build_app() {
   if (state.scan_id) return build_scan_overlay();
   if (state.ui.fill_bucket_container) return build_fill_buckets_overlay();
   if (state.ui.bucket_return_open) return build_bucket_return_overlay();
+  if (state.ui.empty_drum_choice) return build_empty_drum_overlay();
   if (state.ui.empty_choice) return build_empty_choice_overlay();
   const header=`<div class="header" style="justify-content:space-between"><div style="display:flex;align-items:center;gap:12px"><button class="btn-back" id="go-dashboard">← Dashboard</button><div style="width:1px;height:28px;background:#333;margin:0 4px"></div><div><div style="font-weight:700;font-size:18px;letter-spacing:1px">☕ Roastery Trace</div><div style="font-size:12px;color:#666;margin-top:1px">Bear Mrkt</div></div></div><div style="display:flex;align-items:center;gap:10px"><button id="lang-toggle" style="background:none;border:1px solid #666;color:#ccc;border-radius:6px;padding:5px 12px;font-size:14px;font-weight:700;cursor:pointer">${LANG==="uk"?"УКР ▾":"EN ▾"}</button><button class="btn-logout" id="logout-btn">Log Out</button></div></div>`;
   if (state.loading) return header+`<div class="loading">Loading…</div>`;
@@ -661,7 +755,7 @@ function build_scan_overlay() {
   }
 
   // Legacy: scanned a specific container's QR
-  const container=state.containers.find(c=>c.id===cid);
+  const container=source_of(cid);
   if (!container) return `<div class="overlay"><div class="modal" style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⚠️</div><h2 style="margin-bottom:8px">Container Not Found</h2><p class="hint">No container found with ID <strong>${esc(cid)}</strong>.</p><button class="btn btn-dark mt-16" id="close-scan">Go Back</button></div></div>`;
   const fill=active_fill(container);
   if (packing_state.step === "review" || packing_state.step === "done") return build_packing_page(container, fill);
@@ -825,7 +919,7 @@ function build_fill_buckets_overlay() {
     <div style="text-align:center;margin-bottom:14px">
       <div style="font-size:40px">🪣</div>
       <h2 style="margin:8px 0 2px">Fill Buckets</h2>
-      <div class="hint" style="font-size:13px;margin-top:4px">From ${esc(container.id)} · ${esc(container.coffee||"?")} · ${kgfloor(container.remaining)}kg available</div>
+      <div class="hint" style="font-size:13px;margin-top:4px">From ${esc(source_label(container))} · ${esc(container.coffee||"?")} · ${kgfloor(container.remaining)}kg available</div>
     </div>
 
     <div style="display:flex;gap:6px;margin-bottom:10px;background:#f4f2ed;padding:4px;border-radius:8px">
@@ -887,10 +981,10 @@ async function save_filled_buckets() {
     returned_at: null,
   }).in("id", bucket_ids);
   if (fill_err) { alert("Failed to save buckets: " + fill_err.message); return; }
-  // Auto-flip container to "empty" if remaining hits 0
+  // Auto-flip container (every drum, for a combined batch) to "empty" if remaining hits 0
   const session_kg = fill_state.filled.length * 5;
   if (container.remaining - session_kg <= 0.01) {
-    await supabaseClient.from("containers").update({ status: "empty", status_changed_at: now }).eq("id", container.id);
+    await mark_source_empty(container, now);
   }
   state.ui.fill_bucket_container = null;
   reset_fill_state();
@@ -1150,9 +1244,25 @@ function sort_containers_fifo(list) {
 // so the two routes can never diverge: if there's loose coffee left, ask samples-or-write-off first;
 // an already-empty drum just flips straight to empty.
 function request_empty(container_id) {
-  const c = state.containers.find(x => x.id === container_id);
-  if (c && (c.remaining || 0) > 0.01) { state.ui.empty_choice = container_id; render(); }
+  const c = source_of(container_id);
+  // A combined lot with 2+ drums has its own Empty: pick which drum is empty and it leaves the lot.
+  // Only the last drum goes through the normal empty (samples / write-off, lot finished).
+  if (c && c.combined && c.drums.length > 1) { state.ui.empty_drum_choice = c.id; render(); return; }
+  if (c && (c.remaining || 0) > 0.01) { state.ui.empty_choice = c.id; render(); }
   else empty_container(container_id, true);
+}
+
+function build_empty_drum_overlay() {
+  const c = source_of(state.ui.empty_drum_choice);
+  if (!c || !c.combined || c.drums.length < 2) { state.ui.empty_drum_choice = null; return build_rooms_view(); }
+  return `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1000">
+    <div style="background:#fff;border-radius:14px;padding:24px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3)">
+      <h2 style="margin:0 0 6px">Which drum is empty?</h2>
+      <p style="font-size:14px;color:#444;margin:0 0 18px">${esc(c.batch_name || "This lot")} — the drum you pick comes off the lot's list. Nothing is written off: its coffee is already counted in the lot, which carries on in the other drums.</p>
+      ${c.drums.map(d => `<button class="btn" data-empty-drum="${esc(d)}" style="width:100%;padding:14px;font-size:16px;font-weight:700;margin-bottom:10px;background:#fdf5f5;color:#dc2626;border:1px solid #f3d4d4">🗑️ ${esc(d)} is empty</button>`).join("")}
+      <button class="btn btn-ghost" id="empty-drum-cancel" style="width:100%;padding:12px;font-size:14px">Cancel</button>
+    </div>
+  </div>`;
 }
 
 function build_rooms_view() {
@@ -1167,20 +1277,43 @@ function build_rooms_view() {
     const accent = room === "active" ? "#16a34a" : room === "filling" ? "#2563eb" : "#d97706";
     const bstyle = "flex:1;min-width:130px;padding:12px 10px;font-size:15px;font-weight:600;border-radius:8px";
     const mv = (target,label,cls)=>`<button class="btn ${cls}" data-move-room="${esc(c.id)}|${target}" style="${bstyle}">${label}</button>`;
+    // A combined batch with 2+ drums can't go Active yet (see set_container_status)
+    const multi = c.combined && c.drums.length > 1;
+    const to_active = multi
+      ? `<div style="${bstyle};font-size:12px;font-weight:600;color:#999;background:#f4f2ed;text-align:center;display:flex;align-items:center;justify-content:center">📦 Active once 1 drum left</div>`
+      : mv("active","📦 Active →","btn-dark");
+    // A combined lot's own Empty: with 2+ drums, pick the drum that's run out and it comes off the list;
+    // on its last drum, the normal empty that finishes the lot — straight from Filling / Inactive too,
+    // for when the last bucket fill left the drum physically empty (request_empty)
+    const empty_a_drum = !c.combined ? ""
+      : `<button class="btn" data-empty-room="${esc(c.id)}" style="${bstyle};background:#fdf5f5;color:#dc2626;border:1px solid #f3d4d4">🗑️ ${multi ? "Empty a drum" : "Empty"}</button>`;
     let buttons = "";
     if (room === "waiting") {
-      buttons = mv("filling","🪣 Filling →","btn-ghost") + mv("active","📦 Active →","btn-dark");
+      buttons = mv("filling","🪣 Filling →","btn-ghost") + to_active + empty_a_drum;
     } else if (room === "filling") {
       buttons = (remaining >= 5 ? `<button class="btn btn-green" data-fill-buckets="${esc(c.id)}" style="${bstyle}">🪣 Fill bucket</button>` : "")
-              + mv("active","📦 Active →","btn-dark") + mv("waiting","← Store","btn-ghost");
+              + to_active + mv("waiting","← Store","btn-ghost") + empty_a_drum;
     } else {
       buttons = mv("filling","← 🪣 Filling","btn-ghost") + mv("waiting","← Store","btn-ghost")
               + `<button class="btn" data-empty-room="${esc(c.id)}" style="${bstyle};background:#fdf5f5;color:#dc2626;border:1px solid #f3d4d4">🗑️ Empty</button>`;
     }
+    // A combined batch shows its name and its drums, each with a Release button for when it's scooped empty.
+    // Down to its last drum it looks like an ordinary drum, labelled as the last of the batch.
+    const heading = c.combined && c.drums.length === 1
+      ? `<div style="font-weight:700;font-size:17px;color:#1a1a1a">${esc(c.id)}</div>
+         <div style="font-size:16px;color:#333;margin:2px 0 2px">${esc(c.coffee || "—")}</div>
+         <div style="font-size:12px;color:#2563eb;margin:0 0 8px">last drum of 🔗 ${esc(c.batch_name || "combined batch")}</div>`
+      : c.combined
+      ? `<div style="font-weight:700;font-size:17px;color:#1a1a1a">🔗 ${esc(c.batch_name || c.coffee || "Combined batch")}</div>
+         <div style="font-size:13px;color:#666;margin:4px 0 8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+           ${c.drums.length} drums:
+           ${c.drums.map(d => `<span style="background:#f4f2ed;border-radius:6px;padding:2px 8px;font-weight:600;color:#1a1a1a">${esc(d)}</span>`).join("")}
+         </div>`
+      : `<div style="font-weight:700;font-size:17px;color:#1a1a1a">${esc(c.id)}</div>
+         <div style="font-size:16px;color:#333;margin:2px 0 8px">${esc(c.coffee || "—")}</div>`;
     return `<div class="room-card" draggable="true" data-room-card="${esc(c.id)}"
         style="background:#fff;border:2px solid ${accent};border-radius:10px;padding:12px 14px;margin-bottom:12px;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
-        <div style="font-weight:700;font-size:17px;color:#1a1a1a">${esc(c.id)}</div>
-        <div style="font-size:16px;color:#333;margin:2px 0 8px">${esc(c.coffee || "—")}</div>
+        ${heading}
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
           <div style="flex:1;height:8px;background:#eee;border-radius:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${low?"#dc2626":"#16a34a"}"></div></div>
           <span style="font-size:13px;font-weight:700;color:${low?"#dc2626":"#16a34a"}">${kgfloor(remaining)}kg</span>
@@ -1222,14 +1355,17 @@ function new_dispatch_btn_html() {
 }
 
 function build_empty_choice_overlay() {
-  const c = state.containers.find(x => x.id === state.ui.empty_choice);
+  const c = source_of(state.ui.empty_choice);
   if (!c) { state.ui.empty_choice = null; return build_rooms_view(); }
   const remaining = c.remaining || 0;
   const bags = Math.floor(remaining * 1000 / 30);
+  const intro = c.combined
+    ? `${esc(c.drums[0])} is the last drum of ${esc(c.batch_name || "this lot")}. By the system's count there's about <strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} left — emptying finishes the lot, and whatever's left is recorded as the lot's loss. Bag it as samples, or just empty it.`
+    : `There's about <strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} left loose in this drum. Bag it as samples, or just empty the drum.`;
   return `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1000">
     <div style="background:#fff;border-radius:14px;padding:24px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3)">
-      <h2 style="margin:0 0 6px">Empty ${esc(c.id)}</h2>
-      <p style="font-size:14px;color:#444;margin:0 0 18px">There's about <strong>${remaining.toFixed(2)}kg</strong> of ${esc(c.coffee || "coffee")} left loose in this drum. Bag it as samples, or just empty the drum.</p>
+      <h2 style="margin:0 0 6px">Empty ${esc(c.combined ? c.drums[0] : c.id)}</h2>
+      <p style="font-size:14px;color:#444;margin:0 0 18px">${intro}</p>
       <button class="btn btn-amber" id="empty-as-samples" style="width:100%;padding:14px;font-size:15px;margin-bottom:10px">🎁 Bag as ~${bags} × 30g samples</button>
       <button class="btn" id="empty-writeoff" style="width:100%;padding:14px;font-size:15px;margin-bottom:10px;background:#f0eee9;color:#1a1a1a;border:1px solid #e0ddd6">✓ Just empty the drum</button>
       <button class="btn btn-ghost" id="empty-cancel" style="width:100%;padding:12px;font-size:14px">Cancel</button>
@@ -1326,7 +1462,7 @@ function build_manual_order_entry() {
 }
 
 function build_deliveries_tab() {
-  const get_ref=d=>{ const c=state.containers.find(x=>x.id===d.container_id); return {c, fill: c ? { coffee: c.coffee, date: c.latest_roast_date||"", fill_number: 1 } : null}; };
+  const get_ref=d=>{ const c=source_of(d.container_id); return {c, fill: c ? { coffee: c.coffee, date: c.latest_roast_date||"", fill_number: 1 } : null}; };
   const kind_of = d => (state.shop_mappings.find(m => m.master_name === d.shop)?.kind) || "shop";
   const by_date_desc = (a,b) => (b.date||"").localeCompare(a.date||"") || (b.id||"").localeCompare(a.id||"");
   const card = (d, confirmed) => { const {c,fill}=get_ref(d); return build_dispatch_card(d,c,fill,confirmed); };
@@ -1434,7 +1570,7 @@ function build_order_delivery_card(order, dispatches, get_ref) {
 function resolve_line_coffee(l, fill) {
   const fp = l.fp_code && state.fp_codes.find(f=>f.fp_code===l.fp_code);
   if (fp && fp.coffee_name) return fp.coffee_name;
-  const lc = state.containers.find(x=>x.id===l.container_id);
+  const lc = source_of(l.container_id);
   if (lc && lc.coffee) return lc.coffee;
   const bk = l.fill_id && state.buckets.find(b=>b.fill_id===l.fill_id && b.coffee);
   if (bk) return bk.coffee;
@@ -1446,7 +1582,7 @@ function build_dispatch_card(d, c, fill, confirmed, show_scan=true) {
   const line_coffee=l=>{
     const fp = l.fp_code && state.fp_codes.find(f=>f.fp_code===l.fp_code);
     if (fp && fp.coffee_name) return fp.coffee_name;
-    const lc = state.containers.find(x=>x.id===l.container_id);
+    const lc = source_of(l.container_id);
     if (lc && lc.coffee) return lc.coffee;
     const bk = l.fill_id && state.buckets.find(b=>b.fill_id===l.fill_id && b.coffee);
     if (bk) return bk.coffee;
@@ -1746,7 +1882,7 @@ function update_scan_panel() {
     // Check there's still room in the container
     const fp = state.fp_codes.find(f => f.fp_code === code);
     const bag_kg = fp ? (BAG_SIZE_KG[fp.bag_size] || 0) : 0;
-    const container = state.containers.find(c => c.id === entry.lines[idx].container_id);
+    const container = source_of(entry.lines[idx].container_id);
     const used_kg = (entry.lines[idx].count) * bag_kg;
     if (container && (container.remaining - used_kg) < bag_kg) {
       flash_scan(`Not enough left in ${container.id}`, "error");
@@ -1763,7 +1899,7 @@ function update_scan_panel() {
       const v = Math.max(1, Math.floor(Number(e.target.value)) || 1);
       const fp = state.fp_codes.find(f => f.fp_code === code);
       const bag_kg = fp ? (BAG_SIZE_KG[fp.bag_size] || 0) : 0;
-      const container = state.containers.find(c => c.id === entry.lines[idx].container_id);
+      const container = source_of(entry.lines[idx].container_id);
       if (container && v * bag_kg > container.remaining) {
         const max_bags = Math.floor(container.remaining / bag_kg);
         flash_scan(`Max ${max_bags} bags fit in ${container.id}`, "error");
@@ -1953,7 +2089,7 @@ function build_packing_page(container, fill) {
     if (active_containers.length > 0) {
       summary = `<div style="background:#f4f2ed;border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#666">
           <div style="font-weight:600;margin-bottom:4px">Available (FIFO):</div>
-          ${active_containers.sort((a,b) => (a.latest_roast_date||"").localeCompare(b.latest_roast_date||"")).map(c => `<div>📦 ${esc(c.id)} · ${esc(c.coffee||"?")} · ${kgfloor(c.remaining)}kg</div>`).join("")}
+          ${active_containers.sort((a,b) => (a.latest_roast_date||"").localeCompare(b.latest_roast_date||"")).map(c => `<div>📦 ${esc(source_label(c))} · ${esc(c.coffee||"?")} · ${kgfloor(c.remaining)}kg</div>`).join("")}
         </div>`;
     } else if (filled_buckets_available.length > 0 && shop_kind !== "online") {
       summary = `<div style="background:#fff7ed;border:1px solid #d97706;color:#92400e;padding:10px;border-radius:8px;font-size:13px;margin-bottom:14px">
@@ -2006,7 +2142,7 @@ function build_packing_page(container, fill) {
         <div style="display:flex;gap:6px;align-items:center;margin-top:${ps.samples.length?"8px":"0"}">
           <select id="sample-container" style="flex:1;font-size:14px;padding:9px">
             <option value="">— ${LANG==="uk"?"Кава для зразка":"Coffee to sample"} —</option>
-            ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${kgfloor(c.remaining)}kg)</option>`).join("")}
+            ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(source_label(c))} (${kgfloor(c.remaining)}kg)</option>`).join("")}
           </select>
           <input type="number" inputmode="decimal" id="sample-count" min="1" step="1" value="1" style="width:58px;font-size:14px;padding:9px;text-align:center" />
           <button class="btn btn-amber btn-sm" id="sample-add">+ ${tr("Add","Додати")}</button>
@@ -2024,7 +2160,7 @@ function build_packing_page(container, fill) {
           <div style="display:flex;gap:6px;align-items:center">
             <select id="batch-container" style="flex:1;font-size:14px;padding:9px">
               <option value="">— ${tr("Coffee for batch","Кава для batch")} —</option>
-              ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(c.id)} (${kgfloor(c.remaining)}kg)</option>`).join("")}
+              ${sample_conts.map(c=>`<option value="${esc(c.id)}">${esc(c.coffee)} · ${esc(source_label(c))} (${kgfloor(c.remaining)}kg)</option>`).join("")}
             </select>
             <select id="batch-kg" style="width:72px;font-size:14px;padding:9px;text-align:center">
               <option value="1">1kg</option>
@@ -2106,7 +2242,7 @@ function build_shop_confirm_page(container, fill, dispatch) {
   const line_coffee=l=>{
     const fp = l.fp_code && state.fp_codes.find(f=>f.fp_code===l.fp_code);
     if (fp && fp.coffee_name) return fp.coffee_name;
-    const lc = state.containers.find(x=>x.id===l.container_id);
+    const lc = source_of(l.container_id);
     if (lc && lc.coffee) return lc.coffee;
     const bk = l.fill_id && state.buckets.find(b=>b.fill_id===l.fill_id && b.coffee);
     if (bk) return bk.coffee;
@@ -2147,6 +2283,9 @@ function attach_listeners() {
   app.querySelectorAll("[data-empty-room]").forEach(btn => btn.addEventListener("click", () => {
     request_empty(btn.dataset.emptyRoom);
   }));
+  // Combined lot: "Which drum is empty?"
+  app.querySelectorAll("[data-empty-drum]").forEach(btn => btn.addEventListener("click", () => release_drum(btn.dataset.emptyDrum)));
+  app.querySelector("#empty-drum-cancel")?.addEventListener("click", () => { state.ui.empty_drum_choice = null; render(); });
   const clear_room_hl = () => app.querySelectorAll("[data-room-drop]").forEach(z => { z.style.boxShadow=""; z.style.background="#faf9f7"; });
   app.querySelectorAll("[data-room-card]").forEach(cardEl => {
     cardEl.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", cardEl.dataset.roomCard); e.dataTransfer.effectAllowed = "move"; cardEl.style.opacity = "0.4"; });
@@ -2635,22 +2774,15 @@ function attach_listeners() {
     if (dispatch_id) await load_data();
     // Auto-flip used containers to empty only if genuinely exhausted, against the reloaded remaining.
     if (dispatch_id) {
-      const containers_used = [...new Set(lines.map(l => l.container_id).filter(Boolean))];
-      const to_empty = containers_used.filter(cid => {
-        const c = state.containers.find(x => x.id === cid);
-        return c && (c.remaining || 0) <= 0.01;
-      });
+      // Sources, not drum ids: a combined batch empties all its drums and is marked finished
+      const sources_used = [...new Set(lines.map(l => l.container_id).filter(Boolean).map(source_of).filter(Boolean))];
+      const to_empty = sources_used.filter(c => (c.remaining || 0) <= 0.01 && c.status !== "empty");
       if (to_empty.length) {
         const now_iso = new Date().toISOString();
-        await supabaseClient.from("containers")
-          .update({ status: "empty", status_changed_at: now_iso })
-          .in("id", to_empty);
+        for (const c of to_empty) await mark_source_empty(c, now_iso);
         // Status is the only thing that changed, and we know exactly what we set it to — so patch local
         // state instead of paying for a second full reload of every table.
-        to_empty.forEach(cid => {
-          const c = state.containers.find(x => x.id === cid);
-          if (c) { c.status = "empty"; c.status_changed_at = now_iso; }
-        });
+        to_empty.forEach(c => { c.status = "empty"; c.status_changed_at = now_iso; });
       }
     }
     packing_state.step = "done";

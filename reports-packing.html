@@ -127,14 +127,16 @@ async function load(){
   }));
   (buckets||[]).forEach(b => { if(b.status==="filled" && !b.retired_at && b.fill_id) bucket_kg[b.fill_id]=(bucket_kg[b.fill_id]||0)+5; });
 
-  // today's packs grouped by container_id
-  const today_by_cont = {};
+  // today's packs grouped by container_id, and by fill for combined batches (below)
+  const today_by_cont = {}, today_by_fill = {};
   (disp||[]).forEach(d => {
     if((d.date||"") !== today) return;
     (d.dispatch_lines||[]).forEach(l => {
       const cid = l.container_id;
       if(!cid) return;
-      (today_by_cont[cid] = today_by_cont[cid] || []).push({ shop:d.shop, desc:line_desc(l), kg:Number(l.kg)||0, t:d.confirmed_at });
+      const p = { shop:d.shop, desc:line_desc(l), kg:Number(l.kg)||0, t:d.confirmed_at };
+      (today_by_cont[cid] = today_by_cont[cid] || []).push(p);
+      if(l.fill_id) (today_by_fill[l.fill_id] = today_by_fill[l.fill_id] || []).push(p);
     });
   });
 
@@ -142,20 +144,31 @@ async function load(){
   const rows = [], idle = [];
   let tot_kg=0, tot_packs=0, tot_drums=0;
 
-  conts.forEach(c => {
+  // Each drum's current fill. A fill held by several drums is a combined batch: one row for the batch
+  // (its drums joined, e.g. "L01 + M02"), with every roast and every pack in that fill.
+  const current = conts.map(c => {
     const cs = (sessions||[]).filter(s => s.container_id===c.id);  // newest-first
-    if(!cs.length) return;
-    const fill = cs[0].fill_id, coffee = cs[0].coffee;
-    const total = cs.filter(s => s.fill_id===fill).reduce((a,s)=>a+(Number(s.roasted_weight)||0),0);
+    return cs.length ? { c, cs, fill: cs[0].fill_id, coffee: cs[0].coffee } : null;
+  }).filter(Boolean);
+  const drums_by_fill = {};
+  current.forEach(x => { if(x.fill) (drums_by_fill[x.fill] = drums_by_fill[x.fill] || []).push(x.c); });
+  const done_fills = new Set();
+
+  current.forEach(({ c, cs, fill, coffee }) => {
+    const batch = fill && drums_by_fill[fill].length > 1 ? drums_by_fill[fill] : null;
+    if(batch){ if(done_fills.has(fill)) return; done_fills.add(fill); }
+    const total = (batch ? (sessions||[]) : cs).filter(s => s.fill_id===fill).reduce((a,s)=>a+(Number(s.roasted_weight)||0),0);
     const packed = packed_all[fill]||0;
     const bkt = bucket_kg[fill]||0;
     const remaining = Math.max(0, total - packed - bkt);
 
-    const packs = (today_by_cont[c.id]||[]).slice().sort((a,b)=> (a.t||"").localeCompare(b.t||""));
+    const packs = ((batch ? today_by_fill[fill] : today_by_cont[c.id])||[]).slice().sort((a,b)=> (a.t||"").localeCompare(b.t||""));
     const packed_today = packs.reduce((a,p)=>a+p.kg,0);
     const packed_earlier = Math.max(0, packed - packed_today);
 
-    const row = { id:c.id, coffee, status:c.status, total, remaining, packed_today, packed_earlier, bkt, packs };
+    const live = batch ? batch.filter(d => d.status !== "empty") : null;
+    const id = batch ? (live.length ? live : batch).map(d => d.id).sort().join(" + ") : c.id;
+    const row = { id, coffee, status:c.status, total, remaining, packed_today, packed_earlier, bkt, packs };
     if(packs.length){ rows.push(row); tot_kg+=packed_today; tot_packs+=packs.length; tot_drums++; }
     else idle.push(row);
   });

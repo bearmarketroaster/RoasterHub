@@ -127,6 +127,8 @@ function new_session() {
     coffee: "", date: today(), container_id: "",
     batch_count: 1, batches: [], roasted_weight: "",
     is_test: false,
+    combine: false,          // part of a combined batch (several drums = one packing source)
+    combine_with: "",        // fill_id of the open batch to join; "" = start a new one
   };
 }
 
@@ -148,6 +150,19 @@ async function load_data() {
   const { data: containers_data } = await supabaseClient.from("containers").select("id, name, status, retired_at, empty_kg").order("id");
   state.containers = (containers_data || []).filter(c => !c.retired_at);
 
+  // Open combined batches, with the drums currently holding each — offered when logging a roast
+  const { data: batch_rows } = await supabaseClient.from("v_container_state")
+    .select("id, fill_id, coffee, combined, batch_name, batch_roast_date, batch_finished_at, status")
+    .eq("combined", true);
+  const open = {};
+  (batch_rows || []).forEach(r => {
+    if (!r.combined || r.batch_finished_at || !r.fill_id) return;
+    const b = (open[r.fill_id] = open[r.fill_id] || { fill_id: r.fill_id, name: r.batch_name, coffee: r.coffee, roast_date: r.batch_roast_date, drums: [] });
+    if (r.status !== "empty") { b.drums.push(r.id); b.status = b.status || r.status; }
+  });
+  // An Active batch is down to its last drum being packed out — adding a drum would put two in Active
+  state.open_batches = Object.values(open).filter(b => b.drums.length && b.status !== "active").sort((a, b) => (b.roast_date || "").localeCompare(a.roast_date || ""));
+
   const { data: sessions, error } = await supabaseClient.from("roast_sessions").select("*, roast_batches(*)").order("date", { ascending: false });
   if (error) { console.error("Failed to load roast sessions:", error); return; }
   state.roast_sessions = (sessions||[]).map(s => ({ ...s, batches: (s.roast_batches||[]).sort((a,b) => a.batch_number - b.batch_number) }));
@@ -161,7 +176,9 @@ async function save_session() {
   // For test roasts, no container is involved at all
   const container_id = s.is_test ? null : s.container_id;
   if (container_id) {
-    await supabaseClient.from("containers").upsert({ id: container_id, status: "waiting", status_changed_at: new Date().toISOString() }, { onConflict: "id" });
+    // A drum joining a combined batch goes into whichever room the batch is in, so its drums stay together
+    const joining = s.combine && s.combine_with ? (state.open_batches || []).find(b => b.fill_id === s.combine_with) : null;
+    await supabaseClient.from("containers").upsert({ id: container_id, status: joining?.status || "waiting", status_changed_at: new Date().toISOString() }, { onConflict: "id" });
   }
   const { data: { user } } = await supabaseClient.auth.getUser();
   // fill_id = container + date + coffee-slug. Including the coffee slug ensures two different coffees
@@ -169,7 +186,22 @@ async function save_session() {
   // possible — and the rest of the system uses fill_id as the join key for buckets/dispatches/stock).
   const coffee_slug = (s.coffee || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const coffee_id = state.coffee_id_by_name?.[s.coffee] ?? null;
-  const fill_id = container_id ? `${container_id}-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}` : null;
+  let fill_id = container_id ? `${container_id}-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}` : null;
+  // Combined batch: every drum in it shares one fill, which is what makes Traceability treat
+  // them as a single source. Joining uses the batch's fill; starting one creates the batch first.
+  if (container_id && s.combine) {
+    if (s.combine_with) {
+      fill_id = s.combine_with;
+    } else {
+      fill_id = `CB-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
+      const d = new Date(s.date + "T12:00:00");
+      const part = opt => d.toLocaleDateString("en-IE", opt);
+      const name = `${s.coffee} · ${part({ weekday: "short" })} ${d.getDate()} ${part({ month: "short" })}`;   // e.g. "Holy Roast · Mon 12 Oct"
+      const { error: batch_err } = await supabaseClient.from("combined_batches")
+        .insert({ fill_id, name, coffee: s.coffee, coffee_id, roast_date: s.date });
+      if (batch_err) { state.saving = false; alert("Couldn't start the combined batch: " + batch_err.message); render(); return; }
+    }
+  }
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
     id, coffee: s.coffee, coffee_id, date: s.date, container_id,
     roasted_weight: Number(s.roasted_weight), fill_id,
@@ -375,11 +407,41 @@ function build_step1() {
           ? `<div><label class="lbl">Number of Batches</label><input type="number" inputmode="decimal" value="1" disabled style="background:#f4f2ed;color:#666" /><p class="hint" style="font-size:11px;margin-top:4px">Test roasts are limited to 1 batch. Log more as separate sessions.</p></div>`
           : `<div><label class="lbl">Number of Batches *</label><input type="number" inputmode="decimal" id="s1-count" value="${s.batch_count}" min="1" max="20" /></div>`}
       </div>
+      ${s.is_test ? "" : build_combine_option(s)}
       <p id="s1-err" class="err" style="display:none"></p>
       <div style="display:flex;gap:8px;margin-top:16px">
         <button class="btn btn-dark btn-lg" id="s1-next">Next — Enter Batch Data →</button>
       </div>
     </div>`;
+}
+
+// "Combine with other drums of this roast": drums in a combined batch share one fill, so
+// Traceability treats them as one source to fill buckets and pack from. Leave it unticked
+// and the drum works exactly as before.
+function build_combine_option(s) {
+  const matching = (state.open_batches || []).filter(b => b.coffee === s.coffee);
+  const chosen = matching.find(b => b.fill_id === s.combine_with);
+  const date_note = chosen && chosen.roast_date && chosen.roast_date !== s.date
+    ? `<p class="hint" style="font-size:12px;margin-top:6px;color:#d97706">Heads up: ${esc(chosen.name)} was roasted on ${esc(chosen.roast_date)} — you're logging ${esc(s.date)}.</p>` : "";
+  return `
+    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:${s.combine?'#eef4ff':'#f4f2ed'};border:1px solid ${s.combine?'#2563eb':'#e8e6e1'};border-radius:8px;margin-top:16px;cursor:pointer">
+      <input type="checkbox" id="s1-combine" ${s.combine?"checked":""} style="width:18px;height:18px;cursor:pointer" />
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px">🔗 Combine with other drums of this roast</div>
+        <div style="font-size:12px;color:#666;margin-top:2px">The drums become one source for filling buckets and packing. Leftovers are settled once, when the whole batch is emptied.</div>
+      </div>
+    </label>
+    ${s.combine ? `
+      <div style="margin-top:10px">
+        <label class="lbl">Combined batch</label>
+        ${s.coffee ? `
+          <select id="s1-combine-with">
+            <option value="" ${!s.combine_with?"selected":""}>➕ Start a new combined batch</option>
+            ${matching.map(b => `<option value="${esc(b.fill_id)}" ${s.combine_with===b.fill_id?"selected":""}>Add to ${esc(b.name)} · ${esc(b.drums.join(", "))}</option>`).join("")}
+          </select>
+          ${date_note}`
+        : `<p class="hint" style="font-size:12px">Pick the coffee first.</p>`}
+      </div>` : ""}`;
 }
 
 function build_step2() {
@@ -518,8 +580,20 @@ function attach_listeners() {
 
   // Step 1: sync on input. The Test-roast toggle re-renders, and these fields were only read
   // when Next was clicked, so toggling it wiped anything already typed.
-  app.querySelector("#s1-coffee")?.addEventListener("change", e => { state.session.coffee = e.target.value; });
-  app.querySelector("#s1-date")?.addEventListener("change",   e => { state.session.date = e.target.value; });
+  // With Combine ticked, the batch list depends on the coffee (and the date note on the date), so redraw
+  app.querySelector("#s1-coffee")?.addEventListener("change", e => {
+    state.session.coffee = e.target.value;
+    if (state.session.combine) { state.session.combine_with = ""; render(); }
+  });
+  app.querySelector("#s1-date")?.addEventListener("change",   e => { state.session.date = e.target.value; if (state.session.combine) render(); });
+  app.querySelector("#s1-combine")?.addEventListener("change", e => {
+    const g = id => document.getElementById(id);
+    if (g("s1-count")) state.session.batch_count = Number(g("s1-count").value) || state.session.batch_count;
+    state.session.combine = e.target.checked;
+    if (!e.target.checked) state.session.combine_with = "";
+    render();
+  });
+  app.querySelector("#s1-combine-with")?.addEventListener("change", e => { state.session.combine_with = e.target.value; render(); });
   app.querySelector("#s1-container")?.addEventListener("change", e => { state.session.container_id = e.target.value.trim(); });
   app.querySelector("#s1-count")?.addEventListener("input",   e => { state.session.batch_count = Number(e.target.value) || 0; });
 

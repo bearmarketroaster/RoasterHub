@@ -211,13 +211,22 @@ async function load_data() {
   // Bounded by the number of physical drums, so a single unpaginated read is safe here — unlike the
   // dispatches table this used to scan.
   const { data: container_state } = await supabaseClient.from("v_container_state")
-    .select("id, coffee, fill_id, status, fill_start_date, remaining")
+    .select("id, coffee, fill_id, status, fill_start_date, remaining, combined, batch_name")
     .in("status", ["active", "waiting"])
     .order("id", { ascending: true });
   const to_kg = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  // A combined batch (several drums sharing one fill) is listed once, under its first drum,
+  // with the batch's pooled remaining — the same way Traceability shows it.
+  const seen_batches = new Set();
   state.containers = (container_state || [])
     .map(c => ({ ...c, remaining: to_kg(c.remaining) }))
-    .filter(c => c.remaining > 0);
+    .filter(c => c.remaining > 0)
+    .filter(c => {
+      if (!c.combined || !c.fill_id) return true;
+      if (seen_batches.has(c.fill_id)) return false;
+      seen_batches.add(c.fill_id);
+      return true;
+    });
 
   // Load recent staff takeaways for display in the staff tab
   const { data: staff_disps } = await supabaseClient.from("dispatches").select("id, shop, date, total_kg, container_id, fill_id, dispatch_lines(*)").eq("shop", "Staff").order("date", { ascending: false }).limit(50);
@@ -1068,7 +1077,7 @@ function build_staff() {
           <select id="staff-container" ${!s.coffee || matching_containers.length===0 ? "disabled" : ""}>
             ${matching_containers.length === 0
               ? `<option value="">${s.coffee ? "No containers available" : "Pick a coffee first"}</option>`
-              : matching_containers.map(c => `<option value="${esc(c.id)}" ${s.container_id===c.id?"selected":""}>${esc(c.name?`${c.id} — ${c.name}`:c.id)} · ${c.remaining.toFixed(1)}kg</option>`).join("")}
+              : matching_containers.map(c => `<option value="${esc(c.id)}" ${s.container_id===c.id?"selected":""}>${esc(c.combined ? `🔗 ${c.batch_name || c.id}` : c.name ? `${c.id} — ${c.name}` : c.id)} · ${c.remaining.toFixed(1)}kg</option>`).join("")}
           </select>
         </div>
         <div>

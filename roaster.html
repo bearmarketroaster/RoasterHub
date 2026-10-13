@@ -252,7 +252,9 @@ async function load() {
   });
 
   // Roasted ON HAND per coffee = sum of drum remaining (active + waiting drums), scoped to each drum's CURRENT fill.
-  const on_hand = {}, empty_drums = [];
+  // A combined batch is several drums sharing one fill: its roasted total is every roast in that fill,
+  // whichever drum, and it's counted once however many drums hold it.
+  const on_hand = {}, empty_drums = [], counted_fills = new Set();
   conts.forEach(c => {
     if (c.status === "empty") { empty_drums.push({ id: c.id, name: c.name, prefix: size_prefix(c.id) }); return; }
     if (c.status !== "active" && c.status !== "waiting") return;
@@ -260,7 +262,9 @@ async function load() {
     if (!cs.length) return;
     const fill = cs[0].fill_id, coffee = cs[0].coffee;
     if (!fill || !coffee) return;
-    const total = cs.filter(s => s.fill_id === fill).reduce((a, s) => a + (Number(s.roasted_weight) || 0), 0);
+    if (counted_fills.has(fill)) return;
+    counted_fills.add(fill);
+    const total = sess.filter(s => s.fill_id === fill).reduce((a, s) => a + (Number(s.roasted_weight) || 0), 0);
     const remaining = Math.max(0, total - (packed_by_fill[fill] || 0) - (bucket_by_fill[fill] || 0));
     on_hand[coffee] = (on_hand[coffee] || 0) + remaining;
   });
