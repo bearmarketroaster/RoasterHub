@@ -147,7 +147,7 @@ const state = {
   dispatches: [],              // for the revenue/profit view
   shop_mappings: [],
   fp_codes: [],
-  fillmap: {},                 // fill_id -> coffee name (from roast sessions)
+  fillmap: {},                 // fill_id -> coffee_id (from roast sessions)
   money_from: "",
   money_to: "",
   dirty: false,
@@ -269,12 +269,12 @@ async function load() {
   state.dispatches = (disp || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
   const { data: maps } = await supabaseClient.from("shop_mappings").select("master_name, kind");
   state.shop_mappings = maps || [];
-  const { data: fps } = await supabaseClient.from("fp_codes").select("fp_code, coffees(name)");
+  const { data: fps } = await supabaseClient.from("fp_codes").select("fp_code, coffee_id");
   state.fp_codes = fps || [];
   const { data: rs } = await supabaseClient.from("roast_sessions").select("fill_id, coffee, coffee_id, roasted_weight, is_test, roast_batches(green_weight)");
   const fm = {}, lossByC = {};
   (rs || []).forEach(r => {
-    if (r.fill_id && r.coffee && !fm[r.fill_id]) fm[r.fill_id] = r.coffee;
+    if (r.fill_id && r.coffee_id != null && !(r.fill_id in fm)) fm[r.fill_id] = r.coffee_id;
     if (r.is_test) return;
     const green = (r.roast_batches || []).reduce((a, b) => a + (Number(b.green_weight) || 0), 0);
     const roasted = Number(r.roasted_weight) || 0;
@@ -378,15 +378,11 @@ function roasted_cpk(coffeeId) {
   if (!g) return null;
   return round2((g.price + (Number(state.shipping_override[coffeeId]) || 0)) / (1 - roast_loss_for(coffeeId).pct / 100));
 }
-function coffee_id_for_name(name) {
-  const c = name && state.coffees.find(c => c.name === name);
-  return c ? c.id : null;
-}
 function line_coffee_id(l) {
-  let name = null;
-  if (l.fp_code) { const f = state.fp_codes.find(x => x.fp_code === l.fp_code); if (f && f.coffees) name = f.coffees.name; }
-  if (!name && l.fill_id) name = state.fillmap[l.fill_id] || null;
-  return coffee_id_for_name(name);
+  let id = null;
+  if (l.fp_code) id = state.fp_codes.find(x => x.fp_code === l.fp_code)?.coffee_id ?? null;
+  if (id == null && l.fill_id) id = state.fillmap[l.fill_id] ?? null;
+  return state.coffees.some(c => c.id === id) ? id : null;   // active coffees only, as before
 }
 
 // Value one dispatch line for a channel ("shop" → wholesale, "online" → retail).

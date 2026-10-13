@@ -177,26 +177,29 @@ function r1(n) { return Math.round((Number(n)||0)*10)/10; }
 // Planned drums of one coffee that share a combine_fill_id are roasted as one combined source (the
 // Roasts page creates it with this id on the first drum, the rest join it). Today's id for a coffee
 // is reused, so a drum added later joins the same combined roast.
-function combined_id_for(coffee) {
-  return state.plan_items.find(i => i.coffee === coffee && i.combine_fill_id && i.status !== "skipped")?.combine_fill_id || null;
+function combined_id_for(coffee_id) {
+  return state.plan_items.find(i => Number(i.coffee_id) === coffee_id && i.combine_fill_id && i.status !== "skipped")?.combine_fill_id || null;
 }
-function new_combined_id(coffee) {
-  const slug = (coffee || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+function new_combined_id(coffee_id) {
+  const slug = coffee_name(coffee_id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return `CB-${today_str().replace(/-/g, "")}${slug ? `-${slug}` : ""}-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
 }
+// Coffees are identified by id; the name is looked up from the coffees list so it's always current
+function coffee_name(coffee_id, fallback) { return state.coffee_names[coffee_id] ?? fallback ?? ""; }
 // Put an empty drum on today's plan for the picked coffee — as a normal roast, or combined
 async function plan_drum(id, combined) {
-  const coffee = state.selected_coffee;
-  if (!coffee || !id) return;
+  const coffee_id = state.selected_coffee;
+  if (!coffee_id || !id) return;
   if (state.plan_items.find(i => i.container_id === id && i.status !== "skipped")) return; // already planned
   const d = state.empty_drums.find(x => x.id === id);
   const seq = state.plan_items.length ? Math.max(...state.plan_items.map(i => Number(i.seq) || 0)) + 1 : 0;
-  await supabaseClient.from("roast_plan").insert({
+  const { error } = await supabaseClient.from("roast_plan").insert({
     id: gen_plan_id(), plan_date: today_str(), seq,
-    container_id: id, coffee, coffee_id: null,
+    container_id: id, coffee_id, coffee: coffee_name(coffee_id),
     batches: d ? d.max : 1, status: "planned",
-    combine_fill_id: combined ? (combined_id_for(coffee) || new_combined_id(coffee)) : null,
+    combine_fill_id: combined ? (combined_id_for(coffee_id) || new_combined_id(coffee_id)) : null,
   });
+  if (error) alert("Couldn't add the drum to the plan: " + error.message);
   await load_plan(); render();
 }
 
@@ -222,18 +225,20 @@ function max_roasts(pfx) { return SIZE_ROASTS[pfx] || 1; }
 const state = {
   loaded: false,
   window_days: 28,          // usage averaging window — trailing 28-day concurrent average
-  on_hand: {},              // coffee -> roasted kg sitting in drums
-  bucket_kg: {},            // coffee -> kg sitting in filled buckets (info only)
-  usage: {},                // coffee -> total kg dispatched in window
-  kg_per_roast: {},         // coffee -> avg roasted kg per roast (from history)
-  green_per_roast: {},      // coffee -> avg green kg per roast (from history)
+  // Per-coffee figures are keyed by coffee id
+  on_hand: {},              // coffee_id -> roasted kg sitting in drums
+  bucket_kg: {},            // coffee_id -> kg sitting in filled buckets (info only)
+  usage: {},                // coffee_id -> total kg dispatched in window
+  kg_per_roast: {},         // coffee_id -> avg roasted kg per roast (from history)
+  green_per_roast: {},      // coffee_id -> avg green kg per roast (from history)
   empty_drums: [],          // [{ id, name, prefix }]
   empty_buckets: [],        // [{ id, name, prefix }]
   green_order: [],          // green stock to reorder: [{ coffee, current_kg, threshold, status }]
-  retired_names: new Set(), // archived coffees still showing because they have stock left to use up
-  coffees: [],              // [name]
+  coffee_names: {},         // coffee_id -> current name (every coffee, retired too)
+  retired_ids: new Set(),   // archived coffees still showing because they have stock left to use up
+  coffees: [],              // [coffee_id]
   plan_items: [],           // persistent roast_plan rows for today: {id, container_id, coffee, coffee_id, batches, seq, status, roast_session_id}
-  selected_coffee: null,    // coffee picked for tap-to-assign
+  selected_coffee: null,    // coffee_id picked for tap-to-assign
 };
 
 (async () => {
@@ -263,11 +268,11 @@ async function fetch_all(table, select, order_col, ascending = false) {
 async function load() {
   const [containers, sessions, disp, buckets, coffees, fp_codes, stock_items] = await Promise.all([
     supabaseClient.from("containers").select("id, name, status, retired_at").then(r => r.data || []),
-    fetch_all("roast_sessions", "id, container_id, coffee, fill_id, roasted_weight, date, is_test, roast_batches(green_weight)", "date"),
+    fetch_all("roast_sessions", "id, container_id, coffee_id, fill_id, roasted_weight, date, is_test, roast_batches(green_weight)", "date"),
     fetch_all("dispatches", "id, date, shop, dispatch_lines(*)", "date"),
-    fetch_all("buckets", "id, name, coffee, fill_id, status, retired_at, created_at", "created_at"),
-    supabaseClient.from("coffees").select("name, retired_at").then(r => (r.data || []).filter(c => !c.retired_at)),
-    supabaseClient.from("fp_codes").select("fp_code, coffees(name)").then(r => r.data || []),
+    fetch_all("buckets", "id, name, coffee_id, fill_id, status, retired_at, created_at", "created_at"),
+    supabaseClient.from("coffees").select("id, name, retired_at").then(r => r.data || []),
+    supabaseClient.from("fp_codes").select("fp_code, coffee_id").then(r => r.data || []),
     // Green on hand comes from v_green_stock — the sum of green_movements, not a stored figure.
     // Aliased to the old column names so the reorder logic below is untouched.
     supabaseClient.from("v_green_stock").select("coffee, coffee_id, on_hand_kg, low_stock_threshold, retired_at")
@@ -279,8 +284,9 @@ async function load() {
 
   const conts = (containers || []).filter(c => !c.retired_at);
   const sess = sessions || [];
-  const fpmap = {}; (fp_codes || []).forEach(f => { if (f.fp_code && f.coffees) fpmap[f.fp_code] = f.coffees.name; });
-  const fillmap = {}; sess.forEach(s => { if (s.fill_id && s.coffee && !fillmap[s.fill_id]) fillmap[s.fill_id] = s.coffee; });
+  state.coffee_names = Object.fromEntries((coffees || []).map(c => [c.id, c.name]));
+  const fpmap = {}; (fp_codes || []).forEach(f => { if (f.fp_code && f.coffee_id != null) fpmap[f.fp_code] = f.coffee_id; });
+  const fillmap = {}; sess.forEach(s => { if (s.fill_id && s.coffee_id != null && !fillmap[s.fill_id]) fillmap[s.fill_id] = s.coffee_id; });
 
   // Dispatch line kg per fill_id (for container remaining)
   const packed_by_fill = {};
@@ -302,8 +308,8 @@ async function load() {
     if (c.status !== "active" && c.status !== "waiting") return;
     const cs = sess.filter(s => s.container_id === c.id);            // newest-first already
     if (!cs.length) return;
-    const fill = cs[0].fill_id, coffee = cs[0].coffee;
-    if (!fill || !coffee) return;
+    const fill = cs[0].fill_id, coffee = cs[0].coffee_id;
+    if (!fill || coffee == null) return;
     if (counted_fills.has(fill)) return;
     counted_fills.add(fill);
     const total = sess.filter(s => s.fill_id === fill).reduce((a, s) => a + (Number(s.roasted_weight) || 0), 0);
@@ -313,7 +319,7 @@ async function load() {
 
   // Filled-bucket kg per coffee (info only — ready-to-go stock not counted in cover)
   const bkt = {};
-  (buckets || []).forEach(b => { if (b.status === "filled" && !b.retired_at && b.coffee) bkt[b.coffee] = (bkt[b.coffee] || 0) + 5; });
+  (buckets || []).forEach(b => { if (b.status === "filled" && !b.retired_at && b.coffee_id != null) bkt[b.coffee_id] = (bkt[b.coffee_id] || 0) + 5; });
 
   // Usage = kg that left stock over the window (sales, samples, staff, batch, buckets) — excludes Emptied write-offs.
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - state.window_days);
@@ -324,8 +330,8 @@ async function load() {
     (d.dispatch_lines || []).forEach(l => {
       if (l.bag_size === "Emptied") return;
       let coffee = l.fp_code ? fpmap[l.fp_code] : null;
-      if (!coffee && l.fill_id) coffee = fillmap[l.fill_id];
-      if (!coffee) return;
+      if (coffee == null && l.fill_id) coffee = fillmap[l.fill_id];
+      if (coffee == null) return;
       usage[coffee] = (usage[coffee] || 0) + (Number(l.kg) || 0);
     });
   });
@@ -342,13 +348,14 @@ async function load() {
   // Per-coffee batch size, derived from real roasts: roasted ÷ batches, and green ÷ batches.
   const roasted_sum = {}, batch_sum = {}, green_sum = {};
   sess.forEach(s => {
-    if (s.is_test || !s.coffee) return;
+    const c = s.coffee_id;
+    if (s.is_test || c == null) return;
     const nb = (s.roast_batches || []).length;
     const r = Number(s.roasted_weight) || 0;
     if (nb === 0 || r <= 0) return;                 // skip seed/snapshot sessions (no batches)
-    roasted_sum[s.coffee] = (roasted_sum[s.coffee] || 0) + r;
-    batch_sum[s.coffee]   = (batch_sum[s.coffee]   || 0) + nb;
-    green_sum[s.coffee]   = (green_sum[s.coffee]   || 0) + (s.roast_batches || []).reduce((a, b) => a + (Number(b.green_weight) || 0), 0);
+    roasted_sum[c] = (roasted_sum[c] || 0) + r;
+    batch_sum[c]   = (batch_sum[c]   || 0) + nb;
+    green_sum[c]   = (green_sum[c]   || 0) + (s.roast_batches || []).reduce((a, b) => a + (Number(b.green_weight) || 0), 0);
   });
   const kg_per_roast = {}, green_per_roast = {};
   Object.keys(batch_sum).forEach(c => {
@@ -364,12 +371,13 @@ async function load() {
   // stock is real and needs packing out. Recent usage does NOT keep a retired coffee on the list:
   // having sold some a fortnight ago says nothing about whether there's any left, and a coffee
   // you no longer stock has nothing to roast.
-  const active_names = new Set((coffees || []).map(c => c.name));
+  const active_ids = new Set((coffees || []).filter(c => !c.retired_at).map(c => c.id));
   state.coffees = [...new Set([
-    ...active_names,
-    ...Object.keys(on_hand).filter(n => (on_hand[n] || 0) > 0.05),
-  ])].filter(Boolean).sort();
-  state.retired_names = new Set([...state.coffees].filter(n => !active_names.has(n)));
+    ...active_ids,
+    ...Object.keys(on_hand).filter(id => (on_hand[id] || 0) > 0.05).map(Number),
+  ])].filter(id => state.coffee_names[id] != null)
+     .sort((a, b) => coffee_name(a).localeCompare(coffee_name(b)));
+  state.retired_ids = new Set(state.coffees.filter(id => !active_ids.has(id)));
 
   // Green stock to order — mirror the Stock page: out = 0kg, low = below the line's threshold (default 20kg).
   state.green_order = (stock_items || [])
@@ -393,10 +401,10 @@ function roast_rows() {
   // state.coffees is the authoritative list, built in load_data(): active coffees, plus any
   // retired one that still has roasted stock in a drum. Do NOT re-union on_hand/usage here —
   // usage covers a 28-day window, so that resurrects archived coffees sold weeks ago.
-  const names = [...state.coffees].filter(Boolean);
-  const rows = names.map(coffee => {
-    const on_hand = state.on_hand[coffee] || 0;
-    const total = state.usage[coffee] || 0;
+  const rows = state.coffees.map(coffee_id => {
+    const coffee = coffee_name(coffee_id);
+    const on_hand = state.on_hand[coffee_id] || 0;
+    const total = state.usage[coffee_id] || 0;
     const per_day = total / state.window_days;
     let cover, status;
     if (per_day <= 0) { cover = Infinity; status = "idle"; }
@@ -405,9 +413,9 @@ function roast_rows() {
     const suggest = (per_day > 0 && cover < LOW_COVER_DAYS)
       ? Math.max(0, Math.round((TARGET_COVER_DAYS * per_day - on_hand)))
       : 0;
-    const kpr = state.kg_per_roast[coffee];
+    const kpr = state.kg_per_roast[coffee_id];
     const suggest_roasts = (suggest > 0 && kpr > 0) ? Math.ceil(suggest / kpr) : null;
-    return { coffee, on_hand, per_day, cover, status, suggest, suggest_roasts, bucket: state.bucket_kg[coffee] || 0 };
+    return { coffee_id, coffee, on_hand, per_day, cover, status, suggest, suggest_roasts, bucket: state.bucket_kg[coffee_id] || 0 };
   });
   const order = { out: 0, low: 1, ok: 2, idle: 3 };
   rows.sort((a, b) => (order[a.status] - order[b.status]) || (a.cover - b.cover) || a.coffee.localeCompare(b.coffee));
@@ -425,17 +433,17 @@ function render() {
   const done_count = items.filter(i => i.status === "done").length;
   const total_batches = active.reduce((a, i) => a + (Number(i.batches) || 0), 0);
   let plan_green = 0, green_known = active.length > 0;
-  active.forEach(i => { const g = state.green_per_roast[i.coffee]; if (g > 0) plan_green += g * i.batches; else green_known = false; });
+  active.forEach(i => { const g = state.green_per_roast[i.coffee_id]; if (g > 0) plan_green += g * i.batches; else green_known = false; });
 
   const SCOL = { out: "#dc2626", low: "#d97706", ok: "#16a34a", idle: "#bbb" };
   const SLAB = { out: "ROAST", low: "LOW", ok: "OK", idle: "—" };
 
   // ---- Left: priority coffee cards ----
   const prio_cards = rows.map(r => {
-    const sel = state.selected_coffee === r.coffee;
+    const sel = state.selected_coffee === r.coffee_id;
     const cover = r.cover === Infinity ? "—" : r.cover === 0 ? "OUT" : `${r.cover.toFixed(1)}d`;
-    return `<button class="prio ${sel ? "sel" : ""}" data-pick="${esc(r.coffee)}" style="--c:${SCOL[r.status]}">
-      <div class="prio-top"><span class="prio-name">${esc(r.coffee)}${state.retired_names.has(r.coffee)?` <span style="font-size:10px;color:#999;font-weight:600">ARCHIVED</span>`:""}</span><span class="prio-badge" style="background:${SCOL[r.status]}">${SLAB[r.status]}</span></div>
+    return `<button class="prio ${sel ? "sel" : ""}" data-pick="${r.coffee_id}" style="--c:${SCOL[r.status]}">
+      <div class="prio-top"><span class="prio-name">${esc(r.coffee)}${state.retired_ids.has(r.coffee_id)?` <span style="font-size:10px;color:#999;font-weight:600">ARCHIVED</span>`:""}</span><span class="prio-badge" style="background:${SCOL[r.status]}">${SLAB[r.status]}</span></div>
       <div class="prio-cover">${cover === "OUT" ? `<strong style="color:#dc2626">NEEDS ROASTING</strong>` : cover === "—" ? `<span style="color:#bbb">no demand</span>` : `<strong>${cover}</strong> cover · ${kg(r.on_hand)} on hand`}</div>
       <div class="prio-sub">${r.per_day > 0 ? kg(r.per_day) + "/day" : "no recent use"}${r.bucket ? ` · +${kg(r.bucket)} in buckets` : ""}</div>
       ${r.suggest > 0 ? `<div class="prio-rec">↳ roast ${r.suggest_roasts ? `≈${r.suggest_roasts} batch${r.suggest_roasts != 1 ? "es" : ""}` : `~${r.suggest}kg`}</div>` : ""}
@@ -456,14 +464,14 @@ function render() {
           if (planned) {
             return `<div class="slot filled">
               <div class="slot-id">${esc(d.id)}</div>
-              <div class="slot-coffee">${esc(planned.coffee)}</div>
+              <div class="slot-coffee">${esc(coffee_name(planned.coffee_id, planned.coffee))}</div>
               <div class="slot-hint" style="color:#166534">✓ ${planned.status === "done" ? "done" : "in plan"}</div>
             </div>`;
           }
           return `<button class="slot empty ${assignable ? "go" : ""}" data-assign="${esc(d.id)}" ${assignable ? `draggable="true" data-drag-drum="${esc(d.id)}"` : ""}>
             <div class="slot-id">${esc(d.id)}</div>
             <div class="slot-cap">holds ${d.max} batches</div>
-            <div class="slot-hint">${assignable ? `+ ${esc(state.selected_coffee)}` : "empty"}</div>
+            <div class="slot-hint">${assignable ? `+ ${esc(coffee_name(state.selected_coffee))}` : "empty"}</div>
           </button>`;
         }).join("")}
       </div>
@@ -490,7 +498,7 @@ function render() {
     return it.status === "planned" ? `<button class="wl-single" data-make-single="${it.id}" title="Take this drum out of the combined roast">make single</button>` : "";
   };
   const row_html = (it, idx) => {
-    const g = state.green_per_roast[it.coffee];
+    const g = state.green_per_roast[it.coffee_id];
     const mx = max_for(it.container_id);
     const done = it.status === "done", skip = it.status === "skipped";
     return `<div class="wl ${it.status}" ${it.status === "planned" ? `draggable="true" data-drag-plan="${it.id}"` : ""}>
@@ -499,7 +507,7 @@ function render() {
         <button class="wl-mv" data-move="${it.id}|1" ${idx===items.length-1?"disabled":""}>▼</button>
       </div>
       <div class="wl-body">
-        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee">${esc(it.coffee)}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""} ${combine_ctl(it)}</div>
+        <div class="wl-top"><span class="wl-drum">${esc(it.container_id||"?")}</span> → <span class="wl-coffee">${esc(coffee_name(it.coffee_id, it.coffee))}</span>${done?`<span class="wl-badge done">✓ done</span>`:skip?`<span class="wl-badge skip">skipped</span>`:""} ${combine_ctl(it)}</div>
         <div class="wl-sub">${(done||skip)?`${it.batches} batch${it.batches!=1?"es":""}`:`<span class="stepper"><button data-pbatch="${it.id}|-1">−</button><span>${it.batches}</span><button data-pbatch="${it.id}|1">+</button> <span class="slot-max">/ ${mx} batches</span></span>`}${g>0?` · ≈ ${kg(g*it.batches)} green`:""}</div>
       </div>
       <div class="wl-act">
@@ -512,11 +520,11 @@ function render() {
   // The Combined box for the picked coffee: drag drums in (or click it, then click drums). Its chips
   // are that coffee's drums already planned as combined today.
   const combo_box_html = () => {
-    const coffee = state.selected_coffee;
-    const lot = combined_id_for(coffee);
+    const coffee_id = state.selected_coffee;
+    const lot = combined_id_for(coffee_id);
     const in_box = lot ? items.filter(i => i.combine_fill_id === lot && i.status !== "skipped") : [];
     return `<div class="combo-box ${state.combine_mode ? "armed" : ""}" id="combo-box" data-combo-drop>
-      <div class="combo-h">🔗 Combined · ${esc(coffee)}</div>
+      <div class="combo-h">🔗 Combined · ${esc(coffee_name(coffee_id))}</div>
       <div class="combo-sub">${state.combine_mode
         ? "Now click drums below to add them — click here again when you're done."
         : "Drag 2 or more drums here to roast them as one combined source for filling buckets (or click here, then click drums). One drum on its own is just a normal roast."}</div>
@@ -534,7 +542,7 @@ function render() {
     members.forEach(m => shown.add(m.id));
     const n = members.filter(m => m.status !== "skipped").length;
     return `<div class="wl-group">
-      <div class="wl-group-h">🔗 Combined · ${esc(it.coffee)} <span>${n} drums · filled as one</span></div>
+      <div class="wl-group-h">🔗 Combined · ${esc(coffee_name(it.coffee_id, it.coffee))} <span>${n} drums · filled as one</span></div>
       ${members.map(m => row_html(m, items.indexOf(m))).join("")}
     </div>`;
   }).join("");
@@ -600,7 +608,7 @@ function render() {
   });
 
   app.querySelectorAll("[data-pick]").forEach(b => b.addEventListener("click", () => {
-    const c = b.dataset.pick;
+    const c = Number(b.dataset.pick);
     state.selected_coffee = state.selected_coffee === c ? null : c;
     state.combine_mode = false;   // the Combined box is per coffee
     render();
@@ -624,8 +632,9 @@ function render() {
       else if (kind === "plan") {
         const it = state.plan_items.find(i => i.id === id);
         if (!it) return;
-        if (it.coffee !== state.selected_coffee) { alert(`${it.container_id} is planned for ${it.coffee} — only ${state.selected_coffee} drums can go in this Combined box.`); return; }
-        await supabaseClient.from("roast_plan").update({ combine_fill_id: combined_id_for(it.coffee) || new_combined_id(it.coffee), updated_at: new Date().toISOString() }).eq("id", it.id);
+        const cid = Number(it.coffee_id);
+        if (cid !== state.selected_coffee) { alert(`${it.container_id} is planned for ${coffee_name(it.coffee_id, it.coffee)} — only ${coffee_name(state.selected_coffee)} drums can go in this Combined box.`); return; }
+        await supabaseClient.from("roast_plan").update({ combine_fill_id: combined_id_for(cid) || new_combined_id(cid), updated_at: new Date().toISOString() }).eq("id", it.id);
         await load_plan(); render();
       }
     });

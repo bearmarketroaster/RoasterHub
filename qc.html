@@ -130,7 +130,7 @@ const BREW_METHODS = ["Espresso", "Filter", "Batch brew"];
 // for easier successive entries.
 function new_qc_form(kind, carry = {}) {
   return {
-    coffee: "",
+    coffee_id: "",          // the picked coffee's id, as the <select> gives it ("" = none)
     shop: carry.shop || "",
     brew_method: carry.brew_method || "",
     measured_at: carry.measured_at || today_iso(),
@@ -173,7 +173,7 @@ const FORM_STATUS_KEYS = ["saving", "err", "ok"];
 
 // Shop, brew method and date carry over after a save, so on their own they aren't unsaved work
 function qc_form_touched(f) {
-  return !!(f.coffee || f.notes || Object.values(f.readings).some(vals => vals.some(v => v !== "")));
+  return !!(f.coffee_id || f.notes || Object.values(f.readings).some(vals => vals.some(v => v !== "")));
 }
 
 function collect_unsaved() {
@@ -194,7 +194,11 @@ function restore_unsaved() {
   if (!saved) return false;
   state.active_tab = saved.active_tab || state.active_tab;
   for (const [kind, f] of Object.entries(saved.forms || {})) {
-    if (state.forms[kind]) state.forms[kind] = { ...new_qc_form(kind), ...f };
+    if (!state.forms[kind]) continue;
+    // A draft saved before coffee ids were used holds the coffee's name instead
+    if (f.coffee && !f.coffee_id) f.coffee_id = String(coffee_list(kind).find(c => c.name === f.coffee)?.id ?? "");
+    delete f.coffee;
+    state.forms[kind] = { ...new_qc_form(kind), ...f };
   }
   if (saved.sample) state.sample_form = { ...new_sample_form(), ...saved.sample };
   return true;
@@ -258,11 +262,11 @@ function row_readings(row, m) {
     .map(Number);
 }
 
-function coffee_id_for(kind, name) {
-  const list = kind === "green"
+// The coffees a form can pick from, as [{ id, name }]
+function coffee_list(kind) {
+  return kind === "green"
     ? state.in_stock_greens.map(g => ({ id: g.coffee_id, name: g.coffee }))
     : state.coffees;
-  return list.find(c => c.name === name)?.id ?? null;
 }
 
 // A measure is either left blank or given all three readings; at least one
@@ -288,7 +292,8 @@ async function save_qc(kind) {
   const f = state.forms[kind];
   const fail = msg => { f.saving = false; f.err = msg; f.ok = false; render(); };
   if (kind === "tds" && !f.shop) return fail("Select a shop.");
-  if (!f.coffee) return fail("Select a coffee.");
+  const coffee = coffee_list(kind).find(c => String(c.id) === String(f.coffee_id));
+  if (!coffee) return fail("Select a coffee.");
   if (!f.measured_at) return fail("Enter a measurement date.");
   const reading_err = check_readings(kind);
   if (reading_err) return fail(reading_err);
@@ -296,8 +301,8 @@ async function save_qc(kind) {
   f.saving = true; f.err = ""; f.ok = false; render();
   const { data: { user } } = await supabaseClient.auth.getUser();
   const payload = {
-    coffee: f.coffee,
-    coffee_id: coffee_id_for(kind, f.coffee),
+    coffee_id: coffee.id,
+    coffee: coffee.name,
     measured_at: f.measured_at,
     notes: f.notes.trim() || null,
     created_by: user?.id || null,
@@ -379,7 +384,7 @@ function build_select(kind, key, options, empty_label) {
 }
 
 const date_input = kind => `<input type="date" data-field="${kind}|measured_at" value="${esc(state.forms[kind].measured_at)}" />`;
-const coffee_options = () => state.coffees.map(c => ({ value: c.name, label: c.name }));
+const coffee_options = () => state.coffees.map(c => ({ value: String(c.id), label: c.name }));
 
 // Shown under each measure's inputs and updated in place as readings are typed
 function live_avg_text(kind, m) {
@@ -481,15 +486,15 @@ function build_green_tab() {
       <p class="hint" style="font-style:italic;padding:14px 0">No green coffees in stock. Log a delivery in Stock first.</p>
     </div>`
     : build_qc_form("green", "Log a measurement",
-        field("Coffee *", build_select("green", "coffee",
-          greens.map(g => ({ value: g.coffee, label: `${g.coffee} (${g.remaining.toFixed(0)}kg)` })), "— Pick green coffee —")) +
+        field("Coffee *", build_select("green", "coffee_id",
+          greens.map(g => ({ value: String(g.coffee_id), label: `${g.coffee} (${g.remaining.toFixed(0)}kg)` })), "— Pick green coffee —")) +
         field("Date *", date_input("green")));
   return form + build_qc_log("green", "QC Log");
 }
 
 function build_roasted_tab() {
   return build_qc_form("agtron", "Log Agtron readings",
-      field("Coffee *", build_select("agtron", "coffee", coffee_options(), "— Pick coffee —")) +
+      field("Coffee *", build_select("agtron", "coffee_id", coffee_options(), "— Pick coffee —")) +
       field("Date *", date_input("agtron")))
     + build_qc_log("agtron", "Agtron Log");
 }
@@ -497,7 +502,7 @@ function build_roasted_tab() {
 function build_shops_tab() {
   return build_qc_form("tds", "Log TDS readings",
       field("Shop *", build_select("tds", "shop", state.shops.map(s => ({ value: s, label: s })), "— Pick shop —")) +
-      field("Coffee *", build_select("tds", "coffee", coffee_options(), "— Pick coffee —")) +
+      field("Coffee *", build_select("tds", "coffee_id", coffee_options(), "— Pick coffee —")) +
       field("Brew method", build_select("tds", "brew_method", BREW_METHODS.map(b => ({ value: b, label: b })), "—")) +
       field("Date *", date_input("tds")))
     + build_qc_log("tds", "TDS Log");

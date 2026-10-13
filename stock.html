@@ -114,14 +114,16 @@ const state = {
     contract: new_contract(),
     pending_invoice_file: null,   // File object staged for upload after delivery saves
     pending_contract_file: null,  // File staged for upload after contract saves
-    adj: { coffee: "", change_kg: "", reason: "", note: "" },   // no default: the kind must be chosen
+    adj: { coffee_id: "", change_kg: "", reason: "", note: "" },   // no default: the kind must be chosen
     // Attaching an invoice to an arrival that was logged before the invoice arrived.
     // Only invoice_ref, the PDF and per-line price_per_kg are editable — the physical
     // facts of a delivery are recorded on the day and not revised.
     invoice_edit: null,        // { arrival_id, invoice_ref, prices: { line_id: value }, file, err, saving }
-    staff: { coffee: "", container_id: "", bag_size: "200g", err: "", saving: false },
+    staff: { coffee_id: "", container_id: "", bag_size: "200g", err: "", saving: false },
   },
 };
+// The coffee pickers hold the coffee's id (as the <select> gives it, a string). "" = none picked.
+function cid(v) { return v === "" || v == null ? null : Number(v); }
 
 function today() { return new Date().toISOString().split("T")[0]; }
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
@@ -134,7 +136,7 @@ function new_delivery() {
   return { date: today(), supplier: "", invoice_ref: "", due_date: "", items: [new_delivery_item()] };
 }
 function new_delivery_item() {
-  return { coffee:"", green_name:"", origin:"", lot_number:"", ico_number:"", bags:"", weight_kg:"", price_per_kg:"", contract_id:"" };
+  return { coffee_id:"", green_name:"", origin:"", lot_number:"", ico_number:"", bags:"", weight_kg:"", price_per_kg:"", contract_id:"" };
 }
 function new_contract() {
   return { supplier:"", coffee_id:"", bag_count:"", low_bag_threshold:"100" };
@@ -211,7 +213,7 @@ async function load_data() {
   // Bounded by the number of physical drums, so a single unpaginated read is safe here — unlike the
   // dispatches table this used to scan.
   const { data: container_state } = await supabaseClient.from("v_container_state")
-    .select("id, coffee, fill_id, status, fill_start_date, remaining, combined, batch_name")
+    .select("id, coffee, coffee_id, fill_id, status, fill_start_date, remaining, combined, batch_name")
     .in("status", ["active", "waiting"])
     .order("id", { ascending: true });
   const to_kg = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -236,7 +238,7 @@ async function load_data() {
 async function save_delivery() {
   state.saving = true; render();
   const d = state.ui.delivery;
-  const valid_items = d.items.filter(i => i.coffee && Number(i.weight_kg) > 0);
+  const valid_items = d.items.filter(i => cid(i.coffee_id) != null && Number(i.weight_kg) > 0);
   if (!d.date) { state.ui.delivery_err="Please enter a delivery date."; state.saving=false; render(); return; }
   if (!valid_items.length) { state.ui.delivery_err="Please add at least one item with a coffee and weight."; state.saving=false; render(); return; }
   // A PDF with no reference produces a delivery that can be downloaded but reads as "awaiting
@@ -265,7 +267,7 @@ async function save_delivery() {
   const delivery_rows = valid_items.map((item, i) => ({
     id: `${delivery_id}-I${i+1}`,
     arrival_id,
-    coffee_id: coffee_id_by_name(item.coffee),
+    coffee_id: cid(item.coffee_id),
     supplier: d.supplier || null,
     origin: item.origin || null,
     green_name: item.green_name || null,
@@ -421,18 +423,19 @@ async function download_invoice(invoice_path) {
 
 async function save_adjustment() {
   state.saving = true;
-  const coffee = state.ui.adj.coffee;
+  const coffee_id = cid(state.ui.adj.coffee_id);
+  const coffee = coffee_id == null ? "" : coffee_name_by_id(coffee_id);
   const raw = String(state.ui.adj.change_kg || "").trim();
   const counted = parseFloat(raw);
   const reason = state.ui.adj.reason;
   const note = (state.ui.adj.note || "").trim();
-  if (!coffee) { state.ui.adj_err="Please select a coffee."; state.saving=false; render(); return; }
+  if (coffee_id == null) { state.ui.adj_err="Please select a coffee."; state.saving=false; render(); return; }
   if (!raw || isNaN(counted) || counted < 0) { state.ui.adj_err="Enter the counted amount — what's actually there, as a positive number."; state.saving=false; render(); return; }
   if (!reason) { state.ui.adj_err="Please choose what kind of movement this is."; state.saving=false; render(); return; }
 
   // You enter the ABSOLUTE figure you counted; the ledger records the difference. Nobody standing
   // at a bag knows the delta — they know what's there.
-  const existing = state.stock_items.find(x => x.coffee_id === coffee_id_by_name(coffee));
+  const existing = state.stock_items.find(x => x.coffee_id === coffee_id);
   const current = existing ? Number(existing.current_kg) || 0 : 0;
   const change_kg = Math.round((counted - current) * 100) / 100;
   if (Math.abs(change_kg) < 0.005) {
@@ -444,20 +447,19 @@ async function save_adjustment() {
     state.ui.adj_err = `That would ADD ${change_kg.toFixed(2)}kg, but a ${reason} takes stock out. Use Stock correction if the count went up.`;
     state.saving=false; render(); return;
   }
-  const adj_cid = coffee_id_by_name(coffee);
   // One row. The balance is the sum of green_movements, so there is nothing else to update.
   const { error } = await supabaseClient.from("green_movements").insert({
-    id: gen_id("GM"), coffee_id: adj_cid, occurred_on: today(),
+    id: gen_id("GM"), coffee_id, occurred_on: today(),
     change_kg, kind: reason,
     note: `${note ? note + " · " : ""}counted ${counted.toFixed(2)}kg (was ${current.toFixed(2)}kg)`,
   });
   if (error) { state.ui.adj_err="Failed to save adjustment: "+error.message; state.saving=false; render(); return; }
-  state.saving=false; state.ui.adj={ coffee:"", change_kg:"", reason:"", note:"" }; state.ui.show_adj_form=false; state.ui.adj_err="";
+  state.saving=false; state.ui.adj={ coffee_id:"", change_kg:"", reason:"", note:"" }; state.ui.show_adj_form=false; state.ui.adj_err="";
   await load_data(); render();
 }
 
-async function set_threshold(coffee, value) {
-  const item = state.stock_items.find(s => s.coffee===coffee);
+async function set_threshold(coffee_id, value) {
+  const item = state.stock_items.find(s => s.coffee_id===coffee_id);
   if (!item) return;
   await supabaseClient.from("green_coffee_settings")
     .upsert({ coffee_id: item.coffee_id, low_stock_threshold: value, updated_at: new Date().toISOString() },
@@ -478,9 +480,10 @@ async function save_staff_takeaway() {
   const s = state.ui.staff;
   s.err = "";
   const container = state.containers.find(c => c.id === s.container_id);
-  if (!s.coffee) { s.err = "Please select a coffee."; render(); return; }
+  const coffee_id = cid(s.coffee_id);
+  if (coffee_id == null) { s.err = "Please select a coffee."; render(); return; }
   if (!container) { s.err = "Please select a container."; render(); return; }
-  if (container.coffee !== s.coffee) { s.err = "Container doesn't match the selected coffee."; render(); return; }
+  if (container.coffee_id !== coffee_id) { s.err = "Container doesn't match the selected coffee."; render(); return; }
   const bag_kg = BAG_SIZE_KG[s.bag_size] || 0;
   if (!bag_kg) { s.err = "Invalid bag size."; render(); return; }
   if (Math.round(container.remaining * 1000) / 1000 < bag_kg) { s.err = `Container only has ${container.remaining.toFixed(1)}kg remaining — not enough for a ${s.bag_size} bag.`; render(); return; }
@@ -491,8 +494,8 @@ async function save_staff_takeaway() {
 
   // Find the FP code for this coffee + bag size (so dispatch_line.fp_code is set)
   // Not strictly required — if no FP exists, we leave fp_code null
-  const { data: fp_row } = await supabaseClient.from("fp_codes").select("fp_code, coffees(name)").eq("bag_size", s.bag_size);
-  const fp_code = (fp_row || []).find(f => f.coffees?.name === s.coffee)?.fp_code || null;
+  const { data: fp_row } = await supabaseClient.from("fp_codes").select("fp_code").eq("bag_size", s.bag_size).eq("coffee_id", coffee_id);
+  const fp_code = (fp_row || [])[0]?.fp_code || null;
 
   // Create the dispatch (auto-confirmed since kind=staff)
   const dispatch_id = gen_id("DISP");
@@ -523,7 +526,7 @@ async function save_staff_takeaway() {
   if (line_err) { s.err = "Failed to save takeaway line: " + line_err.message; s.saving = false; render(); return; }
 
   // Reset form, reload
-  state.ui.staff = { coffee: "", container_id: "", bag_size: "200g", err: "", saving: false };
+  state.ui.staff = { coffee_id: "", container_id: "", bag_size: "200g", err: "", saving: false };
   await load_data();
   render();
 }
@@ -556,7 +559,7 @@ function collect_unsaved() {
   }
   if (u.show_adj_form) {
     const a = u.adj;
-    if (a.coffee || a.change_kg || a.reason || a.note) { out.adj = a; any = true; }
+    if (a.coffee_id || a.change_kg || a.reason || a.note) { out.adj = a; any = true; }
   }
   if (u.show_contract_form) {
     const c = u.contract;
@@ -566,7 +569,7 @@ function collect_unsaved() {
     out.invoice_edit = UnsavedWork.strip(u.invoice_edit, ["file", "err", "saving"]);
     out.invoice_file = !!u.invoice_edit.file; any = true;
   }
-  if (u.staff.coffee || u.staff.container_id) { out.staff = UnsavedWork.strip(u.staff, ["err", "saving"]); any = true; }
+  if (u.staff.coffee_id || u.staff.container_id) { out.staff = UnsavedWork.strip(u.staff, ["err", "saving"]); any = true; }
   return any ? out : null;
 }
 
@@ -576,6 +579,11 @@ function restore_unsaved() {
   if (!s) return null;
   const u = state.ui;
   state.tab = s.tab ?? state.tab;
+  // A draft saved before coffee ids were used holds the coffee's name instead
+  const to_id = x => { if (x && x.coffee && !x.coffee_id) x.coffee_id = String(coffee_id_by_name(x.coffee) ?? ""); delete x?.coffee; };
+  (s.delivery?.items || []).forEach(to_id);
+  if (s.adj) to_id(s.adj);
+  if (s.staff) to_id(s.staff);
   if (s.delivery)     { u.delivery = s.delivery; u.show_delivery_form = true; }
   if (s.adj)          { u.adj = s.adj; u.show_adj_form = true; }
   if (s.contract)     { u.contract = s.contract; u.show_contract_form = true; }
@@ -616,7 +624,7 @@ function build_green_stock() {
   if (state.stock_items.length===0) return `${stats_html}<div class="card empty"><div class="icon">🌱</div>No green coffee in stock yet.<br/>Log an arrival in the <strong>📦 Deliveries</strong> tab, or record a count with <strong>Update Stock Level</strong> in <strong>⚖️ Adjustments</strong>.</div>`;
   const sorted = [...state.stock_items].sort((a,b) => a.current_kg-b.current_kg);
   return `${stats_html}<div class="section-label">Current Green Stock</div>${sorted.map(item => {
-    const last_delivery_item = state.deliveries.flatMap(d=>d.items).find(i=>i.coffee===item.coffee);
+    const last_delivery_item = state.deliveries.flatMap(d=>d.items).find(i=>i.coffee_id===item.coffee_id);
     const threshold = item.low_stock_threshold||LOW_STOCK_KG;
     const pct = Math.min(100, Math.round((item.current_kg/Math.max(item.current_kg,threshold*3))*100));
     const bar_color = item.current_kg===0?"#dc2626":item.current_kg<threshold?"#dc2626":item.current_kg<threshold*2?"#d97706":"#16a34a";
@@ -639,8 +647,8 @@ function build_green_stock() {
           <div class="stock-track"><div class="stock-fill" style="background:${bar_color};width:${pct}%"></div></div>
         </div>
         <div style="margin-top:10px;display:flex;gap:8px">
-          <button class="btn btn-ghost btn-sm" data-adj-coffee="${esc(item.coffee)}">± Adjust</button>
-          <button class="btn btn-ghost btn-sm" data-set-threshold="${esc(item.coffee)}" data-threshold="${threshold}">Set Alert Level</button>
+          <button class="btn btn-ghost btn-sm" data-adj-coffee="${item.coffee_id}">± Adjust</button>
+          <button class="btn btn-ghost btn-sm" data-set-threshold="${item.coffee_id}" data-threshold="${threshold}">Set Alert Level</button>
         </div>
       </div>`;
   }).join("")}`;
@@ -833,7 +841,7 @@ function build_delivery_item_row(item, i) {
         <div><label class="lbl">Master Coffee Name *</label>
           <select class="item-coffee" data-idx="${i}">
             <option value="">— Select —</option>
-            ${state.coffees.map(c=>`<option value="${esc(c)}" ${item.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+            ${state.coffees_obj.map(c=>`<option value="${c.id}" ${String(item.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Green Name</label><input class="item-green-name" data-idx="${i}" value="${esc(item.green_name||"")}" placeholder="e.g. Ethiopia Yirgacheffe Kochere Gr.1" /></div>
@@ -961,17 +969,19 @@ function build_adjustments() {
   // which is what you actually know standing in the green room — and the ledger movement is
   // the difference.
   const adj_preview_html = () => {
-    if (!adj.coffee) return "";
-    const item = state.stock_items.find(x => x.coffee === adj.coffee);
+    const adj_id = cid(adj.coffee_id);
+    if (adj_id == null) return "";
+    const adj_name = coffee_name_by_id(adj_id);
+    const item = state.stock_items.find(x => x.coffee_id === adj_id);
     const current = item ? Number(item.current_kg) || 0 : 0;
     const raw = String(adj.change_kg ?? "").trim();
-    if (raw === "") return `<p class="hint" style="margin-top:10px">${esc(adj.coffee)} currently shows <strong>${current.toFixed(2)}kg</strong>.</p>`;
+    if (raw === "") return `<p class="hint" style="margin-top:10px">${esc(adj_name)} currently shows <strong>${current.toFixed(2)}kg</strong>.</p>`;
     const counted = Number(raw);
     if (!Number.isFinite(counted) || counted < 0) return `<p class="err" style="margin-top:10px">Enter the counted amount as a positive number.</p>`;
     const delta = Math.round((counted - current) * 100) / 100;
-    if (Math.abs(delta) < 0.005) return `<p class="hint" style="margin-top:10px">${esc(adj.coffee)} already shows <strong>${current.toFixed(2)}kg</strong> — nothing to record.</p>`;
+    if (Math.abs(delta) < 0.005) return `<p class="hint" style="margin-top:10px">${esc(adj_name)} already shows <strong>${current.toFixed(2)}kg</strong> — nothing to record.</p>`;
     return `<div style="margin-top:10px;background:#f4f2ed;border-radius:8px;padding:10px 12px;font-size:13px">
-      ${esc(adj.coffee)}: <strong>${current.toFixed(2)}kg</strong> → <strong>${counted.toFixed(2)}kg</strong>
+      ${esc(adj_name)}: <strong>${current.toFixed(2)}kg</strong> → <strong>${counted.toFixed(2)}kg</strong>
       &nbsp;·&nbsp; records <strong style="color:${delta<0?"#dc2626":"#16a34a"}">${delta>0?"+":""}${delta.toFixed(2)}kg</strong>
     </div>`;
   };
@@ -983,7 +993,7 @@ function build_adjustments() {
         <div><label class="lbl">Coffee *</label>
           <select id="adj-coffee">
             <option value="">— Select coffee —</option>
-            ${state.coffees.map(c=>`<option value="${esc(c)}" ${adj.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+            ${state.coffees_obj.map(c=>`<option value="${c.id}" ${String(adj.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Movement type *</label>
@@ -1030,14 +1040,16 @@ function build_adjustments() {
 function build_staff() {
   const s = state.ui.staff;
   // Coffees available = those that have an active container with stock
-  const coffees_with_stock = [...new Set(state.containers.map(c => c.coffee).filter(Boolean))].sort();
+  const coffees_with_stock = [...new Set(state.containers.map(c => c.coffee_id).filter(id => id != null))]
+    .map(id => ({ id, name: coffee_name_by_id(id) })).sort((a, b) => a.name.localeCompare(b.name));
+  const staff_coffee_id = cid(s.coffee_id);
   // Containers matching the selected coffee, oldest fill first (FIFO).
   // This used to sort on fill_id, but fill_id is CONTAINER-YYYYMMDD-slug — so it ordered by drum name
   // first and the date never got a look in: L01 filled today sorted ahead of XL04 filled last week.
   // fill_start_date is the actual age of the fill, and top-up roasts don't reset it.
   const FAR = "9999-12-31";
   const matching_containers = state.containers
-    .filter(c => c.coffee === s.coffee)
+    .filter(c => staff_coffee_id != null && c.coffee_id === staff_coffee_id)
     .sort((a, b) => (a.fill_start_date || FAR).localeCompare(b.fill_start_date || FAR)
                  || (a.id || "").localeCompare(b.id || ""));
   // Auto-select the oldest container if one isn't picked yet
@@ -1046,7 +1058,7 @@ function build_staff() {
   }
   const selected_container = matching_containers.find(c => c.id === s.container_id);
   const bag_kg = BAG_SIZE_KG[s.bag_size] || 0;
-  const can_save = !!(s.coffee && selected_container && selected_container.remaining >= bag_kg);
+  const can_save = !!(staff_coffee_id != null && selected_container && selected_container.remaining >= bag_kg);
 
   // Recent log
   const recent_log = state.staff_dispatches.slice(0, 30);
@@ -1068,15 +1080,15 @@ function build_staff() {
           <label class="lbl">Coffee *</label>
           <select id="staff-coffee">
             <option value="">— Select coffee —</option>
-            ${coffees_with_stock.map(c => `<option value="${esc(c)}" ${s.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+            ${coffees_with_stock.map(c => `<option value="${c.id}" ${staff_coffee_id===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}
           </select>
           ${coffees_with_stock.length === 0 ? '<p class="hint" style="font-size:11px;margin-top:4px;color:#dc2626">No coffees with stock available.</p>' : ""}
         </div>
         <div>
           <label class="lbl">Container ${matching_containers.length > 1 ? "(oldest first)" : ""}</label>
-          <select id="staff-container" ${!s.coffee || matching_containers.length===0 ? "disabled" : ""}>
+          <select id="staff-container" ${staff_coffee_id == null || matching_containers.length===0 ? "disabled" : ""}>
             ${matching_containers.length === 0
-              ? `<option value="">${s.coffee ? "No containers available" : "Pick a coffee first"}</option>`
+              ? `<option value="">${staff_coffee_id != null ? "No containers available" : "Pick a coffee first"}</option>`
               : matching_containers.map(c => `<option value="${esc(c.id)}" ${s.container_id===c.id?"selected":""}>${esc(c.combined ? `🔗 ${c.batch_name || c.id}` : c.name ? `${c.id} — ${c.name}` : c.id)} · ${c.remaining.toFixed(1)}kg</option>`).join("")}
           </select>
         </div>
@@ -1133,11 +1145,11 @@ function attach_listeners() {
   app.querySelector("#go-dashboard")?.addEventListener("click", () => window.location.href="index.html");
   app.querySelector("#logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href="login.html"; });
   app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => { state.tab=Number(btn.dataset.tab); render(); }));
-  app.querySelectorAll("[data-adj-coffee]").forEach(btn => btn.addEventListener("click", () => { state.ui.adj.coffee=btn.dataset.adjCoffee; state.ui.show_adj_form=true; state.tab=2; render(); }));
+  app.querySelectorAll("[data-adj-coffee]").forEach(btn => btn.addEventListener("click", () => { state.ui.adj.coffee_id=btn.dataset.adjCoffee; state.ui.show_adj_form=true; state.tab=2; render(); }));
     app.querySelectorAll("[data-set-threshold]").forEach(btn => btn.addEventListener("click", () => {
-    const coffee=btn.dataset.setThreshold, current=Number(btn.dataset.threshold)||LOW_STOCK_KG;
-    const val=prompt(`Low stock alert threshold for ${coffee} (kg):`, current);
-    if (val!==null&&Number(val)>0) set_threshold(coffee, Number(val));
+    const coffee_id=Number(btn.dataset.setThreshold), current=Number(btn.dataset.threshold)||LOW_STOCK_KG;
+    const val=prompt(`Low stock alert threshold for ${coffee_name_by_id(coffee_id)} (kg):`, current);
+    if (val!==null&&Number(val)>0) set_threshold(coffee_id, Number(val));
   }));
   app.querySelector("#toggle-delivery-form")?.addEventListener("click", () => {
     state.ui.show_delivery_form=!state.ui.show_delivery_form;
@@ -1232,12 +1244,12 @@ function attach_listeners() {
     el.addEventListener("input",  e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; });
     el.addEventListener("change", e => { state.ui.delivery.items[Number(el.dataset.idx)][field]=e.target.value; });
   });
-  sync(".item-coffee","coffee"); sync(".item-green-name","green_name"); sync(".item-origin","origin");
+  sync(".item-coffee","coffee_id"); sync(".item-green-name","green_name"); sync(".item-origin","origin");
   sync(".item-lot","lot_number"); sync(".item-ico","ico_number"); sync(".item-bags","bags"); sync(".item-weight","weight_kg"); sync(".item-price","price_per_kg");
   sync(".item-contract","contract_id");
 
   app.querySelector("#save-delivery")?.addEventListener("click", () => {
-    app.querySelectorAll(".item-coffee").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].coffee=el.value; });
+    app.querySelectorAll(".item-coffee").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].coffee_id=el.value; });
     app.querySelectorAll(".item-green-name").forEach(el => { state.ui.delivery.items[Number(el.dataset.idx)].green_name=el.value; });
     app.querySelectorAll(".item-origin").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].origin=el.value; });
     app.querySelectorAll(".item-lot").forEach(el        => { state.ui.delivery.items[Number(el.dataset.idx)].lot_number=el.value; });
@@ -1277,13 +1289,13 @@ function attach_listeners() {
 
   app.querySelector("#toggle-adj-form")?.addEventListener("click", () => { state.ui.show_adj_form=!state.ui.show_adj_form; state.ui.adj_err=""; render(); });
   app.querySelector("#cancel-adj")?.addEventListener("click", () => { state.ui.show_adj_form=false; state.ui.adj_err=""; render(); });
-  app.querySelector("#adj-coffee")?.addEventListener("change", e => { state.ui.adj.coffee = e.target.value; });
+  app.querySelector("#adj-coffee")?.addEventListener("change", e => { state.ui.adj.coffee_id = e.target.value; });
   app.querySelector("#adj-reason")?.addEventListener("change", e => { state.ui.adj.reason = e.target.value; });
   app.querySelector("#adj-kg")?.addEventListener("input", e => { state.ui.adj.change_kg = e.target.value; });
   app.querySelector("#adj-note")?.addEventListener("input", e => { state.ui.adj.note = e.target.value; });
   app.querySelector("#save-adj")?.addEventListener("click", () => {
     // Read from DOM in case the user typed without firing change/input (autofill, paste etc)
-    state.ui.adj.coffee    = document.getElementById("adj-coffee")?.value    || state.ui.adj.coffee;
+    state.ui.adj.coffee_id = document.getElementById("adj-coffee")?.value    || state.ui.adj.coffee_id;
     state.ui.adj.reason    = document.getElementById("adj-reason")?.value    || state.ui.adj.reason;
     state.ui.adj.change_kg = document.getElementById("adj-kg")?.value         ?? state.ui.adj.change_kg;
     state.ui.adj.note      = document.getElementById("adj-note")?.value      ?? state.ui.adj.note;
@@ -1292,7 +1304,7 @@ function attach_listeners() {
 
   // Staff Takeaway
   app.querySelector("#staff-coffee")?.addEventListener("change", e => {
-    state.ui.staff.coffee = e.target.value;
+    state.ui.staff.coffee_id = e.target.value;
     state.ui.staff.container_id = "";  // reset so it auto-picks oldest matching
     state.ui.staff.err = "";
     render();

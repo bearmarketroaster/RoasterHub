@@ -131,7 +131,7 @@ const state = {
 
 function new_session() {
   return {
-    coffee: "", date: today(), container_id: "",
+    coffee_id: null, coffee: "", date: today(), container_id: "",   // coffee = the name, for display
     batch_count: 1, batches: [], roasted_weight: "",
     is_test: false,
     combine: false,          // part of a combined batch (several drums = one packing source)
@@ -150,8 +150,8 @@ function yield_class(pct) { if (pct===null) return "hint"; if (pct>=80&&pct<=90)
 
 async function load_data() {
   const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
-  state.coffees = (coffees_data || []).map(c => c.name);
-  state.coffee_id_by_name = Object.fromEntries((coffees_data || []).map(c => [c.name, c.id]));
+  state.coffees = coffees_data || [];   // [{ id, name }]
+  state.coffee_names = Object.fromEntries(state.coffees.map(c => [c.id, c.name]));
 
   // Load containers list (non-retired) so the user can pick from a dropdown
   const { data: containers_data } = await supabaseClient.from("containers").select("id, name, status, retired_at, empty_kg").order("id");
@@ -159,12 +159,12 @@ async function load_data() {
 
   // Open combined batches, with the drums currently holding each — offered when logging a roast
   const { data: batch_rows } = await supabaseClient.from("v_container_state")
-    .select("id, fill_id, coffee, combined, batch_name, batch_roast_date, batch_finished_at, status")
+    .select("id, fill_id, coffee, coffee_id, combined, batch_name, batch_roast_date, batch_finished_at, status")
     .eq("combined", true);
   const open = {};
   (batch_rows || []).forEach(r => {
     if (!r.combined || r.batch_finished_at || !r.fill_id) return;
-    const b = (open[r.fill_id] = open[r.fill_id] || { fill_id: r.fill_id, name: r.batch_name, coffee: r.coffee, roast_date: r.batch_roast_date, drums: [] });
+    const b = (open[r.fill_id] = open[r.fill_id] || { fill_id: r.fill_id, name: r.batch_name, coffee: r.coffee, coffee_id: r.coffee_id, roast_date: r.batch_roast_date, drums: [] });
     if (r.status !== "empty") { b.drums.push(r.id); b.status = b.status || r.status; }
   });
   // An Active batch is down to its last drum being packed out — adding a drum would put two in Active
@@ -191,8 +191,9 @@ async function save_session() {
   // fill_id = container + date + coffee-slug. Including the coffee slug ensures two different coffees
   // roasted into the same container on the same day get distinct fill_ids (rare in normal ops, but
   // possible — and the rest of the system uses fill_id as the join key for buckets/dispatches/stock).
-  const coffee_slug = (s.coffee || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const coffee_id = state.coffee_id_by_name?.[s.coffee] ?? null;
+  const coffee_id = s.coffee_id;
+  const coffee_name = state.coffee_names[coffee_id] ?? s.coffee;
+  const coffee_slug = (coffee_name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   let fill_id = container_id ? `${container_id}-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}` : null;
   // Combined batch: every drum in it shares one fill, which is what makes Traceability treat
   // them as a single source. Joining uses the batch's fill; starting one creates the batch first.
@@ -206,9 +207,9 @@ async function save_session() {
       fill_id = s.combine_with || `CB-${s.date.replace(/-/g,"")}${coffee_slug ? `-${coffee_slug}` : ""}-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
       const d = new Date(s.date + "T12:00:00");
       const part = opt => d.toLocaleDateString("en-IE", opt);
-      const name = `${s.coffee} · ${part({ weekday: "short" })} ${d.getDate()} ${part({ month: "short" })}`;   // e.g. "Holy Roast · Mon 12 Oct"
+      const name = `${coffee_name} · ${part({ weekday: "short" })} ${d.getDate()} ${part({ month: "short" })}`;   // e.g. "Holy Roast · Mon 12 Oct"
       const { error: batch_err } = await supabaseClient.from("combined_batches")
-        .insert({ fill_id, name, coffee: s.coffee, coffee_id, roast_date: s.date });
+        .insert({ fill_id, name, coffee: coffee_name, coffee_id, roast_date: s.date });
       if (batch_err) {
         state.saving = false;
         alert(batch_err.code === "23505"
@@ -220,7 +221,7 @@ async function save_session() {
     }
   }
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
-    id, coffee: s.coffee, coffee_id, date: s.date, container_id,
+    id, coffee: coffee_name, coffee_id, date: s.date, container_id,
     roasted_weight: Number(s.roasted_weight), fill_id,
     roaster_id: user?.id || null,
     is_test: !!s.is_test,
@@ -269,6 +270,13 @@ async function save_session() {
   render();
 }
 
+// The coffee being roasted is identified by id; its name is kept alongside for display
+function set_session_coffee(coffee_id) {
+  const id = coffee_id === "" || coffee_id == null ? null : Number(coffee_id);
+  state.session.coffee_id = id;
+  state.session.coffee = id == null ? "" : (state.coffee_names[id] ?? "");
+}
+
 async function init() {
   await load_data();
   // Launched from the Roaster dashboard? Pre-fill the log from that plan item.
@@ -277,7 +285,7 @@ async function init() {
     const { data: p } = await supabaseClient.from("roast_plan").select("*").eq("id", plan_id).maybeSingle();
     if (p && p.status !== "done") {
       state.session = new_session();
-      state.session.coffee = p.coffee || "";
+      set_session_coffee(p.coffee_id);
       state.session.container_id = p.container_id || "";
       state.session.batch_count = Math.max(1, Number(p.batches) || 1);
       // 🔗 Planned as combined on the Roaster page. It only counts as combined with 2+ drums planned
@@ -305,6 +313,11 @@ async function init() {
     state.ui.step = saved.step;
     state.ui.gross_weight = saved.gross_weight || "";
     state.session = { ...new_session(), ...saved.session };
+    // A draft saved before coffee ids were used holds only the coffee's name
+    if (state.session.coffee_id == null && state.session.coffee) {
+      state.session.coffee_id = state.coffees.find(c => c.name === state.session.coffee)?.id ?? null;
+    }
+    set_session_coffee(state.session.coffee_id);
     state.from_plan_id = saved.from_plan_id || null;
   }
   state.loading = false;
@@ -415,7 +428,7 @@ function build_step1() {
         <div><label class="lbl">Coffee to Roast *</label>
           <select id="s1-coffee">
             <option value="">— Select coffee —</option>
-            ${state.coffees.map(c=>`<option value="${esc(c)}" ${s.coffee===c?"selected":""}>${esc(c)}</option>`).join("")}
+            ${state.coffees.map(c=>`<option value="${c.id}" ${s.coffee_id===c.id?"selected":""}>${esc(c.name)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Roast Date *</label><input type="date" id="s1-date" value="${s.date}" /></div>
@@ -448,7 +461,7 @@ function build_step1() {
 // Traceability treats them as one source to fill buckets and pack from. Leave it unticked
 // and the drum works exactly as before.
 function build_combine_option(s) {
-  const matching = (state.open_batches || []).filter(b => b.coffee === s.coffee);
+  const matching = (state.open_batches || []).filter(b => b.coffee_id != null && b.coffee_id === s.coffee_id);
   const chosen = matching.find(b => b.fill_id === s.combine_with);
   const date_note = chosen && chosen.roast_date && chosen.roast_date !== s.date
     ? `<p class="hint" style="font-size:12px;margin-top:6px;color:#d97706">Heads up: ${esc(chosen.name)} was roasted on ${esc(chosen.roast_date)} — you're logging ${esc(s.date)}.</p>` : "";
@@ -619,7 +632,7 @@ function attach_listeners() {
   // when Next was clicked, so toggling it wiped anything already typed.
   // With Combine ticked, the batch list depends on the coffee (and the date note on the date), so redraw
   app.querySelector("#s1-coffee")?.addEventListener("change", e => {
-    state.session.coffee = e.target.value;
+    set_session_coffee(e.target.value);
     if (state.session.combine) { state.session.combine_with = ""; render(); }
   });
   app.querySelector("#s1-date")?.addEventListener("change",   e => { state.session.date = e.target.value; if (state.session.combine) render(); });
@@ -641,7 +654,7 @@ function attach_listeners() {
   app.querySelector("#s1-is-test")?.addEventListener("change", e => {
     // Capture anything typed but not yet synced before the re-render below rebuilds the inputs.
     const g = id => document.getElementById(id);
-    if (g("s1-coffee"))    state.session.coffee = g("s1-coffee").value;
+    if (g("s1-coffee"))    set_session_coffee(g("s1-coffee").value);
     if (g("s1-date"))      state.session.date = g("s1-date").value || state.session.date;
     if (g("s1-count"))     state.session.batch_count = Number(g("s1-count").value) || state.session.batch_count;
     state.session.is_test = e.target.checked;
@@ -662,7 +675,7 @@ function attach_listeners() {
     if (!coffee) { err_el.textContent="Please select a coffee."; err_el.style.display="block"; return; }
     if (!state.session.is_test && !container) { err_el.textContent="Please select a container."; err_el.style.display="block"; return; }
     if (count<1) { err_el.textContent="At least one batch required."; err_el.style.display="block"; return; }
-    state.session.coffee=coffee; state.session.date=date;
+    set_session_coffee(coffee); state.session.date=date;
     state.session.container_id = state.session.is_test ? "" : container;
     state.session.batch_count=count;
     state.session.batches=Array.from({length:count},(_,i) => state.session.batches[i]||{cropster_id:"",green_weight:""});
@@ -683,7 +696,7 @@ function attach_listeners() {
       // Balance comes from v_green_stock — the sum of green_movements, not a stored figure.
       // See sql/green_schema.sql. This guard is the reason the balance is allowed to go
       // negative in the view: the check happens here, so the view doesn't have to lie.
-      const coffee_id = state.coffee_id_by_name?.[state.session.coffee] ?? -1;
+      const coffee_id = state.session.coffee_id ?? -1;
       const { data: gs } = await supabaseClient.from("v_green_stock")
         .select("on_hand_kg").eq("coffee_id", coffee_id).maybeSingle();
       const on_hand = gs ? Number(gs.on_hand_kg) || 0 : null;
