@@ -1291,26 +1291,28 @@ async function move_to_room(container_id, target) {
   await set_container_status(container_id, target);
 }
 
-// Order drums for the room columns: FIFO by fill, grouped by coffee.
-// The coffee holding the oldest drum leads the column, and inside each coffee the oldest fill is first —
-// so the drum you should work through next is always at the top with its stablemates directly beneath it.
+// Order drums for the room columns: oldest roast first (FIFO), whatever the coffee, so the drum to work
+// through next is at the top. Same day: by coffee name, then drum id.
 function sort_containers_fifo(list) {
   const FAR = "9999-12-31", LAST = "\uffff";
-  const oldest_by_coffee = {};
-  list.forEach(c => {
-    const key = c.coffee_id ?? LAST;
-    const d = c.fill_start_date || FAR;
-    if (!oldest_by_coffee[key] || d < oldest_by_coffee[key]) oldest_by_coffee[key] = d;
-  });
   return list.slice().sort((a, b) => {
-    const ka = a.coffee_id ?? LAST, kb = b.coffee_id ?? LAST;
-    const ga = oldest_by_coffee[ka], gb = oldest_by_coffee[kb];
-    if (ga !== gb) return ga < gb ? -1 : 1;
-    if (ka !== kb) return (a.coffee || LAST).localeCompare(b.coffee || LAST);
     const da = a.fill_start_date || FAR, db = b.fill_start_date || FAR;
     if (da !== db) return da < db ? -1 : 1;
+    const ca = a.coffee || LAST, cb = b.coffee || LAST;
+    if (ca !== cb) return ca.localeCompare(cb);
     return String(a.id).localeCompare(String(b.id));
   });
+}
+
+// "Roasted Tue 13 Oct" for a room card — the fill's first roast, and its last if it was topped up later
+function roasted_label(c) {
+  const fmt = iso => {
+    const d = new Date(iso + "T12:00:00");
+    return `${d.toLocaleDateString("en-IE", { weekday: "short" })} ${d.getDate()} ${d.toLocaleDateString("en-IE", { month: "short" })}`;
+  };
+  const first = c.fill_start_date, last = c.latest_roast_date;
+  if (!first) return "";
+  return `Roasted ${fmt(first)}${last && last !== first ? ` – ${fmt(last)}` : ""}`;
 }
 
 // Start the empty flow for a drum. Used by both the Empty drop zone and the Empty button on Active cards,
@@ -1387,6 +1389,7 @@ function build_rooms_view() {
     return `<div class="room-card" draggable="true" data-room-card="${esc(c.id)}"
         style="background:#fff;border:2px solid ${accent};border-radius:10px;padding:12px 14px;margin-bottom:12px;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
         ${heading}
+        ${roasted_label(c) ? `<div style="font-size:13px;color:#666;margin:-4px 0 8px">📅 ${roasted_label(c)}</div>` : ""}
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
           <div style="flex:1;height:8px;background:#eee;border-radius:5px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${low?"#dc2626":"#16a34a"}"></div></div>
           <span style="font-size:13px;font-weight:700;color:${low?"#dc2626":"#16a34a"}">${kgfloor(remaining)}kg</span>
