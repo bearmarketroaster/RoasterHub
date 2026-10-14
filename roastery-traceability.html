@@ -692,6 +692,36 @@ function save_draft() {
 ["input", "change", "click"].forEach(ev => document.addEventListener(ev, () => setTimeout(save_draft, 0), true));
 window.addEventListener("pagehide", save_draft);
 
+// ── Packing: keep the scan box ready for the next scan ──
+// A barcode scanner types into whatever has focus. After adding samples or tapping a button the focus is
+// elsewhere, so the next scan was lost. In Scanner mode on the scan step:
+//   • a keystroke that lands anywhere but a text box is moved into the scan box (scans start with letters —
+//     FP… / BKT-… — so digits typed into the sample count box are left alone), and
+//   • after a tap on a button the focus goes back to the scan box.
+function packing_scan_ready() {
+  return state.scan_id && packing_state.step === "scan" && packing_state.scan_mode === "scanner"
+    && document.getElementById("manual-scan-input");
+}
+document.addEventListener("keydown", e => {
+  const box = packing_scan_ready();
+  if (!box || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+  const el = document.activeElement;
+  if (el === box) return;
+  const tag = el?.tagName;
+  const typing = tag === "TEXTAREA" || (tag === "INPUT" && !["button", "checkbox", "radio"].includes(el.type));
+  if (typing && !(el.type === "number" && !/[0-9.]/.test(e.key))) return;   // a real field, being typed in
+  box.focus();   // the key now goes into the scan box
+}, true);
+document.addEventListener("click", e => {
+  if (!packing_scan_ready()) return;
+  if (!e.target.closest("button, [data-suggest-code]")) return;
+  setTimeout(() => {
+    const box = packing_scan_ready();
+    const el = document.activeElement;
+    if (box && (!el || el === document.body || el.tagName === "BUTTON")) box.focus();
+  }, 0);
+});
+
 // Returns true if unsaved work was put back
 function restore_draft() {
   let d = null;
