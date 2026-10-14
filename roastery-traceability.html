@@ -656,8 +656,14 @@ function render() {
 const DRAFT_KEY = "rh_trace_draft";
 const DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
+// Set while a save is finishing off after its first write went through: the work is saved, so no copy may be
+// kept (or it could come back and be saved twice), but the screen stays up showing "Saving…" until the
+// follow-up writes and the reload are done.
+let draft_blocked = false;
+
 function save_draft() {
   if (state.loading) return;   // don't wipe a draft before init() has had a chance to restore it
+  if (draft_blocked) { try { sessionStorage.removeItem(DRAFT_KEY); } catch (_) {} return; }
   try {
     const p = packing_state;
     const packing = !!state.scan_id && p.step !== "done" &&
@@ -1019,13 +1025,12 @@ async function save_filled_buckets() {
   }).in("id", bucket_ids);
   if (fill_err) { alert("Failed to save buckets: " + fill_err.message); return; }
 
-  // The fill is saved, so it's no longer unsaved work: clear it (and the kept draft) now, not after the
-  // steps below. Leaving the page part-way through would otherwise bring the same fill back to be
-  // saved again — the duplicate-roast problem of 13 Oct.
+  // The fill is saved, so it's no longer unsaved work: drop the kept draft now, not after the steps below.
+  // Leaving the page part-way through would otherwise bring the same fill back to be saved again — the
+  // duplicate-roast problem of 13 Oct. The screen itself stays on "Saving…" until everything's reloaded.
   const filled = fill_state.filled.slice();
   const dest = fill_state.destination;
-  state.ui.fill_bucket_container = null;
-  reset_fill_state();
+  draft_blocked = true;
   save_draft();
 
   // Fill & dispatch: send the just-filled buckets straight out. Same records the packing screen makes
@@ -1057,6 +1062,11 @@ async function save_filled_buckets() {
   }
   await load_data();
   } finally {
+    if (draft_blocked) {          // the fill was saved: close the screen now the new figures are in
+      state.ui.fill_bucket_container = null;
+      reset_fill_state();
+      draft_blocked = false;
+    }
     state.saving = false;
     fill_in_flight = false;
   }
@@ -2437,21 +2447,22 @@ function attach_listeners() {
       if (sug) sug.style.display = "none";
     }
   });
-  // Fill autocomplete — match against empty buckets only (we're filling them)
+  // Fill autocomplete — buckets that can be filled: empty ones, and ones still out at a shop (refilling
+  // one logs it as a clean return, the same as scanning its QR)
   app.querySelector("#fill-manual-input")?.addEventListener("input", e => {
     const q = e.target.value.trim().toLowerCase();
     const sug = document.getElementById("fill-suggestions");
     if (!sug) return;
     if (!q) { sug.style.display = "none"; sug.innerHTML = ""; return; }
     const matches = rank_bucket_matches(
-      state.buckets.filter(b => !b.retired_at && b.status === "empty"),
+      state.buckets.filter(b => !b.retired_at && (b.status === "empty" || b.status === "dispatched")),
       q, new Set(fill_state.filled.map(x => x.id))
     );
     if (matches.length === 0) {
-      sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No empty buckets match</div>`;
+      sug.innerHTML = `<div style="padding:10px 14px;color:#666;font-size:13px;font-style:italic">No empty or returned buckets match</div>`;
     } else {
       sug.innerHTML = matches.map(b => `<div data-suggest-bucket="${esc(b.id)}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0eee9;font-size:14px">
-        <div style="font-weight:600">🪣 ${esc(b.name||b.id)}</div>
+        <div style="font-weight:600">🪣 ${esc(b.name||b.id)}${b.status === "dispatched" ? ` <span style="font-weight:400;font-size:12px;color:#16a34a">↩ out at ${esc(b.last_shop || "a shop")}</span>` : ""}</div>
         ${b.name ? `<div style="font-size:11px;color:#999;font-family:monospace">${esc(b.id)}</div>` : ""}
       </div>`).join("");
     }
@@ -2850,7 +2861,7 @@ function attach_listeners() {
     const dispatch_id = await save_dispatch_v2(primary_container_id, primary_fill_id, packing_state.shop, lines, total_kg);
     // Saved, so it's no longer unsaved work: drop the kept draft now, not after the steps below.
     // Leaving the page part-way through would otherwise bring the same packing back to be saved again.
-    if (dispatch_id) { packing_state.step = "done"; save_draft(); }
+    if (dispatch_id) { draft_blocked = true; save_draft(); }
     if (dispatch_id && packing_state.scanned_buckets.length > 0) {
       // Record bucket → dispatch link and flip the buckets to dispatched. Independent writes, so both
       // requests go out together rather than one after the other.
@@ -2883,6 +2894,7 @@ function attach_listeners() {
     state.saving = false;
     render();
     } finally {
+      if (draft_blocked) { packing_state.step = "done"; draft_blocked = false; }   // saved — never offer it again
       state.saving = false;
       packing_in_flight = false;
     }
