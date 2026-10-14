@@ -408,13 +408,25 @@ async function cancel_invite(email) {
   render();
 }
 
+// Supabase returns at most 1000 rows per request (dispatches are past 4000), so page through everything
+async function fetch_all(build) {
+  const PAGE = 1000, out = [];
+  for (let i = 0; i < 100; i++) {
+    const { data, error } = await build().range(i * PAGE, i * PAGE + PAGE - 1);
+    if (error) { console.error(error); break; }
+    out.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
 async function load_buckets() {
   // Load buckets + their dispatch counts via dispatch_buckets join
-  const { data: buckets } = await supabaseClient.from("buckets").select("*").order("created_at", { ascending: false });
+  const buckets = await fetch_all(() => supabaseClient.from("buckets").select("*").order("created_at", { ascending: false }).order("id"));
   state.buckets = buckets || [];
-  // Get dispatch info per bucket
-  const { data: db } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at");
-  const { data: dispatches } = await supabaseClient.from("dispatches").select("id, shop, date");
+  // Get dispatch info per bucket — newest trip first, so [0] is where it last went
+  const db = await fetch_all(() => supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false }).order("id"));
+  const dispatches = await fetch_all(() => supabaseClient.from("dispatches").select("id, shop, date").order("id"));
   const dispatch_map = {};
   (dispatches||[]).forEach(d => dispatch_map[d.id] = d);
   const bucket_dispatches = {};
@@ -480,7 +492,7 @@ async function load_containers() {
   const { data: containers } = await supabaseClient.from("containers").select("*").order("id");
   state.containers = containers || [];
   // Count roast sessions per container (gives a sense of usage)
-  const { data: rs } = await supabaseClient.from("roast_sessions").select("container_id, date").order("date", { ascending: false });
+  const rs = await fetch_all(() => supabaseClient.from("roast_sessions").select("container_id, date").order("date", { ascending: false }).order("id"));
   const usage = {};
   (rs || []).forEach(r => {
     if (!r.container_id) return;

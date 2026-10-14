@@ -83,9 +83,21 @@ async function init() {
   render();
 }
 
+// Supabase returns at most 1000 rows per request (roast batches are past 1000), so page through everything
+async function fetch_all(build) {
+  const PAGE = 1000, out = [];
+  for (let i = 0; i < 100; i++) {
+    const { data, error } = await build().range(i * PAGE, i * PAGE + PAGE - 1);
+    if (error) { console.error(error); break; }
+    out.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
 async function load_data() {
-  const { data: sessions } = await supabaseClient.from("roast_sessions").select("id, coffee, date, roasted_weight, roaster_id, container_id, is_test").order("date", { ascending: true });
-  const { data: batches }  = await supabaseClient.from("roast_batches").select("roast_session_id, green_weight");
+  const sessions = await fetch_all(() => supabaseClient.from("roast_sessions").select("id, coffee, date, roasted_weight, roaster_id, container_id, is_test").order("date", { ascending: true }).order("id"));
+  const batches  = await fetch_all(() => supabaseClient.from("roast_batches").select("roast_session_id, green_weight").order("id"));
   const { data: roles }    = await supabaseClient.from("user_roles").select("user_id, email, display_name");
 
   state.roaster_names = {};

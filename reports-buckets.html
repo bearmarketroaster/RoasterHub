@@ -153,13 +153,27 @@ const state = {
   render();
 })();
 
+// Supabase returns at most 1000 rows per request. Dispatches are well past that, and an unpaged read got an
+// arbitrary 1000 of them — so a bucket's latest trip could be missing and an older shop shown instead
+// (Bucket 22, 14 Oct: showed Decathlon, really back from Westland). Page through everything.
+async function fetch_all(build) {
+  const PAGE = 1000, out = [];
+  for (let i = 0; i < 100; i++) {
+    const { data, error } = await build().range(i * PAGE, i * PAGE + PAGE - 1);
+    if (error) { console.error(error); break; }
+    out.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
 async function load() {
-  const { data: buckets } = await supabaseClient.from("buckets").select("*").order("created_at", { ascending: false });
+  const buckets = await fetch_all(() => supabaseClient.from("buckets").select("*").order("created_at", { ascending: false }).order("id"));
   state.buckets = buckets || [];
-  const { data: dispatches } = await supabaseClient.from("dispatches").select("id, shop, date, confirmed_at, container_id");
+  const dispatches = await fetch_all(() => supabaseClient.from("dispatches").select("id, shop, date, confirmed_at, container_id").order("id"));
   state.dispatches_by_id = {};
   (dispatches || []).forEach(d => { state.dispatches_by_id[d.id] = d; });
-  const { data: db } = await supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false });
+  const db = await fetch_all(() => supabaseClient.from("dispatch_buckets").select("bucket_id, dispatch_id, scanned_at").order("scanned_at", { ascending: false }).order("id"));
   state.per_bucket_history = {};
   (db || []).forEach(row => {
     const d = state.dispatches_by_id[row.dispatch_id];
@@ -175,8 +189,8 @@ async function load() {
   });
   // Return history: one row per return (see returns-step1.sql). Clean returns are logged when a
   // bucket is refilled; dirty / damaged ones from "Report a problem bucket" in Traceability.
-  const { data: returns } = await supabaseClient.from("bucket_returns")
-    .select("bucket_id, dispatch_id, shop, returned_at, condition, method").order("returned_at", { ascending: false });
+  const returns = await fetch_all(() => supabaseClient.from("bucket_returns")
+    .select("bucket_id, dispatch_id, shop, returned_at, condition, method").order("returned_at", { ascending: false }).order("id"));
   state.returns = returns || [];
   state.return_by_trip = {};   // "bucket|dispatch" → its return
   state.returns.forEach(r => { if (r.dispatch_id) state.return_by_trip[`${r.bucket_id}|${r.dispatch_id}`] = r; });

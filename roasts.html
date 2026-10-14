@@ -170,8 +170,15 @@ async function load_data() {
   // An Active batch is down to its last drum being packed out — adding a drum would put two in Active
   state.open_batches = Object.values(open).filter(b => b.drums.length && b.status !== "active").sort((a, b) => (b.roast_date || "").localeCompare(a.roast_date || ""));
 
-  const { data: sessions, error } = await supabaseClient.from("roast_sessions").select("*, roast_batches(*)").order("date", { ascending: false });
-  if (error) { console.error("Failed to load roast sessions:", error); return; }
+  // Paged: Supabase returns at most 1000 rows per request
+  const sessions = [];
+  for (let i = 0; i < 100; i++) {
+    const { data, error } = await supabaseClient.from("roast_sessions").select("*, roast_batches(*)")
+      .order("date", { ascending: false }).order("id").range(i * 1000, i * 1000 + 999);
+    if (error) { console.error("Failed to load roast sessions:", error); return; }
+    sessions.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
   state.roast_sessions = (sessions||[]).map(s => ({ ...s, batches: (s.roast_batches||[]).sort((a,b) => a.batch_number - b.batch_number) }));
 }
 
