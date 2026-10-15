@@ -22,7 +22,7 @@
     .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
     .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
     .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
-    .content { padding: 24px; max-width: 1000px; margin: 0 auto; }
+    .content { padding: 24px; max-width: 1100px; margin: 0 auto; }
     .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e8e6e1; margin-bottom: 16px; }
     .section-title { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #666; margin-bottom: 12px; }
     .hint { color: #999; font-style: italic; font-size: 13px; }
@@ -38,48 +38,62 @@
     .btn-save { background: #1a1a1a; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
     .btn-save:hover { opacity: 0.85; }
     .btn-save:disabled { opacity: 0.5; cursor: default; }
+    .btn-ghost { background: #fff; color: #1a1a1a; border: 1px solid #d8d4cc; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+    .btn-x { background: none; border: none; color: #dc2626; font-size: 16px; padding: 2px 6px; }
     .save-flash { color: #16a34a; font-size: 13px; font-weight: 600; }
     .save-err { color: #dc2626; font-size: 13px; font-weight: 600; }
     .dirty { color: #d97706; font-size: 12px; font-weight: 600; }
+    .sp-table td { padding: 5px 6px; }
+    .sp-table input, .sp-table select { padding: 6px 8px; font-size: 13px; }
 
-    /* Coffee tables */
-    .coffee-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .coffee-name { font-size: 16px; font-weight: 700; color: #1a1a1a; }
-    .coffee-green { font-size: 12px; color: #666; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .coffee-green .green-lbl { font-weight: 600; color: #666; }
-    .coffee-green .green-input { width: 92px; padding: 5px 8px; font-size: 13px; text-align: right; }
-    .coffee-green .green-src { color: #999; font-style: italic; }
-    .coffee-green .param-sep { color: #ccc; margin: 0 4px; }
-    .coffee-green b { color: #1a1a1a; }
+    /* Checks */
+    .checks-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f0eee9; font-size: 14px; }
+    .checks-row:last-child { border-bottom: none; }
+    .checks-name { flex: 1; }
+    .checks-count { font-weight: 700; min-width: 28px; text-align: right; }
+    .tag { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+    .tag-ok { background: #e7f5ec; color: #16a34a; }
+    .tag-review { background: #fff7ed; color: #d97706; }
+    .tag-bad { background: #fdecea; color: #dc2626; }
+    .checks-list { font-size: 12px; color: #666; padding: 0 0 8px 4px; line-height: 1.6; }
+    details summary { cursor: pointer; list-style: none; }
+    details summary::-webkit-details-marker { display: none; }
+
+    /* Coffee cards */
+    .coffee-head { margin-bottom: 10px; }
+    .coffee-name { font-size: 16px; font-weight: 700; color: #1a1a1a; margin-bottom: 8px; }
+    .coffee-params { font-size: 12px; color: #666; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+    .coffee-params .lbl { font-weight: 600; color: #666; }
+    .coffee-params .num-input { width: 86px; padding: 5px 8px; font-size: 13px; text-align: right; }
+    .coffee-params select { width: auto; padding: 5px 8px; font-size: 13px; }
+    .coffee-params .src { color: #999; font-style: italic; }
+    .coffee-params .sep { color: #ccc; margin: 0 2px; }
+    .coffee-params b { color: #1a1a1a; }
+    .size-chip { border: 1px solid #d8d4cc; background: #fff; color: #999; border-radius: 14px; padding: 3px 10px; font-size: 12px; font-weight: 600; }
+    .size-chip.on { background: #1a1a1a; border-color: #1a1a1a; color: #fff; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { text-align: left; padding: 9px 8px; background: #f4f2ed; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; border-bottom: 1px solid #e8e6e1; }
     th.num, td.num { text-align: right; }
     td { padding: 9px 8px; border-bottom: 1px solid #f0eee9; vertical-align: middle; }
     td.size { font-weight: 600; }
-    .retail { font-weight: 700; color: #1a1a1a; white-space: nowrap; }
-    .retail-sub { font-size: 11px; color: #999; }
-    .your-price { white-space: nowrap; }
+    .table-wrap { overflow-x: auto; }
     .your-wrap { display: inline-flex; align-items: center; gap: 3px; }
     .your-wrap .eur-pre { color: #666; font-size: 13px; }
     .final-input { width: 78px; padding: 6px 8px; font-size: 14px; text-align: right; border: 1px solid #d8d4cc; border-radius: 6px; }
     .final-input:focus { outline: none; border-color: #1a1a1a; }
-    .sugg-chip { display: block; margin-top: 4px; background: #f0eee9; border: 1px solid #e0ddd6; color: #555; border-radius: 5px; padding: 2px 7px; font-size: 11px; cursor: pointer; }
+    .sugg-chip { display: block; white-space: nowrap; margin-top: 4px; background: #f0eee9; border: 1px solid #e0ddd6; color: #555; border-radius: 5px; padding: 2px 7px; font-size: 11px; cursor: pointer; }
     .sugg-chip:hover { background: #e8e6e1; }
+    .band-sub { font-size: 11px; color: #999; white-space: nowrap; }
     .coffee-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0eee9; }
     .coffee-status { font-size: 12px; color: #999; }
     .coffee-status.dirty { color: #d97706; font-weight: 600; }
-    .bulk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e8e6e1; }
-    .bulk-lbl { font-size: 13px; font-weight: 600; color: #1a1a1a; }
-    .bulk-hint { font-size: 11px; color: #999; font-style: italic; }
-    .bulk-row .sugg-chip { margin-top: 0; }
-    .bulk-fixed { font-size: 15px; font-weight: 700; color: #1a1a1a; }
-    .drill-toggle { margin-left: auto; background: none; border: none; color: #666; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px; }
-    .drill-toggle:hover { color: #1a1a1a; }
-    .drilldown { margin-top: 10px; background: #faf9f7; border: 1px solid #eee; border-radius: 8px; padding: 12px 14px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: #444; }
+    .how-btn { background: #fff; border: 1px solid #d8d4cc; color: #666; border-radius: 6px; padding: 5px 8px; font-size: 11px; font-weight: 700; margin-left: 4px; white-space: nowrap; }
+    .how-btn:hover, .how-btn.on { background: #1a1a1a; border-color: #1a1a1a; color: #fff; }
+    .drilldown { white-space: normal; text-align: left; margin-top: 10px; background: #faf9f7; border: 1px solid #eee; border-radius: 8px; padding: 12px 14px; font-size: 13px; color: #444; font-variant-numeric: tabular-nums; }
     .dl-head { font-weight: 700; color: #1a1a1a; margin-bottom: 4px; font-family: inherit; }
     .dl-row { padding: 2px 0; line-height: 1.5; }
     .dl-row b { color: #1a1a1a; }
-    .dl-size { display: inline-block; min-width: 48px; font-weight: 700; color: #1a1a1a; }
+    .dl-size { display: inline-block; min-width: 22px; font-weight: 700; color: #1a1a1a; }
     .money-range { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; color: #666; }
     .money-range input { margin-left: 6px; padding: 5px 8px; font-size: 13px; }
     .money-stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -96,7 +110,6 @@
     @media (max-width: 600px) {
       .content { padding: 16px 12px; }
       th, td { padding: 7px 5px; font-size: 12px; }
-      .retail-sub { display: none; }
     }
     /* Phones: let the header wrap rather than run off the screen, and use 16px form
        text - iPhones zoom the page in when a smaller field is tapped */
@@ -113,37 +126,63 @@ const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.
 
 function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function eur(n) { return "€" + (Number(n)||0).toFixed(2); }
-function pct(n) { return (Number(n)||0).toFixed(0) + "%"; }
+function pct1(x) { return x == null || !isFinite(x) ? "—" : (x * 100).toFixed(1) + "%"; }
 function round_to(n, step) { return Math.round((Number(n)||0)/step)*step; }
-function round2(n) { return Math.round((Number(n)||0) * 100) / 100; }
+function money_val(n) { return n == null || isNaN(n) ? "" : Number(n).toFixed(2); }   // a price box's value
+function num_or_null(v) { const s = String(v ?? "").trim(); if (s === "") return null; const n = Number(s); return isFinite(n) ? n : null; }
 
-// Canonical RETAIL bag sizes + their weight in kg. (5kg bar is internal; 100g is rare/none currently.)
+// ─────────────────────────────────────────────────────────────────────────────
+// The maths follows Bear_Market_Pricing_Model.xlsx:
+//   Landed €/kg      = green €/kg + shipping €/kg
+//   Roasted €/kg     = landed ÷ (1 − roast loss)                    one roast-loss rate for every coffee
+//   Cost (per bag)   = roasted €/kg × bag weight + packaging        packaging: standard bag, or the
+//                                                                   coffee's special packaging for that size
+//   Roastery → Shop  = cost ÷ (1 − roastery margin)                 optional rounding (the only rounding)
+//   Shop sell price  = typed — this is the price on the bag
+//   Shop margin      = (sell − roastery→shop) ÷ sell
+//   Combined margin  = (sell − cost) ÷ sell                          checked against the target band
+//   Band low / high  = cost ÷ (1 − band low / high)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Every size the sheet prices, and its weight. Which ones a coffee sells is ticked per coffee.
 const SIZES = [
-  { label: "200g",    kg: 0.2 },
-  { label: "500g",    kg: 0.5 },
-  { label: "1kg",     kg: 1   },
+  { label: "100g", kg: 0.1 },
+  { label: "200g", kg: 0.2 },
+  { label: "500g", kg: 0.5 },
+  { label: "1kg",  kg: 1   },
+  { label: "5kg",  kg: 5   },
+];
+const SIZE_KG = Object.fromEntries(SIZES.map(s => [s.label, s.kg]));
+const DEFAULT_SIZES = ["200g", "500g", "1kg"];     // a coffee with no options saved yet
+const ROUNDING = [
+  { value: "none",       label: "None" },
+  { value: "nearest_5c", label: "Nearest 5c" },
+  { value: "up_5c",      label: "Up to 5c" },
 ];
 
 const DEFAULTS = {
-  target_low_pct: 75, target_high_pct: 84,
+  roast_loss_pct: 15, roastery_margin_pct: 15, rounding_rule: "none",
+  target_low_pct: 70, target_high_pct: 80,
 };
-const ROASTERY_MARGIN_PCT = 15;   // Roastery → shop is fixed: price = Cost ÷ (1 − 15%). 15% margin ≈ 18% markup.
-const DEFAULT_LOSS_PCT = 15;      // used when a coffee has no/too-few roasts for a reliable average
-const MIN_ROASTS_FOR_AVG = 3;     // need at least this many real roasts before trusting the average
 
 const state = {
   loaded: false,
-  cfg: { ...DEFAULTS },        // working draft of pricing_settings (just the retail target band now)
-  pkg: {},                     // working draft of packaging: { "200g": 0.349, ... }
+  cfg: { ...DEFAULTS },        // working draft of pricing_settings
+  pkg: {},                     // working draft of standard packaging: { "200g": 0.349, "100g": null, ... }
+  special_pkg: [],             // working draft of special packaging: [{ name, bag_size, cost, notes }]
+  saved_special_keys: [],      // "name|size" keys as saved, so removed rows can be deleted
   coffees: [],                 // [{ id, name }]
+  opts: {},                    // { coffeeId: { sizes: [...], packaging: null|name } }
   green_delivery: {},          // { coffeeId: { price, date } }  derived from stock deliveries
   green_override: {},          // { coffeeId: price }            manual entry in this tool
-  shipping_override: {},       // { coffeeId: shipping €/kg }     per-coffee, added to green before loss
-  roast_loss_stats: {},        // { coffeeId: { avg, n } }        from actual roast data
-  final: {},                   // { coffeeId: { "200g": {retail, wholesale}, ... } } chosen prices
+  shipping_override: {},       // { coffeeId: shipping €/kg }
+  final: {},                   // { coffeeId: { "200g": { retail, wholesale }, ... } } saved prices (draft)
+                               //   retail = shop sell (bag, online) · wholesale = roastery → shop
+  price_history: {},           // { "coffeeId|size": [{ date, retail, wholesale }] } oldest first
+  green_history: {},           // { coffeeId: [{ date, price }] } priced deliveries, oldest first
   coffee_dirty: {},            // { coffeeId: true } unsaved per-coffee price edits
   coffee_saving: {},           // { coffeeId: true } in-flight save
-  drill: {},                   // { coffeeId: true } show calculation drilldown
+  how: {},                     // { "coffeeId|size": true } "How?" breakdown open for that size
   dispatches: [],              // for the revenue/profit view
   shop_mappings: [],
   fp_codes: [],
@@ -170,16 +209,16 @@ const state = {
 })();
 
 // ── UNSAVED WORK ──────────────────────────────────────────────────────────────
-// Price edits not yet saved (see unsaved-work.js): the inputs/packaging draft while
-// "Unsaved changes" shows, and each coffee's chosen prices while marked dirty.
-// Green and shipping overrides save as soon as they're changed, so aren't included.
+// Edits not yet saved (see unsaved-work.js): the settings / packaging draft while "Unsaved changes"
+// shows, and each coffee's sell prices while marked dirty. Green, shipping, sizes and packaging choice
+// save as soon as they're changed, so aren't included.
 function collect_unsaved() {
   if (!state.loaded) return null;
   const finals = {};
   for (const [id, dirty] of Object.entries(state.coffee_dirty)) {
     if (dirty) finals[id] = state.final[id] || {};
   }
-  const inputs = state.dirty ? { cfg: state.cfg, pkg: state.pkg } : null;
+  const inputs = state.dirty ? { cfg: state.cfg, pkg: state.pkg, special_pkg: state.special_pkg } : null;
   if (!inputs && !Object.keys(finals).length) return null;
   return { inputs, finals };
 }
@@ -191,6 +230,7 @@ function restore_unsaved() {
   if (saved.inputs) {
     state.cfg = { ...state.cfg, ...saved.inputs.cfg };
     state.pkg = { ...state.pkg, ...saved.inputs.pkg };
+    if (Array.isArray(saved.inputs.special_pkg)) state.special_pkg = saved.inputs.special_pkg;
     state.dirty = true;
   }
   for (const [id, prices] of Object.entries(saved.finals || {})) {
@@ -201,8 +241,7 @@ function restore_unsaved() {
   return true;
 }
 
-// Supabase returns at most 1000 rows per request (dispatches are past 4000 — revenue was undercounted),
-// so page through everything
+// Supabase returns at most 1000 rows per request (dispatches are past 4000), so page through everything
 async function fetch_all(build) {
   const PAGE = 1000, out = [];
   for (let i = 0; i < 100; i++) {
@@ -215,46 +254,56 @@ async function fetch_all(build) {
 }
 
 async function load() {
-  // Config
+  // Settings
   const { data: settings } = await supabaseClient.from("pricing_settings").select("*").eq("id", 1).maybeSingle();
   if (settings) {
+    const n = (v, d) => (v == null || v === "" || isNaN(Number(v))) ? d : Number(v);
     state.cfg = {
-      target_low_pct:      Number(settings.target_low_pct),
-      target_high_pct:     Number(settings.target_high_pct),
+      roast_loss_pct:      n(settings.roast_loss_pct,      DEFAULTS.roast_loss_pct),
+      roastery_margin_pct: n(settings.roastery_margin_pct, DEFAULTS.roastery_margin_pct),
+      rounding_rule:       settings.rounding_rule || DEFAULTS.rounding_rule,
+      target_low_pct:      n(settings.target_low_pct,      DEFAULTS.target_low_pct),
+      target_high_pct:     n(settings.target_high_pct,     DEFAULTS.target_high_pct),
     };
   }
 
-  // Packaging
+  // Standard packaging — a size with no row has no cost yet (blank, not €0)
   const { data: pkg_rows } = await supabaseClient.from("pricing_packaging").select("*");
   const pkg = {};
-  (pkg_rows || []).forEach(r => { pkg[r.bag_size] = Number(r.cost); });
-  SIZES.forEach(s => { if (pkg[s.label] == null) pkg[s.label] = 0; });
+  SIZES.forEach(s => { pkg[s.label] = null; });
+  (pkg_rows || []).forEach(r => { pkg[r.bag_size] = r.cost == null ? null : Number(r.cost); });
   state.pkg = pkg;
 
-  // Active coffees
+  // Special packaging
+  const { data: sp_rows } = await supabaseClient.from("pricing_special_packaging").select("name, bag_size, cost, notes").order("name").order("bag_size");
+  state.special_pkg = (sp_rows || []).map(r => ({ name: r.name, bag_size: r.bag_size, cost: Number(r.cost), notes: r.notes || "" }));
+  state.saved_special_keys = state.special_pkg.map(r => `${r.name}|${r.bag_size}`);
+
+  // Active coffees and their options (sizes sold, packaging)
   const { data: coffees } = await supabaseClient.from("coffees").select("id, name, retired_at").is("retired_at", null).order("name");
   state.coffees = (coffees || []).map(c => ({ id: c.id, name: c.name }));
+  const { data: opt_rows } = await supabaseClient.from("pricing_coffee_options").select("coffee_id, sizes, packaging");
+  state.opts = {};
+  (opt_rows || []).forEach(r => { state.opts[r.coffee_id] = { sizes: r.sizes || [], packaging: r.packaging || null }; });
 
-  // Latest green price per coffee. Walk deliveries newest-first (same join
-  // direction the rest of the app uses) and take the first delivery line that
-  // actually carries a price_per_kg for each coffee — so a coffee still shows a
-  // price even if its most recent delivery left the price blank.
-  // green_deliveries is one row per coffee per arrival, so no nested join is needed. Newest
-  // first, taking the first row that carries a price — a delivery logged before its invoice
-  // arrived has a null price, and shouldn't wipe out the last known one.
-  const { data: deliveries } = await supabaseClient
+  // Latest green price per coffee: newest delivery that carries a price (a delivery logged before its
+  // invoice arrived has none, and shouldn't wipe out the last known one).
+  const deliveries = await fetch_all(() => supabaseClient
     .from("green_deliveries")
-    .select("coffee_id, price_per_kg, arrived_on")
+    .select("id, coffee_id, price_per_kg, arrived_on")
     .not("price_per_kg", "is", null)
-    .order("arrived_on", { ascending: false });
-  const green = {};
+    .order("arrived_on", { ascending: false }).order("id"));
+  const green = {}, green_hist = {};
   (deliveries || []).forEach(d => {
-    if (d.coffee_id == null || green[d.coffee_id]) return;   // already captured a newer price
+    if (d.coffee_id == null) return;
+    (green_hist[d.coffee_id] = green_hist[d.coffee_id] || []).unshift({ date: d.arrived_on || "", price: Number(d.price_per_kg) });
+    if (green[d.coffee_id]) return;   // already captured a newer price
     green[d.coffee_id] = { price: Number(d.price_per_kg), date: d.arrived_on || null };
   });
   state.green_delivery = green;
+  state.green_history = green_hist;   // { coffeeId: [{ date, price }] } oldest first — for valuing past sales
 
-  // Per-coffee params entered in this tool: green override + shipping €/kg.
+  // Per-coffee green override + shipping €/kg, entered on this page
   const { data: overrides } = await supabaseClient.from("pricing_green").select("coffee_id, green_price, shipping_per_kg");
   const ov = {}, ship = {};
   (overrides || []).forEach(r => {
@@ -265,7 +314,7 @@ async function load() {
   state.green_override = ov;
   state.shipping_override = ship;
 
-  // Chosen per-coffee, per-size prices (what labels will read).
+  // Saved prices: retail = shop sell (the price on the bag, also online), wholesale = roastery → shop
   const { data: finals } = await supabaseClient.from("pricing_final").select("coffee_id, bag_size, retail, wholesale");
   const fin = {};
   (finals || []).forEach(r => {
@@ -277,28 +326,30 @@ async function load() {
   });
   state.final = fin;
 
-  // Revenue/profit view data.
+  // Price history (pricing-step2.sql) — each sale is valued at the prices in force on its day
+  const hist = await fetch_all(() => supabaseClient.from("pricing_price_history")
+    .select("id, coffee_id, bag_size, retail, wholesale, effective_from").order("effective_from").order("id"));
+  const ph = {};
+  (hist || []).forEach(h => {
+    (ph[`${h.coffee_id}|${h.bag_size}`] = ph[`${h.coffee_id}|${h.bag_size}`] || []).push({
+      date: String(h.effective_from || "").slice(0, 10),
+      retail:    h.retail    != null ? Number(h.retail)    : null,
+      wholesale: h.wholesale != null ? Number(h.wholesale) : null,
+    });
+  });
+  state.price_history = ph;
+
+  // Revenue/profit view data
   const disp = await fetch_all(() => supabaseClient.from("dispatches").select("*, dispatch_lines(*)").order("id"));
   state.dispatches = (disp || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
   const { data: maps } = await supabaseClient.from("shop_mappings").select("master_name, kind");
   state.shop_mappings = maps || [];
   const { data: fps } = await supabaseClient.from("fp_codes").select("fp_code, coffee_id");
   state.fp_codes = fps || [];
-  const rs = await fetch_all(() => supabaseClient.from("roast_sessions").select("id, fill_id, coffee, coffee_id, roasted_weight, is_test, roast_batches(green_weight)").order("date").order("id"));
-  const fm = {}, lossByC = {};
-  (rs || []).forEach(r => {
-    if (r.fill_id && r.coffee_id != null && !(r.fill_id in fm)) fm[r.fill_id] = r.coffee_id;
-    if (r.is_test) return;
-    const green = (r.roast_batches || []).reduce((a, b) => a + (Number(b.green_weight) || 0), 0);
-    const roasted = Number(r.roasted_weight) || 0;
-    if (green > 0 && roasted > 0 && roasted < green && r.coffee_id != null) {
-      (lossByC[r.coffee_id] = lossByC[r.coffee_id] || []).push((green - roasted) / green * 100);
-    }
-  });
+  const rs = await fetch_all(() => supabaseClient.from("roast_sessions").select("id, fill_id, coffee_id").order("date").order("id"));
+  const fm = {};
+  (rs || []).forEach(r => { if (r.fill_id && r.coffee_id != null && !(r.fill_id in fm)) fm[r.fill_id] = r.coffee_id; });
   state.fillmap = fm;
-  const stats = {};
-  Object.entries(lossByC).forEach(([cid, arr]) => { stats[cid] = { avg: arr.reduce((a, b) => a + b, 0) / arr.length, n: arr.length }; });
-  state.roast_loss_stats = stats;
   if (!state.money_from) {
     const now = new Date();
     state.money_from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -308,6 +359,7 @@ async function load() {
   state.loaded = true;
 }
 
+// ── Pricing maths ───────────────────────────────────────────────────────────
 // Effective green price for a coffee: manual override wins, else latest delivery.
 function green_for(coffeeId) {
   const ov = state.green_override[coffeeId];
@@ -316,116 +368,226 @@ function green_for(coffeeId) {
   if (d) return { price: d.price, source: "delivery", date: d.date };
   return null;
 }
-
-// Per-coffee roast loss: average of real roasts rounded UP to a whole %, with a buffer.
-// Falls back to the default when there aren't enough roasts yet.
-function roast_loss_for(coffeeId) {
-  const r = state.roast_loss_stats[coffeeId];
-  if (!r || r.n < MIN_ROASTS_FOR_AVG) return { pct: DEFAULT_LOSS_PCT, source: "default", n: r ? r.n : 0, avg: r ? r.avg : null };
-  return { pct: Math.ceil(r.avg), source: "avg", n: r.n, avg: r.avg };
+function opts_for(coffeeId) {
+  return state.opts[coffeeId] || { sizes: DEFAULT_SIZES.slice(), packaging: null };
 }
-
-// ── Pricing maths ───────────────────────────────────────────────────────────
-// Returns null if no green price for this coffee.
-function compute(coffeeId, kg, bagLabel) {
-  const g = green_for(coffeeId);
+function special_names() {
+  return [...new Set(state.special_pkg.map(r => (r.name || "").trim()).filter(Boolean))];
+}
+// Packaging € for one bag: the coffee's special packaging if it lists this size, else the standard bag.
+// null = no cost entered for that size yet.
+function packaging_for(coffeeId, size) {
+  const name = opts_for(coffeeId).packaging;
+  if (name) {
+    const sp = state.special_pkg.find(r => r.name === name && r.bag_size === size && r.cost != null && r.cost !== "");
+    if (sp) return { cost: Number(sp.cost), source: name };
+  }
+  const std = state.pkg[size];
+  return std == null ? null : { cost: Number(std), source: "Standard" };
+}
+// green_price: use this green €/kg instead of the current one (valuing a past sale)
+function roasted_per_kg(coffeeId, green_price) {
+  const g = green_price != null ? { price: green_price } : green_for(coffeeId);
   if (!g) return null;
-  const loss   = roast_loss_for(coffeeId).pct / 100;          // per-coffee, from roast data
-  const shipping = Number(state.shipping_override[coffeeId]) || 0; // per-coffee, added to green first
-  const low      = state.cfg.target_low_pct / 100;
-  const high     = state.cfg.target_high_pct / 100;
-  const packaging = Number(state.pkg[bagLabel]) || 0;
-
-  const roasted_cost_per_kg = round2((g.price + shipping) / (1 - loss));   // (green + shipping) ÷ (1 − loss)
-  const cogs       = round2(roasted_cost_per_kg * kg + packaging);  // Cost, rounded to 2dp before margin
-  const wholesale  = cogs / (1 - ROASTERY_MARGIN_PCT / 100); // roastery→shop: Cost ÷ 0.85 (15% margin ≈ 18% markup)
-
-  // Combined margin = (retail - COGS) / retail = target  ->  retail = COGS / (1 - target)
-  const retail_low  = cogs / (1 - low);   // price at the band floor (75%)
-  const retail_high = cogs / (1 - high);  // price at the band ceiling (84%)
-
-  return { roasted_cost_per_kg, cogs, wholesale, retail_low, retail_high };
+  const shipping = Number(state.shipping_override[coffeeId]) || 0;
+  const landed = g.price + shipping;
+  return { green: g.price, shipping, landed, roasted: landed / (1 - state.cfg.roast_loss_pct / 100) };
+}
+// Roastery → shop price: cost ÷ (1 − margin), with the sheet's optional rounding
+function roastery_price(cost) {
+  const raw = cost / (1 - state.cfg.roastery_margin_pct / 100);
+  if (state.cfg.rounding_rule === "nearest_5c") return Math.round(raw / 0.05) * 0.05;
+  if (state.cfg.rounding_rule === "up_5c") return Math.ceil(raw / 0.05 - 1e-9) * 0.05;
+  return raw;
+}
+// One coffee + size. null = no green price; cost null = no packaging cost for that size.
+// `shop_calc` is the roastery → shop price the maths gives today; `shop` is the one that's charged —
+// the saved price if there is one, else the calculated one.
+function compute(coffeeId, size, green_price) {
+  const r = roasted_per_kg(coffeeId, green_price);
+  if (!r) return null;
+  const p = packaging_for(coffeeId, size);
+  if (!p) return { ...r, packaging: null, cost: null };
+  const cost = r.roasted * SIZE_KG[size] + p.cost;
+  const shop_calc = roastery_price(cost);
+  const shop_saved = roastery_for(coffeeId, size);
+  return {
+    ...r, packaging: p.cost, packaging_source: p.source, cost,
+    shop_calc, shop_saved,
+    shop: shop_saved ?? shop_calc,
+    band_low:  cost / (1 - state.cfg.target_low_pct / 100),
+    band_high: cost / (1 - state.cfg.target_high_pct / 100),
+  };
+}
+// Where a sell price lands
+function evaluate(c, sell) {
+  if (!c || c.cost == null || sell == null || !(sell > 0)) return null;
+  const combined = (sell - c.cost) / sell;
+  const low = state.cfg.target_low_pct / 100, high = state.cfg.target_high_pct / 100;
+  return {
+    shop_margin: (sell - c.shop) / sell,
+    combined,
+    status: combined < low ? "BELOW" : combined > high ? "ABOVE" : "in band",
+    below_shop: sell < c.shop,
+  };
+}
+function saved_price(coffeeId, size, field) {
+  const v = state.final[coffeeId]?.[size]?.[field];
+  return v == null || isNaN(v) ? null : Number(v);
+}
+function sell_for(coffeeId, size)     { return saved_price(coffeeId, size, "retail"); }      // shop sell (bag, online)
+function roastery_for(coffeeId, size) { return saved_price(coffeeId, size, "wholesale"); }   // roastery → shop
+// Saved roastery → shop price no longer what the maths gives (e.g. green price changed) — 5c tolerance
+function roastery_out_of_step(c) {
+  return c && c.shop_saved != null && Math.abs(c.shop_saved - c.shop_calc) >= 0.05;
 }
 
-// ── Calculation drilldown (sanity check) ─────────────────────────────────────
-function build_drilldown(coffee, g) {
-  const green = g.price;
-  const shipping = Number(state.shipping_override[coffee.id]) || 0;
-  const lossInfo = roast_loss_for(coffee.id);
-  const lossPct = lossInfo.pct;
-  const pre = green + shipping;
-  const afterLoss = pre / (1 - lossPct / 100);
-  const roasted = round2(afterLoss);
-  const m = ROASTERY_MARGIN_PCT;
-  const d4 = x => (Number(x) || 0).toFixed(4);
-  const loss_note = lossInfo.source === "avg"
-    ? `avg of ${lossInfo.n} roasts = ${lossInfo.avg.toFixed(2)}%, rounded up to ${lossPct}%`
-    : `default ${lossPct}% (${lossInfo.n ? `only ${lossInfo.n} roast${lossInfo.n>1?"s":""} so far, need ${MIN_ROASTS_FOR_AVG}` : "no roast data yet"})`;
+// ── Prices on a past date (Revenue & Profit) ────────────────────────────────
+// A saved price as it stood on `date`: the latest change on or before it. Sales from before prices were
+// first saved use the first saved price. null = never set.
+function price_on(coffeeId, size, field, date) {
+  const h = state.price_history[`${coffeeId}|${size}`];
+  if (!h || !h.length) return saved_price(coffeeId, size, field);
+  let row = h[0];
+  for (const x of h) { if (x.date <= date) row = x; else break; }
+  return row[field];
+}
+// Green €/kg on `date`: the latest priced delivery on or before it (else the first one). A coffee with no
+// priced deliveries uses its current green price.
+function green_on(coffeeId, date) {
+  const h = state.green_history?.[coffeeId];
+  if (!h || !h.length) return green_for(coffeeId)?.price ?? null;
+  let price = h[0].price;
+  for (const x of h) { if (x.date <= date) price = x.price; else break; }
+  return price;
+}
 
-  const size_lines = SIZES.map(s => {
-    const base = roasted * s.kg;
-    const pkg = Number(state.pkg[s.label]) || 0;
-    const cost = round2(base + pkg);
-    const shop = cost / (1 - m / 100);
-    return `<div class="dl-row"><span class="dl-size">${esc(s.label)}</span>${d4(roasted)} × ${s.kg} = ${d4(base)} + ${d4(pkg)} pkg = <b>${eur(cost)}</b> → ÷ ${(1 - m/100).toFixed(2)} = <b>${eur(shop)}</b> · gross ${eur(shop - cost)}</div>`;
-  }).join("");
-  const bulk_kg = roasted / (1 - m / 100);
+// ── Checks (the sheet's Checks tab) ─────────────────────────────────────────
+function compute_checks() {
+  const no_green = [], no_cost = [], no_roastery = [], roastery_step = [], roastery_loss = [], no_sell = [], below_shop = [], out_band = [];
+  state.coffees.forEach(coffee => {
+    if (!green_for(coffee.id)) no_green.push(coffee.name);
+    opts_for(coffee.id).sizes.forEach(size => {
+      const label = `${coffee.name} ${size}`;
+      const c = compute(coffee.id, size);
+      if (!c || c.cost == null) no_cost.push(label);
+      else if (c.shop_saved == null) no_roastery.push(`${label} (calculated ${eur(c.shop_calc)})`);
+      else {
+        if (c.shop_saved < c.cost) roastery_loss.push(`${label} (${eur(c.shop_saved)} < cost ${eur(c.cost)})`);
+        if (roastery_out_of_step(c)) roastery_step.push(`${label}: saved ${eur(c.shop_saved)}, maths now ${eur(c.shop_calc)}`);
+      }
+      const sell = sell_for(coffee.id, size);
+      if (sell == null) { no_sell.push(label); return; }
+      const e = evaluate(c, sell);
+      if (!e) return;
+      if (e.below_shop) below_shop.push(`${label} (${eur(sell)} < ${eur(c.shop)})`);
+      if (e.status !== "in band") out_band.push(`${label} — ${pct1(e.combined)} ${e.status}`);
+    });
+  });
+  return [
+    { name: "Active coffees with no green price", list: no_green, means: "That coffee costs nothing and prices nothing. Enter its green €/kg." },
+    { name: "Sizes with no cost", list: no_cost, means: "A size is ticked but the green price or the packaging cost for that size is missing." },
+    { name: "Sizes missing a roastery → shop price", list: no_roastery, means: "Until it's saved, the calculated price is used. Tap \"use €…\" (or \"Use all calculated\") and save." },
+    { name: "Roastery → shop price below cost", list: roastery_loss, means: "The roastery loses money on every bag at this price.", bad: true },
+    { name: "Roastery → shop price out of step with cost", list: roastery_step, means: "The saved price is no longer what the maths gives — usually the green price changed. Update it, or leave it if that's deliberate." },
+    { name: "Sizes missing a shop sell price", list: no_sell, means: "Set a price, or untick that size if you don't sell it." },
+    { name: "Shop price below what the shop pays", list: below_shop, means: "Selling at a loss.", bad: true },
+    { name: "Combined margin outside the target band", list: out_band, means: "Not necessarily wrong — but each one should be a decision rather than an accident." },
+  ];
+}
+function render_checks() {
+  const el = document.getElementById("checks");
+  if (!el) return;
+  const checks = compute_checks();
+  el.innerHTML = `
+    <div class="card">
+      <div class="section-title">✅ Checks <span style="font-weight:400;color:#999;font-size:12px;text-transform:none;letter-spacing:0">· glance down after any change</span></div>
+      ${checks.map(ch => {
+        const n = ch.list.length;
+        const tag = n === 0 ? `<span class="tag tag-ok">OK</span>` : `<span class="tag ${ch.bad ? "tag-bad" : "tag-review"}">Review</span>`;
+        const row = `<span class="checks-name">${esc(ch.name)}</span><span class="checks-count">${n}</span>${tag}`;
+        return n === 0
+          ? `<div class="checks-row">${row}</div>`
+          : `<details><summary class="checks-row">${row}</summary>
+               <div class="checks-list"><div style="color:#999;font-style:italic">${esc(ch.means)}</div>${ch.list.map(x => `· ${esc(x)}`).join("<br>")}</div>
+             </details>`;
+      }).join("")}
+    </div>`;
+}
 
+// ── "How?" breakdown: how one size got to its prices ─────────────────────────
+function build_how(cid, size) {
+  const c = compute(cid, size);
+  if (!c || c.cost == null) return "";
+  const d4 = x => "€" + (Number(x) || 0).toFixed(4);
+  const loss = state.cfg.roast_loss_pct, m = state.cfg.roastery_margin_pct;
+  const low = state.cfg.target_low_pct, high = state.cfg.target_high_pct;
+  const raw_shop = c.cost / (1 - m / 100);
+  const rounding = state.cfg.rounding_rule === "nearest_5c" ? "rounded to the nearest 5c"
+                 : state.cfg.rounding_rule === "up_5c" ? "rounded up to the next 5c" : "";
+  const g = green_for(cid);
+  const sell = sell_for(cid, size);
+  const e = evaluate(c, sell);
+  const step = (n, text) => `<div class="dl-row"><span class="dl-size">${n}</span>${text}</div>`;
   return `
     <div class="drilldown">
-      <div class="dl-head">Roasted cost / kg</div>
-      <div class="dl-row">Green ${eur(green)}${shipping ? ` + shipping ${eur(shipping)}` : ""} = ${d4(pre)}</div>
-      <div class="dl-row">÷ (1 − ${lossPct}% loss) = ${d4(afterLoss)} &nbsp;<span style="color:#999">${loss_note}</span></div>
-      <div class="dl-row">= <b>${eur(roasted)} / kg</b> (rounded to 2dp)</div>
-      <div class="dl-head" style="margin-top:10px">Per size &nbsp;<span style="font-weight:400;color:#999">Cost = roasted × size + packaging (rounded); Shop = Cost ÷ ${(1 - m/100).toFixed(2)} (${m}% margin)</span></div>
-      ${size_lines}
-      <div class="dl-row"><span class="dl-size">Bulk</span>${d4(roasted)} ÷ ${(1 - m/100).toFixed(2)} = <b>${eur(bulk_kg)}</b> / kg · × 5 = <b>${eur(bulk_kg * 5)}</b> / bucket</div>
+      <div class="dl-head">How ${esc(size)} is priced</div>
+      ${step("1", `Green ${d4(c.green)}/kg <span style="color:#999">(${g?.source === "manual" ? "entered here" : `latest delivery${g?.date ? ` ${esc(g.date)}` : ""}`})</span> + shipping ${d4(c.shipping)}/kg = landed <b>${d4(c.landed)}/kg</b>`)}
+      ${step("2", `Landed ÷ (1 − ${loss}% roast loss) = roasted <b>${d4(c.roasted)}/kg</b> <span style="color:#999">— coffee is lost in the roast, so each roasted kg costs more</span>`)}
+      ${step("3", `Roasted ${d4(c.roasted)} × ${SIZE_KG[size]}kg = ${d4(c.roasted * SIZE_KG[size])} coffee + ${d4(c.packaging)} packaging <span style="color:#999">(${c.packaging_source === "Standard" ? `standard ${esc(size)} bag` : esc(c.packaging_source)})</span> = cost <b>${eur(c.cost)}</b>`)}
+      ${step("4", `Cost ÷ (1 − ${m}% roastery margin) = ${d4(raw_shop)}${rounding ? `, ${rounding}` : ""} = calculated roastery → shop <b>${eur(c.shop_calc)}</b>`
+        + (c.shop_saved == null
+            ? ` <span style="color:#d97706">— not saved yet, so this is what's used</span>`
+            : `<br>Saved roastery → shop price: <b>${eur(c.shop_saved)}</b>${roastery_out_of_step(c) ? ` <span style="color:#d97706">— differs from today's calculation</span>` : ""}`)
+        + ` <span style="color:#999">— roastery keeps ${eur(c.shop - c.cost)} (${pct1((c.shop - c.cost) / c.shop)} margin)</span>`)}
+      ${step("5", `Target band: cost ÷ (1 − ${low}%) = <b>${eur(c.band_low)}</b> up to cost ÷ (1 − ${high}%) = <b>${eur(c.band_high)}</b>`)}
+      ${e ? `
+        ${step("6", `Shop sell <b>${eur(sell)}</b> — shop margin = (${eur(sell)} − ${eur(c.shop)}) ÷ ${eur(sell)} = <b>${pct1(e.shop_margin)}</b> <span style="color:#999">— shop keeps ${eur(sell - c.shop)}</span>`)}
+        ${step("7", `Combined margin = (${eur(sell)} − ${eur(c.cost)}) ÷ ${eur(sell)} = <b>${pct1(e.combined)}</b> → ${e.below_shop ? `<b style="color:#dc2626">selling below what the shop pays</b>` : e.status === "in band" ? `<b style="color:#16a34a">in band</b> (${low}–${high}%)` : `<b style="color:#d97706">${e.status}</b> the ${low}–${high}% band`}`)}`
+      : step("6", `<span style="color:#999">No shop sell price yet — type one to see where it lands.</span>`)}
     </div>`;
 }
 
 // ── Revenue / profit ────────────────────────────────────────────────────────
-const BAG_KG = {}; SIZES.forEach(s => BAG_KG[s.label] = s.kg);
-
-function roasted_cpk(coffeeId) {
-  const g = green_for(coffeeId);
-  if (!g) return null;
-  return round2((g.price + (Number(state.shipping_override[coffeeId]) || 0)) / (1 - roast_loss_for(coffeeId).pct / 100));
-}
 function line_coffee_id(l) {
   let id = null;
   if (l.fp_code) id = state.fp_codes.find(x => x.fp_code === l.fp_code)?.coffee_id ?? null;
   if (id == null && l.fill_id) id = state.fillmap[l.fill_id] ?? null;
-  return state.coffees.some(c => c.id === id) ? id : null;   // active coffees only, as before
+  return state.coffees.some(c => c.id === id) ? id : null;   // active coffees only
 }
 
-// Value one dispatch line for a channel ("shop" → wholesale, "online" → retail).
-// Returns { revenue, cogs } | { unpriced:true } | null (not a sale).
-function value_line(l, channel) {
+// Value one dispatch line, at the prices in force on its date: shops pay the roastery → shop price, online
+// sells at the shop sell price. Cost uses the green price of the day too. A size with no saved roastery
+// price falls back to the calculated one. Returns { revenue, cogs } | { unpriced:true } | null (not a sale).
+function value_line(l, channel, date) {
   const bs = l.bag_size;
   if (bs === "30g sample" || bs === "Emptied") return null;     // samples & write-offs aren't sales
   const cid = line_coffee_id(l);
   if (cid == null) return { unpriced: true };
-  const rcpk = roasted_cpk(cid);
-  const mk = 1 / (1 - ROASTERY_MARGIN_PCT / 100);   // roastery→shop multiplier = ÷0.85
+  const green = green_on(cid, date);
+  const r = roasted_per_kg(cid, green);
+  if (!r) return { unpriced: true };
   const is_bulk = l.type === "bulk" || bs === "Batch brew" || bs === "Bar 5kg";
   if (is_bulk) {
-    if (rcpk == null) return { unpriced: true };               // need green to derive the bulk rate
     const kg = Number(l.kg) || 0;
-    const cost = round2(rcpk * kg);
-    return { revenue: cost * mk, cogs: cost, cid };            // bulk → shops at Cost ÷ 0.85
+    const cost = r.roasted * kg;
+    // A saved 5kg roastery → shop price sets the bulk rate (per kg = price ÷ 5); otherwise the maths
+    const saved5 = price_on(cid, "5kg", "wholesale", date);
+    const revenue = saved5 != null ? saved5 / 5 * kg : cost / (1 - state.cfg.roastery_margin_pct / 100);
+    return { revenue, cogs: cost, cid };
   }
+  if (!(bs in SIZE_KG)) return { unpriced: true };
+  const c = compute(cid, bs, green);
+  if (!c || c.cost == null) return { unpriced: true };
   const bags = Number(l.bags) || 0;
-  const bag_cost = rcpk != null ? round2(rcpk * (BAG_KG[bs] || 0) + (Number(state.pkg[bs]) || 0)) : null;
   let price;
   if (channel === "online") {
-    price = (state.final[cid] || {})[bs]?.retail;              // online sells at the saved label price
+    price = price_on(cid, bs, "retail", date);                  // online sells at the shop sell price
     if (price == null) return { unpriced: true };
   } else {
-    if (bag_cost == null) return { unpriced: true };           // shop → fixed wholesale = Cost ÷ 0.85
-    price = bag_cost * mk;
+    price = price_on(cid, bs, "wholesale", date) ?? c.shop_calc; // shops pay the roastery → shop price
   }
-  const cogs = bag_cost != null ? bag_cost * bags : 0;
-  return { revenue: price * bags, cogs, cid };
+  return { revenue: price * bags, cogs: c.cost * bags, cid };
 }
 
 function compute_money() {
@@ -440,7 +602,7 @@ function compute_money() {
     if (state.money_from && (d.date || "") < state.money_from) return;
     if (state.money_to   && (d.date || "") > state.money_to)   return;
     (d.lines || []).forEach(l => {
-      const v = value_line(l, kind);
+      const v = value_line(l, kind, d.date || "");
       if (!v) return;
       if (v.unpriced) { unpriced++; return; }
       acc[kind].rev += v.revenue; acc[kind].cogs += (v.cogs || 0);
@@ -495,7 +657,7 @@ function render() {
         <div style="width:1px;height:24px;background:#333;margin:0 4px"></div>
         <div>
           <div class="header-title">💶 Pricing</div>
-          <div class="header-sub">Bear Mrkt · Suggested prices</div>
+          <div class="header-sub">Bear Mrkt · cost, roastery → shop and shop sell prices</div>
         </div>
       </div>
       <button class="btn-logout" id="logout-btn">Log Out</button>
@@ -504,29 +666,39 @@ function render() {
     <div class="content">
 
       <div id="money"></div>
+      <div id="checks"></div>
 
       <div class="card">
-        <div class="section-title">Pricing Inputs</div>
+        <div class="section-title">Settings</div>
         <div class="cfg-grid">
-          ${cfg_num("target_low_pct",      "Target band low", c.target_low_pct,      "%")}
-          ${cfg_num("target_high_pct",     "Target band high",c.target_high_pct,     "%")}
+          ${cfg_num("roast_loss_pct",      "Roast loss",              c.roast_loss_pct,      "%")}
+          ${cfg_num("roastery_margin_pct", "Roastery margin",         c.roastery_margin_pct, "%")}
+          <div class="cfg-field">
+            <label>Price rounding</label>
+            <select data-cfg-select="rounding_rule">
+              ${ROUNDING.map(r => `<option value="${r.value}" ${c.rounding_rule === r.value ? "selected" : ""}>${r.label}</option>`).join("")}
+            </select>
+          </div>
+          ${cfg_num("target_low_pct",      "Target combined — low",   c.target_low_pct,      "%")}
+          ${cfg_num("target_high_pct",     "Target combined — high",  c.target_high_pct,     "%")}
         </div>
-        <div class="cfg-sub">Packaging cost per bag</div>
+        <div class="cfg-sub">Standard packaging — bag cost per size</div>
         <div class="cfg-grid">
           ${SIZES.map(s => cfg_pkg(s.label, state.pkg[s.label])).join("")}
         </div>
+        <div class="cfg-sub">Special packaging — overrides the standard bag for the sizes listed</div>
+        ${special_pkg_html()}
         <div class="cfg-actions">
-          <button class="btn-save" id="save-btn" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save inputs"}</button>
+          <button class="btn-save" id="save-btn" ${state.saving?"disabled":""}>${state.saving?"Saving…":"Save settings"}</button>
           ${state.dirty ? `<span class="dirty">Unsaved changes</span>` : ""}
           ${Date.now() < state.flash_until ? `<span class="save-flash">Saved ✓</span>` : ""}
           ${state.err ? `<span class="save-err">${esc(state.err)}</span>` : ""}
         </div>
         <div class="note">
-          Cost per kg = (green + shipping) ÷ (1 − roast loss). <strong>Shipping is per-coffee</strong> (set it on
-          each coffee), and <strong>roast loss is per-coffee</strong> — the average of that coffee's real roasts,
-          rounded up to a whole % for a buffer (defaults to ${DEFAULT_LOSS_PCT}% until there are ${MIN_ROASTS_FOR_AVG} roasts).
-          Roastery → shop = Cost ÷ 0.85 (15% margin ≈ 18% markup); gross profit = Roastery → shop − Cost.
-          The band/packaging below set the retail (label) suggestion.
+          Landed = green + shipping. Roasted €/kg = landed ÷ (1 − roast loss). Cost = roasted × weight + packaging.
+          Roastery → shop = cost ÷ (1 − roastery margin)${c.rounding_rule !== "none" ? ", rounded" : ""} — the only rounding.
+          Shop margin = (sell − roastery → shop) ÷ sell. Combined margin = (sell − cost) ÷ sell, checked against the target band.
+          A blank packaging cost means "not set yet" — that size shows no cost until it's entered.
         </div>
       </div>
 
@@ -540,13 +712,12 @@ function render() {
   attach();
 }
 
-function cfg_num(key, label, val, suffix, max, optional) {
-  const blank = optional && (!val || Number(val) === 0);
+function cfg_num(key, label, val, suffix) {
   return `
     <div class="cfg-field">
       <label>${label}</label>
       <div class="suffix">
-        <input type="number" inputmode="decimal" step="any" ${max!=null?`max="${max}"`:""} ${optional?`placeholder="optional"`:""} data-cfg="${key}" value="${blank?"":val}" />
+        <input type="number" inputmode="decimal" step="any" data-cfg="${key}" value="${val ?? ""}" />
         <span>${suffix}</span>
       </div>
     </div>`;
@@ -556,14 +727,28 @@ function cfg_pkg(label, val) {
     <div class="cfg-field">
       <label>${esc(label)}</label>
       <div class="suffix">
-        <input type="number" inputmode="decimal" step="any" data-pkg="${esc(label)}" value="${val}" />
+        <input type="number" inputmode="decimal" step="any" min="0" data-pkg="${esc(label)}" value="${val == null ? "" : val}" placeholder="not set" />
         <span>€</span>
       </div>
     </div>`;
 }
+function special_pkg_html() {
+  const rows = state.special_pkg.map((r, i) => `
+    <tr>
+      <td><input data-sp="${i}|name" value="${esc(r.name)}" placeholder="e.g. Gesha label + bag" /></td>
+      <td style="width:100px"><select data-sp="${i}|bag_size">${SIZES.map(s => `<option ${r.bag_size === s.label ? "selected" : ""}>${s.label}</option>`).join("")}</select></td>
+      <td style="width:110px"><input type="number" inputmode="decimal" step="any" min="0" data-sp="${i}|cost" value="${r.cost ?? ""}" placeholder="€" /></td>
+      <td><input data-sp="${i}|notes" value="${esc(r.notes)}" placeholder="notes (optional)" /></td>
+      <td style="width:36px"><button type="button" class="btn-x" data-sp-remove="${i}" title="Remove">✕</button></td>
+    </tr>`).join("");
+  return `
+    ${state.special_pkg.length ? `<div class="table-wrap"><table class="sp-table"><thead><tr><th>Name</th><th>Size</th><th>Cost €</th><th>Notes</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="hint" style="margin-bottom:8px">None yet.</p>`}
+    <button type="button" class="btn-ghost" id="sp-add" style="margin-top:8px">+ Add special packaging</button>`;
+}
 
 function render_results() {
   UnsavedWork.sync();   // every edit and save ends up here, so the kept copy stays current
+  render_checks();
   const el = document.getElementById("results");
   if (!el) return;
 
@@ -572,59 +757,67 @@ function render_results() {
     return;
   }
 
+  const names = special_names();
   el.innerHTML = state.coffees.map(coffee => {
     const g = green_for(coffee.id);
+    const o = opts_for(coffee.id);
+    const r = roasted_per_kg(coffee.id);
     const input_val = state.green_override[coffee.id] != null
       ? state.green_override[coffee.id]
       : (state.green_delivery[coffee.id]?.price ?? "");
     let src_hint = "";
     if (g && g.source === "delivery") src_hint = `from delivery${g.date?` ${esc(g.date)}`:""}`;
     else if (g && g.source === "manual") src_hint = "manual entry";
-    else src_hint = "enter a price to see suggestions";
-
+    else src_hint = "enter a price";
     const ship_val = state.shipping_override[coffee.id] != null ? state.shipping_override[coffee.id] : "";
-    const loss = roast_loss_for(coffee.id);
-    const loss_hint = loss.source === "avg"
-      ? `avg of ${loss.n} roast${loss.n>1?"s":""} (${loss.avg.toFixed(1)}%), rounded up`
-      : `default${loss.n ? ` — only ${loss.n} roast${loss.n>1?"s":""} so far` : " — no roast data yet"}`;
+    const pkg_options = ["", ...names, ...(o.packaging && !names.includes(o.packaging) ? [o.packaging] : [])]
+      .map(n => `<option value="${esc(n)}" ${(o.packaging || "") === n ? "selected" : ""}>${n ? esc(n) + (names.includes(n) ? "" : " (missing)") : "Standard"}</option>`).join("");
 
     const head = `
       <div class="coffee-head">
         <div class="coffee-name">${esc(coffee.name)}</div>
-        <div class="coffee-green">
-          <span class="green-lbl">Green €/kg</span>
-          <input type="number" inputmode="decimal" step="0.01" min="0" class="green-input" data-green="${coffee.id}"
-                 value="${input_val}" placeholder="0.00" />
-          <span class="green-src">${src_hint}</span>
-          <span class="param-sep">·</span>
-          <span class="green-lbl">Shipping €/kg</span>
-          <input type="number" inputmode="decimal" step="0.01" min="0" class="green-input" data-ship="${coffee.id}"
-                 value="${ship_val}" placeholder="0.00" />
-          <span class="param-sep">·</span>
-          <span class="green-lbl">Roast loss</span> <b>${loss.pct}%</b>
-          <span class="green-src">${loss_hint}</span>
+        <div class="coffee-params">
+          <span class="lbl">Green €/kg</span>
+          <input type="number" inputmode="decimal" step="0.01" min="0" class="num-input" data-green="${coffee.id}" value="${input_val}" placeholder="0.00" />
+          <span class="src">${src_hint}</span>
+          <span class="sep">·</span>
+          <span class="lbl">Shipping €/kg</span>
+          <input type="number" inputmode="decimal" step="0.01" min="0" class="num-input" data-ship="${coffee.id}" value="${ship_val}" placeholder="0.00" />
+          ${r ? `<span class="sep">·</span><span>Landed <b>${eur(r.landed)}</b></span><span class="sep">·</span><span>Roasted <b>${eur(r.roasted)}/kg</b></span>` : ""}
+        </div>
+        <div class="coffee-params">
+          <span class="lbl">Packaging</span>
+          <select data-pkg-choice="${coffee.id}">${pkg_options}</select>
+          <span class="sep">·</span>
+          <span class="lbl">Sizes sold</span>
+          ${SIZES.map(s => `<button type="button" class="size-chip ${o.sizes.includes(s.label) ? "on" : ""}" data-size-toggle="${coffee.id}|${s.label}">${s.label}</button>`).join("")}
         </div>
       </div>`;
 
-    if (!g) return `<div class="card">${head}</div>`;
+    if (!g) return `<div class="card">${head}<div class="no-green">No green price — enter one above to see costs.</div></div>`;
+    if (!o.sizes.length) return `<div class="card">${head}<div class="hint">No sizes ticked.</div></div>`;
 
-    const saved = state.final[coffee.id] || {};
-    const rows = SIZES.map(s => {
-      const r = compute(coffee.id, s.kg, s.label);
-      const sugg_rt = round_to((r.retail_low + r.retail_high) / 2, 0.5);
-      const rt_val = saved[s.label]?.retail != null ? saved[s.label].retail : "";
+    const rows = SIZES.filter(s => o.sizes.includes(s.label)).map(s => {
+      const c = compute(coffee.id, s.label);
+      const sell = sell_for(coffee.id, s.label);
+      const key = `${coffee.id}|${s.label}`;
+      if (!c || c.cost == null) {
+        return `<tr><td class="size">${esc(s.label)}</td><td colspan="7" class="no-green">No packaging cost for ${esc(s.label)} — set it in Settings above.</td></tr>`;
+      }
+      const sugg = round_to((c.band_low + c.band_high) / 2, 0.5);
+      const open = !!state.how[key];
       return `
         <tr>
           <td class="size">${esc(s.label)}</td>
-          <td class="num">${eur(r.cogs)}</td>
-          <td class="num"><strong>${eur(r.wholesale)}</strong></td>
-          <td class="num">${eur(r.wholesale - r.cogs)}</td>
-          <td class="num your-price">
+          <td class="num">${eur(c.cost)}</td>
+          <td class="num" data-roastery-cell="${key}">${roastery_cell(c, key)}</td>
+          <td class="num">
             <div class="your-wrap"><span class="eur-pre">€</span>
-              <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${coffee.id}|${esc(s.label)}|retail" value="${rt_val}" placeholder="${sugg_rt.toFixed(2)}" /></div>
-            <button type="button" class="sugg-chip" data-fill="${coffee.id}|${esc(s.label)}|retail|${sugg_rt.toFixed(2)}">use €${sugg_rt.toFixed(2)}</button>
-            <div class="retail-sub">band ${eur(r.retail_low)} – ${eur(r.retail_high)}</div>
+              <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${key}|retail" value="${money_val(sell)}" placeholder="—" />
+              <button type="button" class="how-btn ${open ? "on" : ""}" data-how="${key}" title="How this price is worked out">How?</button></div>
+            <button type="button" class="sugg-chip" data-fill="${key}|retail|${sugg.toFixed(2)}">use €${sugg.toFixed(2)}</button>
           </td>
+          ${eval_cells(c, sell, key)}
         </tr>`;
     }).join("");
 
@@ -633,33 +826,30 @@ function render_results() {
     return `
       <div class="card">
         ${head}
-        <table>
-          <thead>
-            <tr>
-              <th>Size</th>
-              <th class="num">Cost</th>
-              <th class="num">Roastery → Shop</th>
-              <th class="num">Gross profit</th>
-              <th class="num">Shop → Customer (label)</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-        ${(() => {
-          const br = compute(coffee.id, 1, "1kg");
-          const bulk_kg = br ? br.roasted_cost_per_kg / (1 - ROASTERY_MARGIN_PCT/100) : 0;
-          return `<div class="bulk-row">
-            <span class="bulk-lbl">Bulk €/kg (5kg buckets → shops)</span>
-            <span class="bulk-fixed">€${bulk_kg.toFixed(2)}/kg</span>
-            <span class="bulk-hint">roasted cost ÷ 0.85 · only billed when buckets are dispatched</span>
-          </div>`;
-        })()}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Size</th>
+                <th class="num">Cost</th>
+                <th class="num">Roastery → Shop<br><span style="font-weight:400;text-transform:none;letter-spacing:0">what shops pay us</span></th>
+                <th class="num">Shop sell (bag)<br><span style="font-weight:400;text-transform:none;letter-spacing:0">shops &amp; online</span></th>
+                <th class="num">Shop margin</th>
+                <th class="num">Combined</th>
+                <th class="num">Band</th>
+                <th>Check</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        ${SIZES.filter(s => o.sizes.includes(s.label) && state.how[`${coffee.id}|${s.label}`])
+          .map(s => `<div data-how-box="${coffee.id}|${s.label}">${build_how(coffee.id, s.label)}</div>`).join("")}
         <div class="coffee-actions">
           <button class="btn-save" data-save-coffee="${coffee.id}" ${saving?"disabled":""}>${saving?"Saving…":"Save prices"}</button>
+          <button type="button" class="btn-ghost" data-use-calc="${coffee.id}" title="Sizes with no roastery → shop price get today's calculated one (prices already set are left alone)">Fill missing roastery prices</button>
           <span class="coffee-status ${dirty?"dirty":""}">${dirty?"Unsaved changes":""}</span>
-          <button type="button" class="drill-toggle" data-drill="${coffee.id}">${state.drill[coffee.id]?"▾ Hide calculation":"▸ Show calculation"}</button>
         </div>
-        ${state.drill[coffee.id] ? build_drilldown(coffee, g) : ""}
       </div>`;
   }).join("");
 
@@ -667,35 +857,83 @@ function render_results() {
   attach_final();
 }
 
-// Persist a per-coffee manual green price (blank clears it → falls back to delivery).
-async function save_green(coffeeId, raw) {
-  const id = Number(coffeeId);
-  const name = state.coffees.find(c => c.id === id)?.name || null;
-  const val = String(raw).trim();
-  const price = (val === "" || isNaN(Number(val))) ? null : Number(val);
-  if (price == null) delete state.green_override[id]; else state.green_override[id] = price;
-  // Upsert (don't delete the row) so a per-coffee shipping value is preserved when green is cleared.
-  const { error } = await supabaseClient.from("pricing_green").upsert(
-    { coffee_id: id, coffee: name, green_price: price, updated_at: new Date().toISOString() },
-    { onConflict: "coffee_id" }
-  );
-  if (error) alert(`Couldn't save the green price for ${name || "this coffee"}: ${error.message}\n\nIt's showing here but isn't saved — try again.`);
-  render_results();
+// Roastery → shop: the saved price (typed), with today's calculated price to compare / one-tap use
+function roastery_cell(c, key) {
+  return `
+    <div class="your-wrap"><span class="eur-pre">€</span>
+      <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${key}|wholesale" value="${money_val(c.shop_saved)}" placeholder="${c.shop_calc.toFixed(2)}" /></div>
+    <div data-roastery-hint="${key}">${roastery_hint(c, key)}</div>`;
+}
+function roastery_hint(c, key) {
+  const calc = (Math.round(c.shop_calc * 100) / 100).toFixed(2);
+  if (c.shop_saved == null) return `<button type="button" class="sugg-chip" data-fill="${key}|wholesale|${calc}">use €${calc}</button><div class="band-sub" style="color:#d97706">not saved</div>`;
+  if (roastery_out_of_step(c)) return `<button type="button" class="sugg-chip" data-fill="${key}|wholesale|${calc}">maths now €${calc}</button>`;
+  return `<div class="band-sub">matches maths</div>`;
 }
 
-// Persist a per-coffee shipping €/kg (added to green before roast loss). Blank clears it.
-async function save_shipping(coffeeId, raw) {
+// The four cells that depend on the sell price — redrawn in place while typing
+function eval_cells(c, sell, key) {
+  const e = evaluate(c, sell);
+  const status = !e ? `<span class="hint" style="font-size:12px">no price</span>`
+    : e.below_shop ? `<span class="tag tag-bad">LOSS</span>`
+    : e.status === "in band" ? `<span class="tag tag-ok">in band</span>`
+    : `<span class="tag tag-review">${e.status}</span>`;
+  return `
+    <td class="num" data-eval="${key}|shop_margin">${e ? pct1(e.shop_margin) : "—"}</td>
+    <td class="num" data-eval="${key}|combined">${e ? `<strong>${pct1(e.combined)}</strong>` : "—"}</td>
+    <td class="num"><span class="band-sub">${eur(c.band_low)} – ${eur(c.band_high)}</span></td>
+    <td data-eval="${key}|status">${status}</td>`;
+}
+function refresh_row(cid, size) {
+  const key = `${cid}|${size}`;
+  const input = document.querySelector(`.final-input[data-final="${key}|retail"]`);
+  const tr = input?.closest("tr");
+  const c = compute(cid, size);
+  if (!tr || !c || c.cost == null) return;
+  const hint = document.querySelector(`[data-roastery-hint="${key}"]`);   // not the input — keeps focus
+  if (hint) { hint.innerHTML = roastery_hint(c, key); attach_fill_chips(hint); }
+  const tmp = document.createElement("tbody");
+  tmp.innerHTML = `<tr>${eval_cells(c, sell_for(cid, size), key)}</tr>`;
+  const fresh = [...tmp.firstChild.children];
+  const cells = [...tr.children];
+  cells.slice(cells.length - 4).forEach((td, i) => td.replaceWith(fresh[i]));
+  const how = document.querySelector(`[data-how-box="${key}"]`);
+  if (how) how.innerHTML = build_how(cid, size);
+  render_checks();
+}
+
+// Persist a per-coffee green price / shipping on pricing_green (blank clears it)
+async function save_green_row(coffeeId, patch, what) {
   const id = Number(coffeeId);
   const name = state.coffees.find(c => c.id === id)?.name || null;
-  const val = String(raw).trim();
-  const ship = (val === "" || isNaN(Number(val))) ? null : Number(val);
-  if (ship == null) delete state.shipping_override[id]; else state.shipping_override[id] = ship;
   const { error } = await supabaseClient.from("pricing_green").upsert(
-    { coffee_id: id, coffee: name, shipping_per_kg: ship, updated_at: new Date().toISOString() },
+    { coffee_id: id, coffee: name, ...patch, updated_at: new Date().toISOString() },
     { onConflict: "coffee_id" }
   );
-  if (error) alert(`Couldn't save the shipping cost for ${name || "this coffee"}: ${error.message}\n\nIt's showing here but isn't saved — try again.`);
+  if (error) alert(`Couldn't save the ${what} for ${name || "this coffee"}: ${error.message}\n\nIt's showing here but isn't saved — try again.`);
+}
+async function save_green(coffeeId, raw) {
+  const id = Number(coffeeId), price = num_or_null(raw);
+  if (price == null) delete state.green_override[id]; else state.green_override[id] = price;
   render_results();
+  await save_green_row(id, { green_price: price }, "green price");
+}
+async function save_shipping(coffeeId, raw) {
+  const id = Number(coffeeId), ship = num_or_null(raw);
+  if (ship == null) delete state.shipping_override[id]; else state.shipping_override[id] = ship;
+  render_results();
+  await save_green_row(id, { shipping_per_kg: ship }, "shipping cost");
+}
+// Sizes sold and packaging choice save straight away
+async function save_opts(coffeeId) {
+  const id = Number(coffeeId);
+  const o = opts_for(id);
+  state.opts[id] = o;
+  render_results();
+  const { error } = await supabaseClient.from("pricing_coffee_options").upsert(
+    { coffee_id: id, sizes: o.sizes, packaging: o.packaging || null, updated_at: new Date().toISOString() },
+    { onConflict: "coffee_id" });
+  if (error) alert("Couldn't save that change: " + error.message + "\n\nIt's showing here but isn't saved — try again.");
 }
 
 function attach_green() {
@@ -706,6 +944,18 @@ function attach_green() {
   document.querySelectorAll("[data-ship]").forEach(inp => {
     inp.addEventListener("change", () => save_shipping(inp.dataset.ship, inp.value));
   });
+  document.querySelectorAll("[data-size-toggle]").forEach(btn => btn.addEventListener("click", () => {
+    const [cid, size] = btn.dataset.sizeToggle.split("|");
+    const o = { ...opts_for(Number(cid)) };
+    o.sizes = o.sizes.includes(size) ? o.sizes.filter(s => s !== size) : SIZES.map(s => s.label).filter(s => s === size || o.sizes.includes(s));
+    state.opts[Number(cid)] = o;
+    save_opts(cid);
+  }));
+  document.querySelectorAll("[data-pkg-choice]").forEach(sel => sel.addEventListener("change", () => {
+    const id = Number(sel.dataset.pkgChoice);
+    state.opts[id] = { ...opts_for(id), packaging: sel.value || null };
+    save_opts(id);
+  }));
 }
 
 function mark_coffee_dirty(id) {
@@ -713,69 +963,101 @@ function mark_coffee_dirty(id) {
   const btn = document.querySelector(`[data-save-coffee="${id}"]`);
   const status = btn?.parentElement?.querySelector(".coffee-status");
   if (status) { status.textContent = "Unsaved changes"; status.classList.add("dirty"); }
+  UnsavedWork.sync();
 }
 
-function attach_final() {
-  // Typing your own price — update draft silently (no re-render, keep focus). Merge so the
-  // other field on the same size isn't lost.
-  document.querySelectorAll(".final-input").forEach(inp => {
-    inp.addEventListener("input", () => {
-      const [cid, size, field] = inp.dataset.final.split("|");
-      const id = Number(cid);
-      const v = inp.value.trim();
-      const cur = (state.final[id] = state.final[id] || {});
-      cur[size] = { ...(cur[size] || {}), [field]: v === "" ? null : Number(v) };
-      mark_coffee_dirty(id);
-    });
-  });
-  // One-tap accept a suggested price.
-  document.querySelectorAll(".sugg-chip").forEach(chip => {
+// Set one draft price (field: "retail" = shop sell, "wholesale" = roastery → shop), keeping the other
+function set_draft_price(id, size, field, value) {
+  const cur = ((state.final[id] = state.final[id] || {})[size] = state.final[id][size] || { retail: null, wholesale: null });
+  cur[field] = value;
+}
+// One-tap fill chips: the suggested shop price (middle of the band, nearest 50c) or the calculated roastery price
+function attach_fill_chips(root) {
+  root.querySelectorAll(".sugg-chip").forEach(chip => {
     chip.addEventListener("click", () => {
       const [cid, size, field, val] = chip.dataset.fill.split("|");
       const id = Number(cid);
       const input = document.querySelector(`.final-input[data-final="${cid}|${size}|${field}"]`);
       if (input) input.value = val;
-      const cur = (state.final[id] = state.final[id] || {});
-      cur[size] = { ...(cur[size] || {}), [field]: Number(val) };
+      set_draft_price(id, size, field, Number(val));
       mark_coffee_dirty(id);
+      refresh_row(id, size);
     });
   });
+}
+
+function attach_final() {
+  // Typing a price — update the draft and that row's margins in place (keeps focus)
+  document.querySelectorAll(".final-input").forEach(inp => {
+    inp.addEventListener("input", () => {
+      const [cid, size, field] = inp.dataset.final.split("|");
+      const id = Number(cid);
+      set_draft_price(id, size, field, num_or_null(inp.value));
+      mark_coffee_dirty(id);
+      refresh_row(id, size);
+    });
+  });
+  attach_fill_chips(document);
+  // Fill each ticked size that has NO roastery → shop price with today's calculated one (still needs Save).
+  // Prices already set are left alone — change those one at a time with their chip.
+  document.querySelectorAll("[data-use-calc]").forEach(btn => btn.addEventListener("click", () => {
+    const id = Number(btn.dataset.useCalc);
+    opts_for(id).sizes.forEach(size => {
+      const c = compute(id, size);
+      if (c && c.cost != null && c.shop_saved == null) set_draft_price(id, size, "wholesale", Math.round(c.shop_calc * 100) / 100);
+    });
+    mark_coffee_dirty(id);
+    render_results();
+  }));
   document.querySelectorAll("[data-save-coffee]").forEach(btn => {
     btn.addEventListener("click", () => save_coffee(Number(btn.dataset.saveCoffee)));
   });
-  document.querySelectorAll("[data-drill]").forEach(btn => {
+  document.querySelectorAll("[data-how]").forEach(btn => {
     btn.addEventListener("click", () => {
-      const id = Number(btn.dataset.drill);
-      state.drill[id] = !state.drill[id];
+      state.how[btn.dataset.how] = !state.how[btn.dataset.how];
       render_results();
     });
   });
 }
 
-// Persist one coffee's chosen prices: roastery→shop (wholesale) and shop→customer (retail, the label price).
+// Persist one coffee's saved prices: retail = shop sell (the price on the bag, also online), wholesale =
+// roastery → shop. Every change is logged with its date by the database (pricing-step2.sql).
+// Prices for sizes not currently ticked are left as they are, so re-ticking a size brings its prices back.
 async function save_coffee(id) {
+  if (state.coffee_saving[id]) return;   // already saving — ignore a second tap
   state.coffee_saving[id] = true; render_results();
   const now = new Date().toISOString();
-  const saved = state.final[id] || {};
+  const draft = state.final[id] || {};
   const rows = [], cleared = [];
+  const val = x => (x == null || isNaN(x)) ? null : Math.round(Number(x) * 100) / 100;
   SIZES.forEach(s => {
-    const rt = saved[s.label]?.retail;
-    if (rt == null || isNaN(rt)) { if (s.label in saved) cleared.push(s.label); return; }
-    rows.push({ coffee_id: id, bag_size: s.label, retail: Number(rt), wholesale: null, updated_at: now });
+    if (!(s.label in draft)) return;
+    const rt = val(draft[s.label]?.retail), ws = val(draft[s.label]?.wholesale);
+    if (rt == null && ws == null) cleared.push(s.label);
+    else rows.push({ coffee_id: id, bag_size: s.label, retail: rt, wholesale: ws, updated_at: now });
   });
   let err = null;
   if (rows.length) {
     const res = await supabaseClient.from("pricing_final").upsert(rows, { onConflict: "coffee_id,bag_size" });
     err = res.error;
   }
-  if (!err && cleared.length) await supabaseClient.from("pricing_final").delete().eq("coffee_id", id).in("bag_size", cleared);
-
+  if (!err && cleared.length) {
+    const res = await supabaseClient.from("pricing_final").delete().eq("coffee_id", id).in("bag_size", cleared);
+    err = res.error;
+  }
   state.coffee_saving[id] = false;
-  if (err) { state.err = err.message; render(); return; }
+  if (err) { alert("Couldn't save the prices: " + err.message); render_results(); return; }
   state.coffee_dirty[id] = false;
-  const fin = (state.final[id] = {});
-  rows.forEach(r => { fin[r.bag_size] = { retail: r.retail }; });
+  cleared.forEach(size => { delete draft[size]; });
+  // Mirror what the database logged, so Revenue & Profit uses the new prices from today without a reload
+  const today = now.slice(0, 10);
+  [...rows.map(r => [r.bag_size, r.retail, r.wholesale]), ...cleared.map(s => [s, null, null])].forEach(([size, retail, wholesale]) => {
+    const k = `${id}|${size}`, h = (state.price_history[k] = state.price_history[k] || []);
+    const last = h[h.length - 1];
+    if (!last || last.retail !== retail || last.wholesale !== wholesale) h.push({ date: today, retail, wholesale });
+  });
   render_results();
+  render_money();
 }
 
 // ── Listeners ───────────────────────────────────────────────────────────────
@@ -786,23 +1068,53 @@ function attach() {
     window.location.href = "login.html";
   });
 
-  // Live recompute on config edits — update draft + re-render ONLY the results
-  // block so the input keeps focus while typing.
+  // Live recompute on settings edits — update the draft and re-render ONLY the results, so the input
+  // keeps focus while typing.
   document.querySelectorAll("[data-cfg]").forEach(inp => {
     inp.addEventListener("input", () => {
-      let v = Number(inp.value) || 0;
-      if (inp.dataset.cfg === "roastery_margin_pct" && v > 18) { v = 18; inp.value = 18; }
+      const v = num_or_null(inp.value);
+      if (v == null) return;
+      if (/_pct$/.test(inp.dataset.cfg) && (v < 0 || v >= 100)) return;   // a % must stay below 100
       state.cfg[inp.dataset.cfg] = v;
+      mark_dirty();
+      render_results();
+    });
+  });
+  document.querySelectorAll("[data-cfg-select]").forEach(sel => {
+    sel.addEventListener("change", () => {
+      state.cfg[sel.dataset.cfgSelect] = sel.value;
       mark_dirty();
       render_results();
     });
   });
   document.querySelectorAll("[data-pkg]").forEach(inp => {
     inp.addEventListener("input", () => {
-      state.pkg[inp.dataset.pkg] = Number(inp.value) || 0;
+      state.pkg[inp.dataset.pkg] = num_or_null(inp.value);
       mark_dirty();
       render_results();
     });
+  });
+  // Special packaging rows
+  document.querySelectorAll("[data-sp]").forEach(inp => {
+    const update = () => {
+      const [i, field] = inp.dataset.sp.split("|");
+      const row = state.special_pkg[Number(i)];
+      if (!row) return;
+      row[field] = field === "cost" ? num_or_null(inp.value) : inp.value;
+      mark_dirty();
+      render_results();   // the packaging dropdowns and costs follow the names
+    };
+    inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", update);
+  });
+  document.querySelectorAll("[data-sp-remove]").forEach(btn => btn.addEventListener("click", () => {
+    state.special_pkg.splice(Number(btn.dataset.spRemove), 1);
+    mark_dirty();
+    render();
+  }));
+  document.getElementById("sp-add")?.addEventListener("click", () => {
+    state.special_pkg.push({ name: "", bag_size: "100g", cost: null, notes: "" });
+    mark_dirty();
+    render();
   });
 
   document.getElementById("save-btn")?.addEventListener("click", save);
@@ -825,24 +1137,53 @@ function mark_dirty() {
       }
     }
   }
+  UnsavedWork.sync();
 }
 
+// Save the settings card: rates, standard packaging, special packaging
 async function save() {
+  if (state.saving) return;   // already saving — ignore a second tap
+  // Special packaging: every row needs a name and a cost, and a name + size only once
+  const sp = state.special_pkg.map(r => ({ ...r, name: (r.name || "").trim() }));
+  const bad = sp.find(r => !r.name || r.cost == null);
+  if (bad) { state.err = "Each special packaging row needs a name and a cost (or remove the row)."; render(); return; }
+  const keys = sp.map(r => `${r.name}|${r.bag_size}`);
+  if (new Set(keys).size !== keys.length) { state.err = "The same special packaging name and size is listed twice."; render(); return; }
+
   state.saving = true; state.err = ""; render();
   const now = new Date().toISOString();
+  const errors = [];
+  const chk = res => { if (res?.error) errors.push(res.error.message); };
 
-  const { error: e1 } = await supabaseClient.from("pricing_settings").upsert({
+  chk(await supabaseClient.from("pricing_settings").upsert({
     id: 1,
+    roast_loss_pct:      state.cfg.roast_loss_pct,
+    roastery_margin_pct: state.cfg.roastery_margin_pct,
+    rounding_rule:       state.cfg.rounding_rule,
     target_low_pct:      state.cfg.target_low_pct,
     target_high_pct:     state.cfg.target_high_pct,
     updated_at: now,
-  }, { onConflict: "id" });
+  }, { onConflict: "id" }));
 
-  const pkg_payload = SIZES.map(s => ({ bag_size: s.label, cost: Number(state.pkg[s.label]) || 0, updated_at: now }));
-  const { error: e2 } = await supabaseClient.from("pricing_packaging").upsert(pkg_payload, { onConflict: "bag_size" });
+  // Standard packaging: sizes with a cost are saved; a blanked size is removed (= not set)
+  const set_sizes = SIZES.filter(s => state.pkg[s.label] != null);
+  const blank_sizes = SIZES.filter(s => state.pkg[s.label] == null).map(s => s.label);
+  if (set_sizes.length) chk(await supabaseClient.from("pricing_packaging")
+    .upsert(set_sizes.map(s => ({ bag_size: s.label, cost: Number(state.pkg[s.label]), updated_at: now })), { onConflict: "bag_size" }));
+  if (blank_sizes.length) chk(await supabaseClient.from("pricing_packaging").delete().in("bag_size", blank_sizes));
+
+  // Special packaging: upsert what's listed, delete rows that were removed or renamed
+  if (sp.length) chk(await supabaseClient.from("pricing_special_packaging")
+    .upsert(sp.map(r => ({ name: r.name, bag_size: r.bag_size, cost: Number(r.cost), notes: r.notes || null, updated_at: now })), { onConflict: "name,bag_size" }));
+  for (const k of state.saved_special_keys.filter(k => !keys.includes(k))) {
+    const [name, bag_size] = k.split("|");
+    chk(await supabaseClient.from("pricing_special_packaging").delete().eq("name", name).eq("bag_size", bag_size));
+  }
 
   state.saving = false;
-  if (e1 || e2) { state.err = (e1 || e2).message; state.dirty = true; render(); return; }
+  if (errors.length) { state.err = errors[0]; state.dirty = true; render(); return; }
+  state.special_pkg = sp;
+  state.saved_special_keys = keys;
   state.dirty = false;
   state.flash_until = Date.now() + 2000;
   render();
