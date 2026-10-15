@@ -279,12 +279,15 @@ async function load() {
   state.special_pkg = (sp_rows || []).map(r => ({ name: r.name, bag_size: r.bag_size, cost: Number(r.cost), notes: r.notes || "" }));
   state.saved_special_keys = state.special_pkg.map(r => `${r.name}|${r.bag_size}`);
 
-  // Active coffees and their options (sizes sold, packaging)
+  // Active coffees and their options (sizes sold, packaging, own roastery margin)
   const { data: coffees } = await supabaseClient.from("coffees").select("id, name, retired_at").is("retired_at", null).order("name");
   state.coffees = (coffees || []).map(c => ({ id: c.id, name: c.name }));
-  const { data: opt_rows } = await supabaseClient.from("pricing_coffee_options").select("coffee_id, sizes, packaging");
+  const { data: opt_rows } = await supabaseClient.from("pricing_coffee_options").select("coffee_id, sizes, packaging, roastery_margin_pct");
   state.opts = {};
-  (opt_rows || []).forEach(r => { state.opts[r.coffee_id] = { sizes: r.sizes || [], packaging: r.packaging || null }; });
+  (opt_rows || []).forEach(r => {
+    state.opts[r.coffee_id] = { sizes: r.sizes || [], packaging: r.packaging || null,
+                                margin: r.roastery_margin_pct == null ? null : Number(r.roastery_margin_pct) };
+  });
 
   // Latest green price per coffee: newest delivery that carries a price (a delivery logged before its
   // invoice arrived has none, and shouldn't wipe out the last known one).
@@ -369,7 +372,7 @@ function green_for(coffeeId) {
   return null;
 }
 function opts_for(coffeeId) {
-  return state.opts[coffeeId] || { sizes: DEFAULT_SIZES.slice(), packaging: null };
+  return state.opts[coffeeId] || { sizes: DEFAULT_SIZES.slice(), packaging: null, margin: null };
 }
 function special_names() {
   return [...new Set(state.special_pkg.map(r => (r.name || "").trim()).filter(Boolean))];
@@ -394,8 +397,13 @@ function roasted_per_kg(coffeeId, green_price) {
   return { green: g.price, shipping, landed, roasted: landed / (1 - state.cfg.roast_loss_pct / 100) };
 }
 // Roastery → shop price: cost ÷ (1 − margin), with the sheet's optional rounding
-function roastery_price(cost) {
-  const raw = cost / (1 - state.cfg.roastery_margin_pct / 100);
+// A coffee's roastery margin %: its own if set, else the default from Settings
+function margin_for(coffeeId) {
+  const m = opts_for(coffeeId).margin;
+  return m == null || isNaN(m) ? state.cfg.roastery_margin_pct : Number(m);
+}
+function roastery_price(cost, coffeeId) {
+  const raw = cost / (1 - margin_for(coffeeId) / 100);
   if (state.cfg.rounding_rule === "nearest_5c") return Math.round(raw / 0.05) * 0.05;
   if (state.cfg.rounding_rule === "up_5c") return Math.ceil(raw / 0.05 - 1e-9) * 0.05;
   return raw;
@@ -409,7 +417,7 @@ function compute(coffeeId, size, green_price) {
   const p = packaging_for(coffeeId, size);
   if (!p) return { ...r, packaging: null, cost: null };
   const cost = r.roasted * SIZE_KG[size] + p.cost;
-  const shop_calc = roastery_price(cost);
+  const shop_calc = roastery_price(cost, coffeeId);
   const shop_saved = roastery_for(coffeeId, size);
   return {
     ...r, packaging: p.cost, packaging_source: p.source, cost,
@@ -520,7 +528,7 @@ function build_how(cid, size) {
   const c = compute(cid, size);
   if (!c || c.cost == null) return "";
   const d4 = x => "€" + (Number(x) || 0).toFixed(4);
-  const loss = state.cfg.roast_loss_pct, m = state.cfg.roastery_margin_pct;
+  const loss = state.cfg.roast_loss_pct, m = margin_for(cid);
   const low = state.cfg.target_low_pct, high = state.cfg.target_high_pct;
   const raw_shop = c.cost / (1 - m / 100);
   const rounding = state.cfg.rounding_rule === "nearest_5c" ? "rounded to the nearest 5c"
@@ -573,7 +581,7 @@ function value_line(l, channel, date) {
     const cost = r.roasted * kg;
     // A saved 5kg roastery → shop price sets the bulk rate (per kg = price ÷ 5); otherwise the maths
     const saved5 = price_on(cid, "5kg", "wholesale", date);
-    const revenue = saved5 != null ? saved5 / 5 * kg : cost / (1 - state.cfg.roastery_margin_pct / 100);
+    const revenue = saved5 != null ? saved5 / 5 * kg : cost / (1 - margin_for(cid) / 100);
     return { revenue, cogs: cost, cid };
   }
   if (!(bs in SIZE_KG)) return { unpriced: true };
@@ -672,7 +680,7 @@ function render() {
         <div class="section-title">Settings</div>
         <div class="cfg-grid">
           ${cfg_num("roast_loss_pct",      "Roast loss",              c.roast_loss_pct,      "%")}
-          ${cfg_num("roastery_margin_pct", "Roastery margin",         c.roastery_margin_pct, "%")}
+          ${cfg_num("roastery_margin_pct", "Roastery margin — default", c.roastery_margin_pct, "%")}
           <div class="cfg-field">
             <label>Price rounding</label>
             <select data-cfg-select="rounding_rule">
@@ -786,6 +794,11 @@ function render_results() {
           ${r ? `<span class="sep">·</span><span>Landed <b>${eur(r.landed)}</b></span><span class="sep">·</span><span>Roasted <b>${eur(r.roasted)}/kg</b></span>` : ""}
         </div>
         <div class="coffee-params">
+          <span class="lbl">Roastery margin</span>
+          <input type="number" inputmode="decimal" step="0.5" min="0" max="99" class="num-input" style="width:64px" data-margin="${coffee.id}"
+                 value="${o.margin ?? ""}" placeholder="${state.cfg.roastery_margin_pct}" title="Blank = the default (${state.cfg.roastery_margin_pct}%) from Settings" />
+          <span>%</span><span class="src">${o.margin == null ? "default" : "this coffee only"}</span>
+          <span class="sep">·</span>
           <span class="lbl">Packaging</span>
           <select data-pkg-choice="${coffee.id}">${pkg_options}</select>
           <span class="sep">·</span>
@@ -931,7 +944,7 @@ async function save_opts(coffeeId) {
   state.opts[id] = o;
   render_results();
   const { error } = await supabaseClient.from("pricing_coffee_options").upsert(
-    { coffee_id: id, sizes: o.sizes, packaging: o.packaging || null, updated_at: new Date().toISOString() },
+    { coffee_id: id, sizes: o.sizes, packaging: o.packaging || null, roastery_margin_pct: o.margin ?? null, updated_at: new Date().toISOString() },
     { onConflict: "coffee_id" });
   if (error) alert("Couldn't save that change: " + error.message + "\n\nIt's showing here but isn't saved — try again.");
 }
@@ -950,6 +963,14 @@ function attach_green() {
     o.sizes = o.sizes.includes(size) ? o.sizes.filter(s => s !== size) : SIZES.map(s => s.label).filter(s => s === size || o.sizes.includes(s));
     state.opts[Number(cid)] = o;
     save_opts(cid);
+  }));
+  // Per-coffee roastery margin: blank = the Settings default
+  document.querySelectorAll("[data-margin]").forEach(inp => inp.addEventListener("change", () => {
+    const id = Number(inp.dataset.margin);
+    let m = num_or_null(inp.value);
+    if (m != null && (m < 0 || m >= 100)) { alert("The roastery margin must be between 0 and 99%."); render_results(); return; }
+    state.opts[id] = { ...opts_for(id), margin: m };
+    save_opts(id);
   }));
   document.querySelectorAll("[data-pkg-choice]").forEach(sel => sel.addEventListener("change", () => {
     const id = Number(sel.dataset.pkgChoice);
