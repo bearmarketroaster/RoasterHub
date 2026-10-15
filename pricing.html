@@ -81,8 +81,6 @@
     .your-wrap .eur-pre { color: #666; font-size: 13px; }
     .final-input { width: 78px; padding: 6px 8px; font-size: 14px; text-align: right; border: 1px solid #d8d4cc; border-radius: 6px; }
     .final-input:focus { outline: none; border-color: #1a1a1a; }
-    .sugg-chip { display: block; white-space: nowrap; margin-top: 4px; background: #f0eee9; border: 1px solid #e0ddd6; color: #555; border-radius: 5px; padding: 2px 7px; font-size: 11px; cursor: pointer; }
-    .sugg-chip:hover { background: #e8e6e1; }
     .band-sub { font-size: 11px; color: #999; white-space: nowrap; }
     .coffee-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0eee9; }
     .coffee-status { font-size: 12px; color: #999; }
@@ -488,7 +486,7 @@ function compute_checks() {
   return [
     { name: "Active coffees with no green price", list: no_green, means: "That coffee costs nothing and prices nothing. Enter its green €/kg." },
     { name: "Sizes with no cost", list: no_cost, means: "A size is ticked but the green price or the packaging cost for that size is missing." },
-    { name: "Sizes missing a roastery → shop price", list: no_roastery, means: "Until one is set, the calculated price is used. Type one, tap \"use €…\" or \"Fill missing roastery prices\", then save." },
+    { name: "Sizes missing a roastery → shop price", list: no_roastery, means: "Until one is set, the calculated price is used. Type one (or use \"Fill missing roastery prices\"), then save." },
     { name: "Roastery → shop price below cost", list: roastery_loss, means: "The roastery loses money on every bag at this price.", bad: true },
     { name: "Sizes missing a shop sell price", list: no_sell, means: "Set a price, or untick that size if you don't sell it." },
     { name: "Shop price below what the shop pays", list: below_shop, means: "Selling at a loss.", bad: true },
@@ -809,7 +807,6 @@ function render_results() {
       if (!c || c.cost == null) {
         return `<tr><td class="size">${esc(s.label)}</td><td colspan="7" class="no-green">No packaging cost for ${esc(s.label)} — set it in Settings above.</td></tr>`;
       }
-      const sugg = round_to((c.band_low + c.band_high) / 2, 0.5);
       const open = !!state.how[key];
       return `
         <tr>
@@ -820,7 +817,6 @@ function render_results() {
             <div class="your-wrap"><span class="eur-pre">€</span>
               <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${key}|retail" value="${money_val(sell)}" placeholder="—" />
               <button type="button" class="how-btn ${open ? "on" : ""}" data-how="${key}" title="How this price is worked out">How?</button></div>
-            <div data-sell-hint="${key}">${sell == null ? `<button type="button" class="sugg-chip" data-fill="${key}|retail|${sugg.toFixed(2)}">use €${sugg.toFixed(2)}</button>` : ""}</div>
           </td>
           ${eval_cells(c, sell, key)}
         </tr>`;
@@ -869,10 +865,9 @@ function roastery_cell(c, key) {
       <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${key}|wholesale" value="${money_val(c.shop_saved)}" placeholder="${c.shop_calc.toFixed(2)}" /></div>
     <div data-roastery-hint="${key}">${roastery_hint(c, key)}</div>`;
 }
-// Under the roastery price: its actual margin once set; a starting suggestion only while it's empty
+// Under the roastery price: its actual margin once set
 function roastery_hint(c, key) {
-  const calc = (Math.round(c.shop_calc * 100) / 100).toFixed(2);
-  if (c.shop_saved == null) return `<button type="button" class="sugg-chip" data-fill="${key}|wholesale|${calc}">use €${calc}</button><div class="band-sub" style="color:#d97706">not set</div>`;
+  if (c.shop_saved == null) return `<div class="band-sub" style="color:#d97706">not set</div>`;
   const m = c.shop_saved > 0 ? (c.shop_saved - c.cost) / c.shop_saved : null;
   return `<div class="band-sub" style="${m != null && m < 0 ? "color:#dc2626;font-weight:700" : ""}">margin ${pct1(m)}</div>`;
 }
@@ -897,13 +892,7 @@ function refresh_row(cid, size) {
   const c = compute(cid, size);
   if (!tr || !c || c.cost == null) return;
   const hint = document.querySelector(`[data-roastery-hint="${key}"]`);   // not the input — keeps focus
-  if (hint) { hint.innerHTML = roastery_hint(c, key); attach_fill_chips(hint); }
-  const sell_hint = document.querySelector(`[data-sell-hint="${key}"]`);
-  if (sell_hint) {
-    const sugg = round_to((c.band_low + c.band_high) / 2, 0.5).toFixed(2);
-    sell_hint.innerHTML = sell_for(cid, size) == null ? `<button type="button" class="sugg-chip" data-fill="${key}|retail|${sugg}">use €${sugg}</button>` : "";
-    attach_fill_chips(sell_hint);
-  }
+  if (hint) hint.innerHTML = roastery_hint(c, key);
   const tmp = document.createElement("tbody");
   tmp.innerHTML = `<tr>${eval_cells(c, sell_for(cid, size), key)}</tr>`;
   const fresh = [...tmp.firstChild.children];
@@ -991,21 +980,6 @@ function set_draft_price(id, size, field, value) {
   const cur = ((state.final[id] = state.final[id] || {})[size] = state.final[id][size] || { retail: null, wholesale: null });
   cur[field] = value;
 }
-// One-tap fill chips: the suggested shop price (middle of the band, nearest 50c) or the calculated roastery price
-function attach_fill_chips(root) {
-  root.querySelectorAll(".sugg-chip").forEach(chip => {
-    chip.addEventListener("click", () => {
-      const [cid, size, field, val] = chip.dataset.fill.split("|");
-      const id = Number(cid);
-      const input = document.querySelector(`.final-input[data-final="${cid}|${size}|${field}"]`);
-      if (input) input.value = val;
-      set_draft_price(id, size, field, Number(val));
-      mark_coffee_dirty(id);
-      refresh_row(id, size);
-    });
-  });
-}
-
 function attach_final() {
   // Typing a price — update the draft and that row's margins in place (keeps focus)
   document.querySelectorAll(".final-input").forEach(inp => {
@@ -1017,7 +991,6 @@ function attach_final() {
       refresh_row(id, size);
     });
   });
-  attach_fill_chips(document);
   // Fill each ticked size that has NO roastery → shop price with today's calculated one (still needs Save).
   // Prices already set are left alone — change those one at a time with their chip.
   document.querySelectorAll("[data-use-calc]").forEach(btn => btn.addEventListener("click", () => {
