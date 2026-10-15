@@ -486,7 +486,7 @@ function compute_checks() {
   return [
     { name: "Active coffees with no green price", list: no_green, means: "That coffee costs nothing and prices nothing. Enter its green €/kg." },
     { name: "Sizes with no cost", list: no_cost, means: "A size is ticked but the green price or the packaging cost for that size is missing." },
-    { name: "Sizes missing a roastery → shop price", list: no_roastery, means: "Until one is set, the calculated price is used. Type one (or use \"Fill missing roastery prices\"), then save." },
+    { name: "Sizes missing a roastery → shop price", list: no_roastery, means: "Until one is set, the calculated price is used. Type one in, then save." },
     { name: "Roastery → shop price below cost", list: roastery_loss, means: "The roastery loses money on every bag at this price.", bad: true },
     { name: "Sizes missing a shop sell price", list: no_sell, means: "Set a price, or untick that size if you don't sell it." },
     { name: "Shop price below what the shop pays", list: below_shop, means: "Selling at a loss.", bad: true },
@@ -658,7 +658,10 @@ function render() {
           <div class="header-sub">Bear Mrkt · cost, roastery → shop and shop sell prices</div>
         </div>
       </div>
-      <button class="btn-logout" id="logout-btn">Log Out</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a class="btn-logout" href="price-changes.html" style="text-decoration:none">📄 Price changes report</a>
+        <button class="btn-logout" id="logout-btn">Log Out</button>
+      </div>
     </div>
 
     <div class="content">
@@ -848,7 +851,6 @@ function render_results() {
           .map(s => `<div data-how-box="${coffee.id}|${s.label}">${build_how(coffee.id, s.label)}</div>`).join("")}
         <div class="coffee-actions">
           <button class="btn-save" data-save-coffee="${coffee.id}" ${saving?"disabled":""}>${saving?"Saving…":"Save prices"}</button>
-          <button type="button" class="btn-ghost" data-use-calc="${coffee.id}" title="Sizes with no roastery → shop price get today's calculated one (prices already set are left alone)">Fill missing roastery prices</button>
           <span class="coffee-status ${dirty?"dirty":""}">${dirty?"Unsaved changes":""}</span>
         </div>
       </div>`;
@@ -858,7 +860,7 @@ function render_results() {
   attach_final();
 }
 
-// Roastery → shop: the saved price (typed), with today's calculated price to compare / one-tap use
+// Roastery → shop: the saved price (typed); today's calculated price shows faintly while it's empty
 function roastery_cell(c, key) {
   return `
     <div class="your-wrap"><span class="eur-pre">€</span>
@@ -991,17 +993,6 @@ function attach_final() {
       refresh_row(id, size);
     });
   });
-  // Fill each ticked size that has NO roastery → shop price with today's calculated one (still needs Save).
-  // Prices already set are left alone — change those one at a time with their chip.
-  document.querySelectorAll("[data-use-calc]").forEach(btn => btn.addEventListener("click", () => {
-    const id = Number(btn.dataset.useCalc);
-    opts_for(id).sizes.forEach(size => {
-      const c = compute(id, size);
-      if (c && c.cost != null && c.shop_saved == null) set_draft_price(id, size, "wholesale", Math.round(c.shop_calc * 100) / 100);
-    });
-    mark_coffee_dirty(id);
-    render_results();
-  }));
   document.querySelectorAll("[data-save-coffee]").forEach(btn => {
     btn.addEventListener("click", () => save_coffee(Number(btn.dataset.saveCoffee)));
   });

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Price Changes — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    .header { background: #1a1a1a; color: #fff; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
+    .header-logo { font-size: 28px; }
+    .header-title { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+    .header-sub   { font-size: 12px; color: #999; margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
+    .btn-auth { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-auth:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .main { padding: 28px 32px; max-width: 1000px; margin: 0 auto; }
+    .controls { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+    .controls label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #666; margin-bottom: 5px; }
+    .controls input, .controls textarea { padding: 8px 10px; border: 1px solid #e8e6e1; border-radius: 6px; font-size: 14px; font-family: inherit; background: #fff; }
+    .controls textarea { width: 100%; min-height: 54px; resize: vertical; }
+    .seg { display: inline-flex; border: 1px solid #d8d4cc; border-radius: 8px; overflow: hidden; }
+    .seg button { background: #fff; border: none; padding: 8px 14px; font-size: 13px; font-weight: 600; color: #666; cursor: pointer; }
+    .seg button + button { border-left: 1px solid #d8d4cc; }
+    .seg button.on { background: #1a1a1a; color: #fff; }
+    .btn-print { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; margin-left: auto; }
+    .doc { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 28px; }
+    .doc-title { font-size: 22px; font-weight: 800; }
+    .doc-sub { font-size: 13px; color: #666; margin-top: 4px; }
+    .doc-note { margin-top: 14px; padding: 10px 14px; background: #f4f2ed; border-radius: 8px; font-size: 14px; white-space: pre-wrap; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 18px; }
+    th { text-align: left; padding: 9px 10px; background: #f4f2ed; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; }
+    th.num, td.num { text-align: right; }
+    td.num, td.when { white-space: nowrap; }
+    td { padding: 9px 10px; border-top: 1px solid #f0eee9; vertical-align: top; }
+    td.coffee { font-weight: 700; }
+    .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+    .was { color: #999; text-decoration: line-through; }
+    .now { font-weight: 700; }
+    .up { color: #b45309; font-size: 12px; }
+    .down { color: #16a34a; font-size: 12px; }
+    .muted { color: #999; }
+    .new-tag { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: #e7f5ec; color: #16a34a; }
+    .empty { padding: 28px; text-align: center; color: #999; font-style: italic; font-size: 14px; }
+    .doc-foot { margin-top: 18px; font-size: 11px; color: #999; }
+    @media (max-width: 600px) { .header { padding: 16px 20px; flex-wrap: wrap; row-gap: 10px; } .main { padding: 18px 12px; } .doc { padding: 16px; } th, td { padding: 7px 6px; } input, textarea { font-size: 16px !important; } }
+    /* Printing: just the document */
+    @page { size: A4 landscape; margin: 12mm; }
+    @media print {
+      body { background: #fff; }
+      .header, .controls { display: none !important; }
+      .main { padding: 0; max-width: none; }
+      .doc { border: none; padding: 0; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <button class="header-back" id="go-back">← Pricing</button>
+      <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+      <div class="header-logo">📄</div>
+      <div><div class="header-title">Price Changes</div><div class="header-sub">Bear Mrkt · to send out</div></div>
+    </div>
+    <button class="btn-auth" id="auth-btn">Log Out</button>
+  </div>
+  <div class="main" id="main"><div class="empty">Loading…</div></div>
+
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Price changes to send out, built from pricing_price_history (pricing-step2.sql): every saved change to a
+// coffee + size's prices, dated. Two versions:
+//   Website  — shop sell price (the price on the bag, also online)
+//   Dynamics — roastery → shop (what shops are invoiced) and shop sell
+// "Changes": each coffee + size whose price differs between the start and end of the dates picked
+// (was → now). "Full price list": every price as it stood on the "to" date.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SIZE_ORDER = ["100g", "200g", "500g", "1kg", "5kg"];
+const FP_SIZE = { "5kg": "Bar 5kg" };   // FP codes call the 5kg bucket "Bar 5kg"
+
+function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function eur(n) { return n == null ? "—" : "€" + Number(n).toFixed(2); }
+function local_iso(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function nice_date(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T12:00:00");
+  return d.toLocaleDateString("en-IE", { day: "numeric", month: "short", year: "numeric" });
+}
+
+const now = new Date();
+const state = {
+  loaded: false,
+  audience: "website",      // "website" | "dynamics"
+  mode: "changes",          // "changes" | "full"
+  from: local_iso(new Date(now.getFullYear(), now.getMonth(), 1)),
+  to: local_iso(now),
+  note: "",
+  history: {},              // "coffeeId|size" → [{ date, retail, wholesale }] oldest first
+  coffees: {},              // id → name
+  fp: {},                   // "coffeeId|size" → [fp codes]
+};
+
+document.getElementById("go-back").addEventListener("click", () => window.location.href = "pricing.html");
+document.getElementById("auth-btn").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut(); window.location.href = "login.html";
+});
+
+async function fetch_all(build) {
+  const PAGE = 1000, out = [];
+  for (let i = 0; i < 100; i++) {
+    const { data, error } = await build().range(i * PAGE, i * PAGE + PAGE - 1);
+    if (error) throw error;
+    out.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
+  const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+  if (role_row?.role !== "admin") { window.location.href = "index.html"; return; }
+  try {
+    const [hist, coffees, fps] = await Promise.all([
+      fetch_all(() => supabaseClient.from("pricing_price_history")
+        .select("id, coffee_id, bag_size, retail, wholesale, effective_from").order("effective_from").order("id")),
+      fetch_all(() => supabaseClient.from("coffees").select("id, name").order("id")),
+      fetch_all(() => supabaseClient.from("fp_codes").select("fp_code, coffee_id, bag_size, retired_at").order("fp_code")),
+    ]);
+    hist.forEach(h => {
+      (state.history[`${h.coffee_id}|${h.bag_size}`] ||= []).push({
+        date: local_iso(new Date(h.effective_from)),
+        retail:    h.retail    == null ? null : Number(h.retail),
+        wholesale: h.wholesale == null ? null : Number(h.wholesale),
+      });
+    });
+    coffees.forEach(c => { state.coffees[c.id] = c.name; });
+    fps.filter(f => !f.retired_at).forEach(f => {
+      const size = Object.keys(FP_SIZE).find(k => FP_SIZE[k] === f.bag_size) || f.bag_size;
+      (state.fp[`${f.coffee_id}|${size}`] ||= []).push(f.fp_code);
+    });
+  } catch (e) {
+    document.getElementById("main").innerHTML = `<div class="empty">Couldn't load the price history: ${esc(e.message)}<br><br>Has pricing-step2.sql been run?</div>`;
+    return;
+  }
+  state.loaded = true;
+  render();
+})();
+
+// Prices as they stood at the end of `date` (null = not set then)
+function prices_on(list, date) {
+  let row = null;
+  for (const x of list) { if (x.date <= date) row = x; else break; }
+  return row ? { retail: row.retail, wholesale: row.wholesale } : { retail: null, wholesale: null };
+}
+// The last day in [from, to] on which `field` changed
+function changed_on(list, field, from, to) {
+  let prev = null, when = null;
+  for (const x of list) {
+    if (x.date > to) break;
+    if (x.date >= from && (prev == null ? x[field] != null : x[field] !== prev[field])) when = x.date;
+    prev = x;
+  }
+  return when;
+}
+
+function build_rows() {
+  const fields = state.audience === "website" ? ["retail"] : ["wholesale", "retail"];
+  const day_before = (() => { const d = new Date(state.from + "T12:00:00"); d.setDate(d.getDate() - 1); return local_iso(d); })();
+  const rows = [];
+  for (const [key, list] of Object.entries(state.history)) {
+    const [cid, size] = key.split("|");
+    const was = prices_on(list, day_before), now_ = prices_on(list, state.to);
+    let include, when = null;
+    if (state.mode === "full") {
+      include = fields.some(f => now_[f] != null);
+    } else {
+      include = fields.some(f => was[f] !== now_[f]);
+      when = fields.map(f => was[f] !== now_[f] ? changed_on(list, f, state.from, state.to) : null).filter(Boolean).sort().pop() || null;
+    }
+    if (!include) continue;
+    rows.push({ cid, size, name: state.coffees[cid] || `Coffee #${cid}`, fp: (state.fp[key] || []).join(", "), was, now: now_, when });
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name) || SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size));
+  return rows;
+}
+
+function change_html(was, now_) {
+  if (was == null && now_ == null) return `<span class="muted">—</span>`;
+  if (was === now_) return `<span class="muted">no change</span>`;
+  if (was == null) return `<span class="new-tag">NEW</span>`;
+  if (now_ == null) return `<span class="muted">removed</span>`;
+  const d = now_ - was, pct = was ? d / was * 100 : null;
+  return `<span class="${d > 0 ? "up" : "down"}">${d > 0 ? "+" : "−"}€${Math.abs(d).toFixed(2)}${pct != null ? ` (${d > 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%)` : ""}</span>`;
+}
+function price_pair(was, now_) {
+  if (was === now_) return `<span class="now">${eur(now_)}</span>`;
+  return `${was != null ? `<span class="was">${eur(was)}</span> → ` : ""}<span class="now">${eur(now_)}</span>`;
+}
+
+function render() {
+  const main = document.getElementById("main");
+  if (!state.loaded) return;
+  const rows = build_rows();
+  const web = state.audience === "website", full = state.mode === "full";
+  const title = `Bear Mrkt — ${full ? "Price list" : "Price changes"} · ${web ? "Website (shop sell prices)" : "Dynamics (roastery → shop & shop sell)"}`;
+  const period = full ? `Prices as of ${nice_date(state.to)}` : `Changes from ${nice_date(state.from)} to ${nice_date(state.to)}`;
+
+  let head, body;
+  if (web) {
+    head = full
+      ? `<th>Coffee</th><th>Size</th><th>FP codes</th><th class="num">Shop sell price</th>`
+      : `<th>Coffee</th><th>Size</th><th>FP codes</th><th class="num">Shop sell price</th><th class="num">Change</th><th>Changed on</th>`;
+    body = rows.map(r => full
+      ? `<tr><td class="coffee">${esc(r.name)}</td><td>${esc(r.size)}</td><td class="mono">${esc(r.fp) || "—"}</td><td class="num now">${eur(r.now.retail)}</td></tr>`
+      : `<tr><td class="coffee">${esc(r.name)}</td><td>${esc(r.size)}</td><td class="mono">${esc(r.fp) || "—"}</td>
+           <td class="num">${price_pair(r.was.retail, r.now.retail)}</td><td class="num">${change_html(r.was.retail, r.now.retail)}</td><td class="when">${esc(nice_date(r.when))}</td></tr>`).join("");
+  } else {
+    head = full
+      ? `<th>Coffee</th><th>Size</th><th>FP codes</th><th class="num">Roastery → shop</th><th class="num">Shop sell</th>`
+      : `<th>Coffee</th><th>Size</th><th>FP codes</th><th class="num">Roastery → shop</th><th class="num">Change</th><th class="num">Shop sell</th><th class="num">Change</th><th>Changed on</th>`;
+    body = rows.map(r => full
+      ? `<tr><td class="coffee">${esc(r.name)}</td><td>${esc(r.size)}</td><td class="mono">${esc(r.fp) || "—"}</td><td class="num now">${eur(r.now.wholesale)}</td><td class="num now">${eur(r.now.retail)}</td></tr>`
+      : `<tr><td class="coffee">${esc(r.name)}</td><td>${esc(r.size)}</td><td class="mono">${esc(r.fp) || "—"}</td>
+           <td class="num">${price_pair(r.was.wholesale, r.now.wholesale)}</td><td class="num">${change_html(r.was.wholesale, r.now.wholesale)}</td>
+           <td class="num">${price_pair(r.was.retail, r.now.retail)}</td><td class="num">${change_html(r.was.retail, r.now.retail)}</td><td class="when">${esc(nice_date(r.when))}</td></tr>`).join("");
+  }
+
+  main.innerHTML = `
+    <div class="controls">
+      <div><label>For</label>
+        <div class="seg"><button data-aud="website" class="${web ? "on" : ""}">Website</button><button data-aud="dynamics" class="${!web ? "on" : ""}">Dynamics</button></div></div>
+      <div><label>Show</label>
+        <div class="seg"><button data-mode="changes" class="${!full ? "on" : ""}">Changes only</button><button data-mode="full" class="${full ? "on" : ""}">Full price list</button></div></div>
+      ${full ? "" : `<div><label>From</label><input type="date" id="from" value="${state.from}" /></div>`}
+      <div><label>${full ? "Prices as of" : "To"}</label><input type="date" id="to" value="${state.to}" /></div>
+      <button class="btn-print" id="print">🖨️ Print / save as PDF</button>
+      <div style="flex-basis:100%"><label>Note at the top (optional)</label>
+        <textarea id="note" placeholder="e.g. New prices apply from Monday 3 November.">${esc(state.note)}</textarea></div>
+    </div>
+
+    <div class="doc">
+      <div class="doc-title">${esc(title)}</div>
+      <div class="doc-sub">${esc(period)} · ${rows.length} item${rows.length === 1 ? "" : "s"} · prices in euro</div>
+      ${state.note.trim() ? `<div class="doc-note">${esc(state.note.trim())}</div>` : ""}
+      ${rows.length
+        ? `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+        : `<div class="empty">${full ? "No prices saved as of that date." : "No price changes between those dates."}</div>`}
+      <div class="doc-foot">Prepared ${esc(nice_date(local_iso(new Date())))} from the RoasterHub Pricing page.</div>
+    </div>`;
+
+  main.querySelectorAll("[data-aud]").forEach(b => b.addEventListener("click", () => { state.audience = b.dataset.aud; render(); }));
+  main.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => { state.mode = b.dataset.mode; render(); }));
+  document.getElementById("from")?.addEventListener("change", e => { state.from = e.target.value || state.from; render(); });
+  document.getElementById("to")?.addEventListener("change", e => { state.to = e.target.value || state.to; render(); });
+  const note = document.getElementById("note");
+  note.addEventListener("input", () => {
+    state.note = note.value;
+    const doc_note = document.querySelector(".doc-note");
+    if (doc_note && state.note.trim()) doc_note.textContent = state.note.trim();
+    else render_keep_note_focus();
+  });
+  document.getElementById("print").addEventListener("click", () => window.print());
+}
+// Adding / removing the note box redraws the page; put the caret back where it was
+function render_keep_note_focus() {
+  const pos = document.getElementById("note")?.selectionStart ?? state.note.length;
+  render();
+  const n = document.getElementById("note");
+  n.focus(); n.setSelectionRange(pos, pos);
+}
+</script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
+</body>
+</html>
