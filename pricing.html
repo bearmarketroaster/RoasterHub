@@ -445,10 +445,6 @@ function saved_price(coffeeId, size, field) {
 }
 function sell_for(coffeeId, size)     { return saved_price(coffeeId, size, "retail"); }      // shop sell (bag, online)
 function roastery_for(coffeeId, size) { return saved_price(coffeeId, size, "wholesale"); }   // roastery → shop
-// Saved roastery → shop price no longer what the maths gives (e.g. green price changed) — 5c tolerance
-function roastery_out_of_step(c) {
-  return c && c.shop_saved != null && Math.abs(c.shop_saved - c.shop_calc) >= 0.05;
-}
 
 // ── Prices on a past date (Revenue & Profit) ────────────────────────────────
 // A saved price as it stood on `date`: the latest change on or before it. Sales from before prices were
@@ -472,7 +468,7 @@ function green_on(coffeeId, date) {
 
 // ── Checks (the sheet's Checks tab) ─────────────────────────────────────────
 function compute_checks() {
-  const no_green = [], no_cost = [], no_roastery = [], roastery_step = [], roastery_loss = [], no_sell = [], below_shop = [], out_band = [];
+  const no_green = [], no_cost = [], no_roastery = [], roastery_loss = [], no_sell = [], below_shop = [], out_band = [];
   state.coffees.forEach(coffee => {
     if (!green_for(coffee.id)) no_green.push(coffee.name);
     opts_for(coffee.id).sizes.forEach(size => {
@@ -480,10 +476,7 @@ function compute_checks() {
       const c = compute(coffee.id, size);
       if (!c || c.cost == null) no_cost.push(label);
       else if (c.shop_saved == null) no_roastery.push(`${label} (calculated ${eur(c.shop_calc)})`);
-      else {
-        if (c.shop_saved < c.cost) roastery_loss.push(`${label} (${eur(c.shop_saved)} < cost ${eur(c.cost)})`);
-        if (roastery_out_of_step(c)) roastery_step.push(`${label}: saved ${eur(c.shop_saved)}, maths now ${eur(c.shop_calc)}`);
-      }
+      else if (c.shop_saved < c.cost) roastery_loss.push(`${label} (${eur(c.shop_saved)} < cost ${eur(c.cost)})`);
       const sell = sell_for(coffee.id, size);
       if (sell == null) { no_sell.push(label); return; }
       const e = evaluate(c, sell);
@@ -495,9 +488,8 @@ function compute_checks() {
   return [
     { name: "Active coffees with no green price", list: no_green, means: "That coffee costs nothing and prices nothing. Enter its green €/kg." },
     { name: "Sizes with no cost", list: no_cost, means: "A size is ticked but the green price or the packaging cost for that size is missing." },
-    { name: "Sizes missing a roastery → shop price", list: no_roastery, means: "Until it's saved, the calculated price is used. Tap \"use €…\" (or \"Use all calculated\") and save." },
+    { name: "Sizes missing a roastery → shop price", list: no_roastery, means: "Until one is set, the calculated price is used. Type one, tap \"use €…\" or \"Fill missing roastery prices\", then save." },
     { name: "Roastery → shop price below cost", list: roastery_loss, means: "The roastery loses money on every bag at this price.", bad: true },
-    { name: "Roastery → shop price out of step with cost", list: roastery_step, means: "The saved price is no longer what the maths gives — usually the green price changed. Update it, or leave it if that's deliberate." },
     { name: "Sizes missing a shop sell price", list: no_sell, means: "Set a price, or untick that size if you don't sell it." },
     { name: "Shop price below what the shop pays", list: below_shop, means: "Selling at a loss.", bad: true },
     { name: "Combined margin outside the target band", list: out_band, means: "Not necessarily wrong — but each one should be a decision rather than an accident." },
@@ -545,9 +537,9 @@ function build_how(cid, size) {
       ${step("3", `Roasted ${d4(c.roasted)} × ${SIZE_KG[size]}kg = ${d4(c.roasted * SIZE_KG[size])} coffee + ${d4(c.packaging)} packaging <span style="color:#999">(${c.packaging_source === "Standard" ? `standard ${esc(size)} bag` : esc(c.packaging_source)})</span> = cost <b>${eur(c.cost)}</b>`)}
       ${step("4", `Cost ÷ (1 − ${m}% roastery margin) = ${d4(raw_shop)}${rounding ? `, ${rounding}` : ""} = calculated roastery → shop <b>${eur(c.shop_calc)}</b>`
         + (c.shop_saved == null
-            ? ` <span style="color:#d97706">— not saved yet, so this is what's used</span>`
-            : `<br>Saved roastery → shop price: <b>${eur(c.shop_saved)}</b>${roastery_out_of_step(c) ? ` <span style="color:#d97706">— differs from today's calculation</span>` : ""}`)
-        + ` <span style="color:#999">— roastery keeps ${eur(c.shop - c.cost)} (${pct1((c.shop - c.cost) / c.shop)} margin)</span>`)}
+            ? ` <span style="color:#d97706">— no price set yet, so this is what's used</span>`
+            : `<br>Your roastery → shop price: <b>${eur(c.shop_saved)}</b>`)
+        + ` <span style="color:#999">— roastery keeps ${eur(c.shop - c.cost)} per bag = <b style="color:#444">${pct1((c.shop - c.cost) / c.shop)}</b> margin</span>`)}
       ${step("5", `Target band: cost ÷ (1 − ${low}%) = <b>${eur(c.band_low)}</b> up to cost ÷ (1 − ${high}%) = <b>${eur(c.band_high)}</b>`)}
       ${e ? `
         ${step("6", `Shop sell <b>${eur(sell)}</b> — shop margin = (${eur(sell)} − ${eur(c.shop)}) ÷ ${eur(sell)} = <b>${pct1(e.shop_margin)}</b> <span style="color:#999">— shop keeps ${eur(sell - c.shop)}</span>`)}
@@ -828,7 +820,7 @@ function render_results() {
             <div class="your-wrap"><span class="eur-pre">€</span>
               <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${key}|retail" value="${money_val(sell)}" placeholder="—" />
               <button type="button" class="how-btn ${open ? "on" : ""}" data-how="${key}" title="How this price is worked out">How?</button></div>
-            <button type="button" class="sugg-chip" data-fill="${key}|retail|${sugg.toFixed(2)}">use €${sugg.toFixed(2)}</button>
+            <div data-sell-hint="${key}">${sell == null ? `<button type="button" class="sugg-chip" data-fill="${key}|retail|${sugg.toFixed(2)}">use €${sugg.toFixed(2)}</button>` : ""}</div>
           </td>
           ${eval_cells(c, sell, key)}
         </tr>`;
@@ -877,11 +869,12 @@ function roastery_cell(c, key) {
       <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${key}|wholesale" value="${money_val(c.shop_saved)}" placeholder="${c.shop_calc.toFixed(2)}" /></div>
     <div data-roastery-hint="${key}">${roastery_hint(c, key)}</div>`;
 }
+// Under the roastery price: its actual margin once set; a starting suggestion only while it's empty
 function roastery_hint(c, key) {
   const calc = (Math.round(c.shop_calc * 100) / 100).toFixed(2);
-  if (c.shop_saved == null) return `<button type="button" class="sugg-chip" data-fill="${key}|wholesale|${calc}">use €${calc}</button><div class="band-sub" style="color:#d97706">not saved</div>`;
-  if (roastery_out_of_step(c)) return `<button type="button" class="sugg-chip" data-fill="${key}|wholesale|${calc}">maths now €${calc}</button>`;
-  return `<div class="band-sub">matches maths</div>`;
+  if (c.shop_saved == null) return `<button type="button" class="sugg-chip" data-fill="${key}|wholesale|${calc}">use €${calc}</button><div class="band-sub" style="color:#d97706">not set</div>`;
+  const m = c.shop_saved > 0 ? (c.shop_saved - c.cost) / c.shop_saved : null;
+  return `<div class="band-sub" style="${m != null && m < 0 ? "color:#dc2626;font-weight:700" : ""}">margin ${pct1(m)}</div>`;
 }
 
 // The four cells that depend on the sell price — redrawn in place while typing
@@ -905,6 +898,12 @@ function refresh_row(cid, size) {
   if (!tr || !c || c.cost == null) return;
   const hint = document.querySelector(`[data-roastery-hint="${key}"]`);   // not the input — keeps focus
   if (hint) { hint.innerHTML = roastery_hint(c, key); attach_fill_chips(hint); }
+  const sell_hint = document.querySelector(`[data-sell-hint="${key}"]`);
+  if (sell_hint) {
+    const sugg = round_to((c.band_low + c.band_high) / 2, 0.5).toFixed(2);
+    sell_hint.innerHTML = sell_for(cid, size) == null ? `<button type="button" class="sugg-chip" data-fill="${key}|retail|${sugg}">use €${sugg}</button>` : "";
+    attach_fill_chips(sell_hint);
+  }
   const tmp = document.createElement("tbody");
   tmp.innerHTML = `<tr>${eval_cells(c, sell_for(cid, size), key)}</tr>`;
   const fresh = [...tmp.firstChild.children];
