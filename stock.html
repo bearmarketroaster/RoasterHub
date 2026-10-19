@@ -91,7 +91,8 @@ const LOW_STOCK_KG = 20;
 const state = {
   tab: 0,
   coffees: [],
-  coffees_obj: [],        // [{id, name}] for the contract green-coffee picker
+  coffees_obj: [],        // [{id, name, retired_at}] every coffee — for names
+  active_coffees_obj: [], // [{id, name}] not retired — for the coffee pickers
   stock_items: [],
   deliveries: [],
   adjustments: [],
@@ -146,9 +147,12 @@ function coffee_id_by_name(name) { const c = state.coffees_obj.find(x => x.name 
 function contract_remaining(c) { return Number(c.bag_count||0) - Number(state.contract_delivered[c.id]||0); }
 
 async function load_data() {
-  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name").order("name");
+  // All coffees (retired too) so past deliveries and contracts still show a name; the pickers offer
+  // active coffees only
+  const { data: coffees_data } = await supabaseClient.from("coffees").select("id, name, retired_at").order("name");
   state.coffees = (coffees_data || []).map(c => c.name);
   state.coffees_obj = coffees_data || [];
+  state.active_coffees_obj = state.coffees_obj.filter(c => !c.retired_at);
 
   // Green now lives in green_deliveries + green_movements, with the balance DERIVED by
   // v_green_stock rather than stored. See sql/green_schema.sql. These are mapped into the
@@ -868,7 +872,7 @@ function build_delivery_item_row(item, i) {
         <div><label class="lbl">Master Coffee Name *</label>
           <select class="item-coffee" data-idx="${i}">
             <option value="">— Select —</option>
-            ${state.coffees_obj.map(c=>`<option value="${c.id}" ${String(item.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
+            ${state.active_coffees_obj.map(c=>`<option value="${c.id}" ${String(item.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Green Name</label><input class="item-green-name" data-idx="${i}" value="${esc(item.green_name||"")}" placeholder="e.g. Ethiopia Yirgacheffe Kochere Gr.1" /></div>
@@ -900,7 +904,7 @@ function build_contracts() {
         <div><label class="lbl">Green Coffee *</label>
           <select id="con-coffee">
             <option value="">— Select —</option>
-            ${state.coffees_obj.map(c=>`<option value="${c.id}" ${String(contract.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
+            ${state.active_coffees_obj.map(c=>`<option value="${c.id}" ${String(contract.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Total Bags *</label><input type="number" inputmode="decimal" id="con-bags" value="${esc(contract.bag_count)}" placeholder="e.g. 275" /></div>
@@ -1021,7 +1025,7 @@ function build_adjustments() {
         <div><label class="lbl">Coffee *</label>
           <select id="adj-coffee">
             <option value="">— Select coffee —</option>
-            ${state.coffees_obj.map(c=>`<option value="${c.id}" ${String(adj.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
+            ${state.active_coffees_obj.map(c=>`<option value="${c.id}" ${String(adj.coffee_id)===String(c.id)?"selected":""}>${esc(c.name)}</option>`).join("")}
           </select>
         </div>
         <div><label class="lbl">Movement type *</label>
@@ -1068,7 +1072,8 @@ function build_adjustments() {
 function build_staff() {
   const s = state.ui.staff;
   // Coffees available = those that have an active container with stock
-  const coffees_with_stock = [...new Set(state.containers.map(c => c.coffee_id).filter(id => id != null))]
+  const active_ids = new Set(state.active_coffees_obj.map(c => c.id));
+  const coffees_with_stock = [...new Set(state.containers.map(c => c.coffee_id).filter(id => id != null && active_ids.has(id)))]
     .map(id => ({ id, name: coffee_name_by_id(id) })).sort((a, b) => a.name.localeCompare(b.name));
   const staff_coffee_id = cid(s.coffee_id);
   // Containers matching the selected coffee, oldest fill first (FIFO).
