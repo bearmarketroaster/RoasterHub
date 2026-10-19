@@ -49,6 +49,10 @@
     .tag-wait { background: #fff7ed; color: #d97706; }
     .empty { padding: 26px; text-align: center; color: #888; font-size: 14px; }
     .near { margin-top: 10px; font-size: 13px; color: #555; }
+    .seg { display: inline-flex; border: 1px solid #d8d4cc; border-radius: 8px; overflow: hidden; }
+    .seg button { background: #fff; border: none; padding: 8px 14px; font-size: 13px; font-weight: 600; color: #666; cursor: pointer; }
+    .seg button + button { border-left: 1px solid #d8d4cc; }
+    .seg button.on { background: #1a1a1a; color: #fff; }
     .near button { margin: 4px 6px 0 0; background: #f4f2ed; border: 1px solid #e0ddd6; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
     @media (max-width: 600px) { .header { padding: 16px 20px; flex-wrap: wrap; row-gap: 10px; } .main { padding: 18px 12px; } .doc { padding: 14px; } input, select { font-size: 16px !important; } }
     @page { size: A4; margin: 12mm; }
@@ -102,7 +106,9 @@ const state = {
   loaded: false,
   coffees: [],          // [{ id, name, retired_at }]
   shops: [],            // [master_name]
-  q: { date: params.get("date") || "", coffee_id: params.get("coffee") || "", shop: params.get("shop") || "" },
+  mode: params.get("cropster") ? "cropster" : "date",   // "date" = date + coffee + location · "cropster" = backtrace
+  q: { date: params.get("date") || "", coffee_id: params.get("coffee") || "", shop: params.get("shop") || "",
+       cropster: params.get("cropster") || "" },
   busy: false,
   result: null,         // built by run_trace()
   err: "",
@@ -135,7 +141,8 @@ async function fetch_all(build) {
   state.shops = [...new Set((maps || []).map(m => m.master_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   state.loaded = true;
   render();
-  if (state.q.date && state.q.coffee_id && state.q.shop) run_trace();
+  if (state.mode === "cropster" && state.q.cropster) run_cropster();
+  else if (state.q.date && state.q.coffee_id && state.q.shop) run_trace();
 })();
 
 // ── The trace ───────────────────────────────────────────────────────────────
@@ -148,15 +155,7 @@ async function run_trace() {
   try {
     // Every roast of this coffee (with its Cropster batches), its green deliveries and green movements
     const [sessions, deliveries, movements, shop_disp] = await Promise.all([
-      fetch_all(() => supabaseClient.from("roast_sessions")
-        .select("id, date, container_id, fill_id, roasted_weight, is_test, saved_at, roast_batches(batch_number, cropster_id, green_weight)")
-        .eq("coffee_id", coffee_id).order("date").order("id")),
-      fetch_all(() => supabaseClient.from("green_deliveries")
-        .select("id, arrived_on, supplier, origin, green_name, lot_number, ico_number, bags, weight_kg")
-        .eq("coffee_id", coffee_id).order("arrived_on").order("id")),
-      fetch_all(() => supabaseClient.from("green_movements")
-        .select("id, occurred_on, change_kg, kind, delivery_id, roast_session_id")
-        .eq("coffee_id", coffee_id).order("occurred_on").order("id")),
+      ...coffee_data(coffee_id),
       // That location's deliveries on that date (in case the date is the delivery date)
       fetch_all(() => supabaseClient.from("dispatches")
         .select("id, date, shop, dispatch_lines(fill_id)").eq("shop", shop).eq("date", date).order("id")),
@@ -165,7 +164,65 @@ async function run_trace() {
     const by_roast_date = new Set(sessions.filter(s => s.date === date && s.fill_id).map(s => s.fill_id));
     const by_delivery_date = new Set(shop_disp.flatMap(d => (d.dispatch_lines || []).map(l => l.fill_id)).filter(f => f && fills_of_coffee.has(f)));
     const fills = [...new Set([...by_roast_date, ...by_delivery_date])];
+    const why = fill => [by_roast_date.has(fill) ? "roasted that day" : null, by_delivery_date.has(fill) ? `delivered to ${shop} that day` : null].filter(Boolean);
+    const roasts = await trace_fills(fills, { sessions, deliveries, movements }, why);
 
+    // Nothing matched: offer the nearest roast dates of that coffee
+    const near = roasts.length ? [] : [...new Set(sessions.map(s => s.date))]
+      .filter(d => d >= add_days(date, -14) && d <= add_days(date, 14))
+      .sort((a, b) => Math.abs(new Date(a) - new Date(date)) - Math.abs(new Date(b) - new Date(date))).slice(0, 6);
+
+    state.result = { mode: "date", date, coffee_id, shop, roasts, near };
+  } catch (e) {
+    state.err = "Couldn't run the trace: " + (e.message || e);
+  }
+  state.busy = false;
+  render();
+}
+
+// Backtrace from a Cropster roast id: the roast it belongs to (its drum, or every drum of a combined roast),
+// and everywhere that roast went.
+async function run_cropster() {
+  const cid = String(state.q.cropster || "").trim();
+  if (!cid) { state.err = "Type a Cropster id."; render(); return; }
+  state.busy = true; state.err = ""; state.result = null; render();
+  history.replaceState(null, "", `?cropster=${encodeURIComponent(cid)}`);
+  try {
+    const hits = await fetch_all(() => supabaseClient.from("roast_batches")
+      .select("id, roast_session_id, cropster_id, roast_sessions(id, coffee_id, fill_id)").eq("cropster_id", cid).order("id"));
+    const roasts = [];
+    const by_coffee = {};
+    hits.forEach(h => { const s = h.roast_sessions; if (s && s.fill_id && s.coffee_id != null) (by_coffee[s.coffee_id] ||= new Set()).add(s.fill_id); });
+    for (const [coffee_id, fills] of Object.entries(by_coffee)) {
+      const [sessions, deliveries, movements] = await Promise.all(coffee_data(Number(coffee_id)));
+      (await trace_fills([...fills], { sessions, deliveries, movements }, () => [`Cropster ${cid}`]))
+        .forEach(r => roasts.push({ ...r, coffee_id: Number(coffee_id) }));
+    }
+    state.result = { mode: "cropster", cropster: cid, roasts, unlinked: hits.length && !roasts.length };
+  } catch (e) {
+    state.err = "Couldn't run the trace: " + (e.message || e);
+  }
+  state.busy = false;
+  render();
+}
+
+// One coffee's roasts (with Cropster batches), green deliveries and green movements
+function coffee_data(coffee_id) {
+  return [
+    fetch_all(() => supabaseClient.from("roast_sessions")
+      .select("id, date, container_id, fill_id, roasted_weight, is_test, saved_at, roast_batches(batch_number, cropster_id, green_weight)")
+      .eq("coffee_id", coffee_id).order("date").order("id")),
+    fetch_all(() => supabaseClient.from("green_deliveries")
+      .select("id, arrived_on, supplier, origin, green_name, lot_number, ico_number, bags, weight_kg")
+      .eq("coffee_id", coffee_id).order("arrived_on").order("id")),
+    fetch_all(() => supabaseClient.from("green_movements")
+      .select("id, occurred_on, change_kg, kind, delivery_id, roast_session_id")
+      .eq("coffee_id", coffee_id).order("occurred_on").order("id")),
+  ];
+}
+
+// The full card data for a set of roasts (fills) of one coffee: drums, Cropster roasts, green lots, deliveries
+async function trace_fills(fills, { sessions, deliveries, movements }, why) {
     // Where those roasts went: every dispatch line packed from them, with its dispatch
     let lines = [];
     for (let i = 0; i < fills.length; i += 50) {
@@ -192,7 +249,7 @@ async function run_trace() {
     }
 
     const lots = fifo_lots(deliveries, movements);
-    const roasts = fills.map(fill => {
+    return fills.map(fill => {
       const ss = sessions.filter(s => s.fill_id === fill);
       const ls = lines.filter(l => l.fill_id === fill);
       const by_disp = {};
@@ -209,7 +266,7 @@ async function run_trace() {
       ss.forEach(s => (lots.by_session[s.id] || []).forEach(a => { lot_kg[a.lot_key] = (lot_kg[a.lot_key] || 0) + a.kg; }));
       return {
         fill, name: combined[fill] || null,
-        why: [by_roast_date.has(fill) ? "roasted that day" : null, by_delivery_date.has(fill) ? `delivered to ${shop} that day` : null].filter(Boolean),
+        why: why(fill),
         sessions: ss,
         drums: [...new Set(ss.map(s => s.container_id).filter(Boolean))],
         dispatches,
@@ -217,18 +274,6 @@ async function run_trace() {
         green_unallocated: ss.some(s => !(lots.by_session[s.id] || []).length),
       };
     }).sort((a, b) => (a.sessions[0]?.date || "").localeCompare(b.sessions[0]?.date || ""));
-
-    // Nothing matched: offer the nearest roast dates of that coffee
-    const near = roasts.length ? [] : [...new Set(sessions.map(s => s.date))]
-      .filter(d => d >= add_days(date, -14) && d <= add_days(date, 14))
-      .sort((a, b) => Math.abs(new Date(a) - new Date(date)) - Math.abs(new Date(b) - new Date(date))).slice(0, 6);
-
-    state.result = { date, coffee_id, shop, roasts, near };
-  } catch (e) {
-    state.err = "Couldn't run the trace: " + (e.message || e);
-  }
-  state.busy = false;
-  render();
 }
 
 // First-in-first-out green: which delivery (ICO / lot) each roast's green most likely came from.
@@ -267,26 +312,53 @@ function render() {
   const q = state.q;
   const coffee_opts = state.coffees.map(c => `<option value="${c.id}" ${String(q.coffee_id) === String(c.id) ? "selected" : ""}>${esc(c.name)}${c.retired_at ? " (retired)" : ""}</option>`).join("");
   const shop_opts = state.shops.map(s => `<option ${q.shop === s ? "selected" : ""}>${esc(s)}</option>`).join("");
+  const by_date = state.mode === "date";
+  const go = by_date ? run_trace : run_cropster;
   main.innerHTML = `
     <div class="controls">
-      <div><label>Date (roast or delivery)</label><input type="date" id="q-date" value="${esc(q.date)}" /></div>
-      <div><label>Coffee</label><select id="q-coffee"><option value="">— pick —</option>${coffee_opts}</select></div>
-      <div><label>Where it went</label><select id="q-shop"><option value="">— pick —</option>${shop_opts}</select></div>
+      <div><label>Trace by</label>
+        <div class="seg"><button data-mode="date" class="${by_date ? "on" : ""}">Date + coffee + location</button><button data-mode="cropster" class="${!by_date ? "on" : ""}">Cropster id</button></div></div>
+      ${by_date ? `
+        <div><label>Date (roast or delivery)</label><input type="date" id="q-date" value="${esc(q.date)}" /></div>
+        <div><label>Coffee</label><select id="q-coffee"><option value="">— pick —</option>${coffee_opts}</select></div>
+        <div><label>Where it went</label><select id="q-shop"><option value="">— pick —</option>${shop_opts}</select></div>`
+      : `<div><label>Cropster id</label><input id="q-cropster" value="${esc(q.cropster)}" placeholder="e.g. 14231" autocomplete="off" /></div>`}
       <button class="btn" id="q-go" ${state.busy ? "disabled" : ""}>${state.busy ? "Tracing…" : "🔎 Trace"}</button>
       ${state.result && state.result.roasts.length ? `<button class="btn btn-light" id="q-print">🖨️ Print / PDF</button>` : ""}
     </div>
     ${state.err ? `<div class="doc empty" style="color:#dc2626">${esc(state.err)}</div>` : ""}
-    ${state.result ? result_html(state.result) : (state.busy ? "" : `<div class="doc empty">Enter the date, coffee and where it went — e.g. 24/09/2026, Holy Roast, Sandyford.</div>`)}`;
+    ${state.result ? result_html(state.result) : (state.busy ? "" : `<div class="doc empty">${by_date
+      ? "Enter the date, coffee and where it went — e.g. 24/09/2026, Holy Roast, Sandyford."
+      : "Enter a Cropster roast id to see its roast, drum, green and everywhere it went."}</div>`)}`;
 
-  document.getElementById("q-date").addEventListener("change", e => { state.q.date = e.target.value; });
-  document.getElementById("q-coffee").addEventListener("change", e => { state.q.coffee_id = e.target.value; });
-  document.getElementById("q-shop").addEventListener("change", e => { state.q.shop = e.target.value; });
-  document.getElementById("q-go").addEventListener("click", run_trace);
+  main.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => {
+    if (state.mode === b.dataset.mode) return;
+    state.mode = b.dataset.mode; state.result = null; state.err = ""; render();
+  }));
+  document.getElementById("q-date")?.addEventListener("change", e => { state.q.date = e.target.value; });
+  document.getElementById("q-coffee")?.addEventListener("change", e => { state.q.coffee_id = e.target.value; });
+  document.getElementById("q-shop")?.addEventListener("change", e => { state.q.shop = e.target.value; });
+  const cr = document.getElementById("q-cropster");
+  if (cr) {
+    cr.addEventListener("input", e => { state.q.cropster = e.target.value; });
+    cr.addEventListener("keydown", e => { if (e.key === "Enter") { state.q.cropster = cr.value; run_cropster(); } });
+    if (!state.result && !state.busy) cr.focus();
+  }
+  document.getElementById("q-go").addEventListener("click", go);
   document.getElementById("q-print")?.addEventListener("click", () => window.print());
   main.querySelectorAll("[data-near]").forEach(b => b.addEventListener("click", () => { state.q.date = b.dataset.near; run_trace(); }));
 }
 
 function result_html(r) {
+  if (r.mode === "cropster") {
+    const head = `
+      <div class="doc-title">Backtrace — Cropster ${esc(r.cropster)}</div>
+      <div class="doc-sub">${r.roasts.length ? `${esc([...new Set(r.roasts.map(x => state.coffees.find(c => c.id === x.coffee_id)?.name || "Coffee"))].join(", "))} · ` : ""}prepared ${esc(nice_date(local_iso(new Date())))}</div>`;
+    if (!r.roasts.length) return `<div class="doc">${head}<div class="empty">${r.unlinked
+      ? `Cropster ${esc(r.cropster)} is logged, but its roast isn't linked to a drum, so there's nothing to follow.`
+      : `No roast with Cropster id ${esc(r.cropster)} has been logged. Check the number on Cropster.`}</div></div>`;
+    return `<div class="doc">${head}${r.roasts.map(x => roast_html(x, null, r.cropster)).join("")}</div>`;
+  }
   const coffee = state.coffees.find(c => c.id === r.coffee_id)?.name || "Coffee";
   const head = `
     <div class="doc-title">Trace — ${esc(coffee)} · ${esc(r.shop)} · ${esc(nice_date(r.date))}</div>
@@ -300,7 +372,9 @@ function result_html(r) {
   return `<div class="doc">${head}${r.roasts.map(x => roast_html(x, r.shop)).join("")}</div>`;
 }
 
-function roast_html(x, shop) {
+// shop: the location searched for (highlighted), or null for a Cropster backtrace (list everywhere it went)
+// hl_cropster: the Cropster id searched for (its row highlighted)
+function roast_html(x, shop, hl_cropster) {
   const roast_dates = [...new Set(x.sessions.map(s => s.date))];
   const total = x.sessions.reduce((a, s) => a + (Number(s.roasted_weight) || 0), 0);
   const to_shop = x.dispatches.filter(d => d.shop === shop);
@@ -308,7 +382,7 @@ function roast_html(x, shop) {
 
   const cropster = x.sessions.map(s => {
     const bs = (s.roast_batches || []).slice().sort((a, b) => a.batch_number - b.batch_number);
-    return bs.map((b, i) => `<tr>
+    return bs.map((b, i) => `<tr class="${hl_cropster && String(b.cropster_id) === String(hl_cropster) ? "hl" : ""}">
       ${i === 0 ? `<td rowspan="${bs.length}">${esc(nice_date(s.date))}</td><td rowspan="${bs.length}" class="mono">${esc(s.container_id || "—")}</td>` : ""}
       <td class="mono">${esc(b.cropster_id || "—")}</td><td class="num">${b.green_weight != null ? kg(b.green_weight) : "—"}</td>
       ${i === 0 ? `<td rowspan="${bs.length}" class="num">${kg(s.roasted_weight)}${s.is_test ? ` <span class="muted">(test)</span>` : ""}</td>` : ""}
@@ -341,7 +415,7 @@ function roast_html(x, shop) {
   return `
     <div class="roast">
       <div class="roast-head">
-        <div class="roast-name">${x.name ? `🔗 ${esc(x.name)}` : `Roast ${esc(roast_dates.map(nice_date).join(" + "))}`}
+        <div class="roast-name">${x.coffee_id != null ? `${esc(state.coffees.find(c => c.id === x.coffee_id)?.name || "")} · ` : ""}${x.name ? `🔗 ${esc(x.name)}` : `Roast ${esc(roast_dates.map(nice_date).join(" + "))}`}
           ${x.why.map(w => `<span class="why">${esc(w)}</span>`).join("")}</div>
         <div class="mono muted">${esc(x.fill)}</div>
       </div>
@@ -361,14 +435,17 @@ function roast_html(x, shop) {
         ${lots}
         <div class="est">Estimated first-in-first-out: the oldest green in stock is taken to be used first. The app records the coffee used in each roast, not the individual sack.${x.green_unallocated ? " Some of this roast's green deduction couldn't be matched to stock." : ""}</div>
       </div>
-      <div class="sec">
+      ${shop == null ? `<div class="sec">
+        <div class="sec-title">Where this roast went</div>
+        ${x.dispatches.length ? disp_table(x.dispatches) : `<div class="muted" style="font-size:13px">Nothing from this roast has been dispatched yet.</div>`}
+      </div>` : `<div class="sec">
         <div class="sec-title">Delivered to ${esc(shop)}</div>
         ${to_shop.length ? disp_table(to_shop) : `<div class="muted" style="font-size:13px">None of this roast went to ${esc(shop)}${elsewhere.length ? " — see below for where it did go" : ""}.</div>`}
       </div>
       ${elsewhere.length ? `<div class="sec">
         <div class="sec-title">This roast also went to</div>
         ${disp_table(elsewhere)}
-      </div>` : ""}
+      </div>` : ""}`}
     </div>`;
 }
 </script>
