@@ -399,7 +399,8 @@ function result_html(r) {
     if (!r.roasts.length) return `<div class="doc">${head}<div class="empty">${r.unlinked
       ? `Cropster ${esc(r.cropster)} is logged, but its roast isn't linked to a drum, so there's nothing to follow.`
       : `No roast with Cropster id ${esc(r.cropster)} has been logged. Check the number on Cropster.`}</div></div>`;
-    return `<div class="doc">${head}${r.roasts.map((x, i) => simple_html(x, null, i) + details_html(x, i, null, r.cropster)).join("")}</div>`;
+    const groups = merge_roasts(r.roasts);
+    return `<div class="doc">${head}${groups.map((x, i) => simple_html(x, null, i, groups.length)).join("")}</div>`;
   }
   const coffee = state.coffees.find(c => c.id === r.coffee_id)?.name || "Coffee";
   const head = `
@@ -411,13 +412,41 @@ function result_html(r) {
       ${r.near.length ? `<div class="near">${esc(coffee)} roasts close to that date: ${r.near.map(d => `<button data-near="${d}">${esc(nice_date(d))}</button>`).join("")}</div>` : ""}
     </div>`;
   }
-  return `<div class="doc">${head}${r.roasts.map((x, i) => simple_html(x, r.shop, i) + details_html(x, i, r.shop)).join("")}</div>`;
+  const groups = merge_roasts(r.roasts);
+  return `<div class="doc">${head}${groups.map((x, i) => simple_html(x, r.shop, i, groups.length)).join("")}</div>`;
+}
+
+// Roasts of the same coffee made from the same green (same ICO lots / deliveries) read as ONE summary, even
+// across different drums: drums, roast dates and Cropster roasts are listed together, and deliveries from
+// them are added up (two drums on the same delivery become one line).
+function merge_roasts(roasts) {
+  const groups = {};
+  roasts.forEach(x => {
+    const key = `${x.coffee_id ?? state.result?.coffee_id}|${x.lots.map(l => l.key).sort().join(",")}`;
+    const g = groups[key];
+    if (!g) { groups[key] = { ...x, sessions: [...x.sessions], drums: [...x.drums], lots: x.lots.map(l => ({ ...l })),
+                              dispatches: x.dispatches.map(d => ({ ...d, lines: [...d.lines] })) }; return; }
+    g.sessions.push(...x.sessions);
+    x.drums.forEach(d => { if (!g.drums.includes(d)) g.drums.push(d); });
+    x.lots.forEach(l => { const m = g.lots.find(y => y.key === l.key); if (m) m.kg += l.kg; else g.lots.push({ ...l }); });
+    x.dispatches.forEach(d => {
+      const m = g.dispatches.find(y => y.id === d.id);
+      if (m) m.lines.push(...d.lines); else g.dispatches.push({ ...d, lines: [...d.lines] });
+    });
+    g.name = null;   // several roasts now — not one named combined roast
+  });
+  return Object.values(groups).map(g => {
+    g.sessions.sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)));
+    g.drums.sort();
+    g.dispatches.sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)));
+    return g;
+  });
 }
 
 // ── The plain summary (what's shown by default) ─────────────────────────────
 // A few lines anyone can read: coffee + what + where, when and in which drum it was roasted, the Cropster
 // roasts, the green coffee's ICO, and what was delivered when.
-function simple_html(x, shop, i) {
+function simple_html(x, shop, i, count) {
   const coffee = state.coffees.find(c => c.id === (x.coffee_id ?? state.result?.coffee_id))?.name || "Coffee";
   const roast_dates = [...new Set(x.sessions.map(s => s.date))].map(nice_date).join(" and ");
   const cropster = [...new Set(x.sessions.flatMap(s => (s.roast_batches || []).map(b => b.cropster_id)).filter(Boolean))];
@@ -439,8 +468,7 @@ function simple_html(x, shop, i) {
   const deliveries = x.dispatches.map(d => `<b>${esc(what(d))}</b>${shop == null ? ` to <b>${esc(d.shop)}</b>` : ""} on ${esc(nice_date(d.date))}`);
   // The page title already says coffee · place · date; a card only needs a label when there's more than one
   // (or, for a Cropster search, which coffee it is)
-  const many = (state.result?.roasts.length || 0) > 1;
-  const label = shop == null ? coffee : many ? `Batch ${i + 1}` : "";
+  const label = shop == null ? coffee : count > 1 ? `Batch ${i + 1}` : "";
   return `
     <div class="simple">
       ${label ? `<div class="simple-title">${esc(label)}</div>` : ""}
@@ -449,10 +477,6 @@ function simple_html(x, shop, i) {
       <div class="simple-row">Green coffee: ${icos.length ? `ICO ${icos.join("<br>and ICO ")}` : `<span class="muted">not known</span>`}</div>
       <div class="simple-row">${shop == null ? "Went to" : "Delivered"}: ${deliveries.length ? deliveries.join("<br>") : `<span class="muted">not dispatched yet</span>`}</div>
     </div>`;
-}
-// The full breakdown, folded away under "Show details"
-function details_html(x, i, shop, hl_cropster) {
-  return `<details class="more"><summary>Show details</summary>${roast_html(x, shop, hl_cropster)}</details>`;
 }
 
 // What a dispatch line is: Bags (by size), Bucket (5kg), Batch brew, Samples, Write-off (emptied), Bulk.
@@ -486,98 +510,6 @@ function filter_qs() {
   return (state.q.type ? `&type=${encodeURIComponent(state.q.type)}` : "") + (state.q.type === "Bags" && state.q.size ? `&size=${encodeURIComponent(state.q.size)}` : "");
 }
 
-// shop: the location searched for (only its deliveries are listed), or null for a Cropster backtrace (everywhere it went)
-// hl_cropster: the Cropster id searched for (its row highlighted)
-function roast_html(x, shop, hl_cropster) {
-  const roast_dates = [...new Set(x.sessions.map(s => s.date))];
-  const total = x.sessions.reduce((a, s) => a + (Number(s.roasted_weight) || 0), 0);
-  const to_shop = x.dispatches.filter(d => d.shop === shop);
-
-  const cropster = x.sessions.map(s => {
-    const bs = (s.roast_batches || []).slice().sort((a, b) => a.batch_number - b.batch_number);
-    return bs.map((b, i) => `<tr class="${hl_cropster && String(b.cropster_id) === String(hl_cropster) ? "hl" : ""}">
-      ${i === 0 ? `<td rowspan="${bs.length}">${esc(nice_date(s.date))}</td><td rowspan="${bs.length}" class="mono">${esc(s.container_id || "—")}</td>` : ""}
-      <td class="mono">${esc(b.cropster_id || "—")}</td><td class="num">${b.green_weight != null ? kg(b.green_weight) : "—"}</td>
-      ${i === 0 ? `<td rowspan="${bs.length}" class="num">${kg(s.roasted_weight)}${s.is_test ? ` <span class="muted">(test)</span>` : ""}</td>` : ""}
-    </tr>`).join("") || `<tr><td>${esc(nice_date(s.date))}</td><td class="mono">${esc(s.container_id || "—")}</td><td colspan="2" class="muted">no batches recorded</td><td class="num">${kg(s.roasted_weight)}</td></tr>`;
-  }).join("");
-
-  const lots = x.lots.length ? `<table>
-      <thead><tr><th>ICO number</th><th>Lot</th><th>Green</th><th>Supplier</th><th>Arrived</th><th class="num">Green used (est.)</th></tr></thead>
-      <tbody>${x.lots.map(l => l.unknown
-        ? `<tr><td colspan="5" class="muted">Stock from before deliveries were logged / a stock correction (${esc(nice_date(l.date))}) — no ICO recorded</td><td class="num">${kg(l.kg)}</td></tr>`
-        : `<tr><td class="mono"><b>${esc(l.ico || "—")}</b></td><td class="mono">${esc(l.lot || "—")}</td><td>${esc(l.green_name || l.origin || "—")}</td><td>${esc(l.supplier || "—")}</td><td>${esc(nice_date(l.date))}</td><td class="num">${kg(l.kg)}</td></tr>`).join("")}</tbody>
-    </table>`
-    : `<div class="muted" style="font-size:13px">No green deduction recorded for this roast, so its ICO can't be worked out.</div>`;
-
-  // One row per item on each delivery, with its type; the date / place / status show once per delivery
-  const disp_rows = list => list.map(d => {
-    const items = d.lines.slice().sort((a, b) => TYPE_ORDER.indexOf(line_type(a).type) - TYPE_ORDER.indexOf(line_type(b).type));
-    const status = d.confirmed_at ? `<span class="tag tag-ok">delivered ${esc(short_date(d.confirmed_at))}</span>` : `<span class="tag tag-wait">not confirmed</span>`;
-    return items.map((l, i) => {
-      const t = line_type(l);
-      return `<tr class="${i ? "cont" : ""}">
-        <td class="nw">${i ? "" : esc(short_date(d.date))}</td><td class="nw">${i ? "" : `<b>${esc(d.shop || "—")}</b>`}</td>
-        <td><span class="type type-${t.type.toLowerCase().replace(/\W+/g, "-")}">${esc(t.type)}</span></td><td>${esc(t.size)}</td>
-        <td class="num">${t.qty}</td><td class="num">${kg(l.kg)}</td><td class="mono">${esc(l.fp_code || "—")}</td>
-        <td class="nw">${t.type === "Bucket" ? esc(d.buckets.join(", ") || "—") : ""}</td>
-        <td class="nw">${i ? "" : status}</td><td class="mono muted">${i ? "" : esc(d.id)}</td>
-      </tr>`;
-    }).join("");
-  }).join("");
-  const disp_table = list => `<div style="overflow-x:auto"><table>
-      <thead><tr><th>Date</th><th>To</th><th>Type</th><th>Size</th><th class="num">Qty</th><th class="num">Kg</th><th>FP code</th><th>Buckets</th><th>Status</th><th>Ref</th></tr></thead>
-      <tbody>${disp_rows(list)}</tbody></table></div>`;
-
-  // Totals for the whole roast, by type
-  const tot = {};
-  x.dispatches.forEach(d => d.lines.forEach(l => {
-    const t = line_type(l), k = `${t.type}|${t.size}`;
-    const e = (tot[k] = tot[k] || { ...t, qty: 0, kg: 0 });
-    e.qty += Number(t.qty) || 0; e.kg += Number(l.kg) || 0;
-  }));
-  const totals = TYPE_ORDER.map(type => {
-    const rows = Object.values(tot).filter(t => t.type === type);
-    if (!rows.length) return "";
-    const parts = rows.map(t => t.counted ? `${t.qty} × ${t.size}` : kg(t.kg));
-    return `<span>${esc(type === "Bucket" ? "Buckets" : type)}: <b>${esc(parts.join(", "))}</b></span>`;
-  }).filter(Boolean).join("");
-  const sent_kg = x.dispatches.reduce((a, d) => a + d.lines.reduce((b, l) => b + (Number(l.kg) || 0), 0), 0);
-
-  return `
-    <div class="roast">
-      <div class="roast-head">
-        <div class="roast-name">${x.coffee_id != null ? `${esc(state.coffees.find(c => c.id === x.coffee_id)?.name || "")} · ` : ""}${x.name ? `🔗 ${esc(x.name)}` : `Roast ${esc(roast_dates.map(nice_date).join(" + "))}`}
-          ${x.why.map(w => `<span class="why">${esc(w)}</span>`).join("")}</div>
-        <div class="mono muted">${esc(x.fill)}</div>
-      </div>
-      <div class="sec">
-        <div class="kv">
-          <span>Container${x.drums.length === 1 ? "" : "s"}: <b>${esc(x.drums.join(", ") || "—")}</b></span>
-          <span>Roasted: <b>${esc(roast_dates.map(nice_date).join(", "))}</b></span>
-          <span>Total roasted: <b>${kg(total)}</b></span>
-          <span>${shop == null ? "Sent out" : `Sent to ${esc(shop)}`}${state.result?.filter ? ` (${esc(state.result.filter)})` : ""}: <b>${kg(sent_kg)}</b></span>
-        </div>
-        ${totals ? `<div class="kv" style="margin-top:6px">${totals}</div>` : ""}
-      </div>
-      <div class="sec">
-        <div class="sec-title">Cropster roasts</div>
-        <table><thead><tr><th>Roast date</th><th>Drum</th><th>Cropster id</th><th class="num">Green in</th><th class="num">Roasted out</th></tr></thead><tbody>${cropster}</tbody></table>
-      </div>
-      <div class="sec">
-        <div class="sec-title">Green coffee used — ICO / lot</div>
-        ${lots}
-        <div class="est">Estimated first-in-first-out: the oldest green in stock is taken to be used first. The app records the coffee used in each roast, not the individual sack.${x.green_unallocated ? " Some of this roast's green deduction couldn't be matched to stock." : ""}</div>
-      </div>
-      ${shop == null ? `<div class="sec">
-        <div class="sec-title">Where this roast went</div>
-        ${x.dispatches.length ? disp_table(x.dispatches) : `<div class="muted" style="font-size:13px">Nothing from this roast has been dispatched yet.</div>`}
-      </div>` : `<div class="sec">
-        <div class="sec-title">Delivered to ${esc(shop)}</div>
-        ${disp_table(to_shop)}
-      </div>`}
-    </div>`;
-}
 </script>
 <!-- Sends the user to log in if this login is ended elsewhere, then back here -->
 <script src="session-guard.js"></script>
