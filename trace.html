@@ -128,7 +128,8 @@ const state = {
   mode: params.get("cropster") ? "cropster" : "date",   // "date" = date + coffee + location · "cropster" = backtrace
   q: { date: params.get("date") || "", coffee_id: params.get("coffee") || "", shop: params.get("shop") || "",
        cropster: params.get("cropster") || "",
-       type: params.get("type") || "", size: params.get("size") || "" },   // optional filter: what was sent
+       type: params.get("type") || "", size: params.get("size") || "",     // optional filter: what was sent
+       on: params.get("on") === "delivery" ? "delivery" : "roast" },        // the date is a roast date or a delivery date
   busy: false,
   result: null,         // built by run_trace()
   err: "",
@@ -168,35 +169,43 @@ async function fetch_all(build) {
 // ── The trace ───────────────────────────────────────────────────────────────
 async function run_trace() {
   const { date, shop } = state.q;
+  const on = state.q.on === "delivery" ? "delivery" : "roast";   // which date it is: roast date OR delivery date
   const coffee_id = Number(state.q.coffee_id);
   if (!date || !coffee_id || !shop) { state.err = "Pick a date, a coffee and where it went."; render(); return; }
   state.busy = true; state.err = ""; state.result = null; render();
-  history.replaceState(null, "", `?date=${date}&coffee=${coffee_id}&shop=${encodeURIComponent(shop)}${filter_qs()}`);
+  history.replaceState(null, "", `?on=${on}&date=${date}&coffee=${coffee_id}&shop=${encodeURIComponent(shop)}${filter_qs()}`);
   try {
-    // Every roast of this coffee (with its Cropster batches), its green deliveries and green movements
+    // Every roast of this coffee (with its Cropster batches), its green deliveries and green movements, and —
+    // for a delivery date — that location's deliveries in the fortnight either side (the day itself + nearby days
+    // to suggest if nothing matches)
     const [sessions, deliveries, movements, shop_disp] = await Promise.all([
       ...coffee_data(coffee_id),
-      // That location's deliveries on that date (in case the date is the delivery date)
-      fetch_all(() => supabaseClient.from("dispatches")
-        .select("id, date, shop, dispatch_lines(fill_id, bag_size, type, bags)").eq("shop", shop).eq("date", date).order("id")),
+      on === "delivery"
+        ? fetch_all(() => supabaseClient.from("dispatches")
+            .select("id, date, shop, dispatch_lines(fill_id, bag_size, type, bags)").eq("shop", shop)
+            .gte("date", add_days(date, -14)).lte("date", add_days(date, 14)).order("date").order("id"))
+        : Promise.resolve([]),
     ]);
     const fills_of_coffee = new Set(sessions.map(s => s.fill_id).filter(Boolean));
-    const by_roast_date = new Set(sessions.filter(s => s.date === date && s.fill_id).map(s => s.fill_id));
-    const by_delivery_date = new Set(shop_disp.flatMap(d => (d.dispatch_lines || []).filter(line_matches).map(l => l.fill_id)).filter(f => f && fills_of_coffee.has(f)));
-    const fills = [...new Set([...by_roast_date, ...by_delivery_date])];
-    const why = fill => [by_roast_date.has(fill) ? "roasted that day" : null, by_delivery_date.has(fill) ? `delivered to ${shop} that day` : null].filter(Boolean);
-    // Only roasts that actually went to that location (of that type, if filtered) are the answer — and only
-    // their deliveries to that location are listed: a clean report for that location
-    const roasts = (await trace_fills(fills, { sessions, deliveries, movements }, why))
-      .map(x => ({ ...x, dispatches: x.dispatches.filter(d => d.shop === shop) }))
+    // The deliveries of this coffee (of the type, if filtered) to the location, by date
+    const coffee_lines = d => (d.dispatch_lines || []).filter(l => line_matches(l) && l.fill_id && fills_of_coffee.has(l.fill_id));
+    const fills = on === "roast"
+      ? [...new Set(sessions.filter(s => s.date === date && s.fill_id).map(s => s.fill_id))]
+      : [...new Set(shop_disp.filter(d => d.date === date).flatMap(d => coffee_lines(d).map(l => l.fill_id)))];
+    // Only that location's deliveries are listed (a clean report) — for a delivery date, only that day's
+    const roasts = (await trace_fills(fills, { sessions, deliveries, movements }, () => []))
+      .map(x => ({ ...x, dispatches: x.dispatches.filter(d => d.shop === shop && (on === "roast" || d.date === date)) }))
       .filter(x => x.dispatches.length);
 
-    // Nothing matched: offer the nearest roast dates of that coffee
-    const near = roasts.length ? [] : [...new Set(sessions.map(s => s.date))]
-      .filter(d => d >= add_days(date, -14) && d <= add_days(date, 14))
+    // Nothing matched: offer nearby dates of the same kind
+    const dates = on === "roast"
+      ? [...new Set(sessions.map(s => s.date))]
+      : [...new Set(shop_disp.filter(d => coffee_lines(d).length).map(d => d.date))];
+    const near = roasts.length ? [] : dates
+      .filter(d => d !== date && d >= add_days(date, -14) && d <= add_days(date, 14))
       .sort((a, b) => Math.abs(new Date(a) - new Date(date)) - Math.abs(new Date(b) - new Date(date))).slice(0, 6);
 
-    state.result = { mode: "date", date, coffee_id, shop, roasts, near, filter: filter_label() };
+    state.result = { mode: "date", on, date, coffee_id, shop, roasts, near, filter: filter_label() };
   } catch (e) {
     state.err = "Couldn't run the trace: " + (e.message || e);
   }
@@ -353,7 +362,9 @@ function render() {
       <div><label>Trace by</label>
         <div class="seg"><button data-mode="date" class="${by_date ? "on" : ""}">Date + coffee + location</button><button data-mode="cropster" class="${!by_date ? "on" : ""}">Cropster id</button></div></div>
       ${by_date ? `
-        <div><label>Date (roast or delivery)</label><input type="date" id="q-date" value="${esc(q.date)}" /></div>
+        <div><label>The date is the</label>
+          <div class="seg"><button data-on="roast" class="${q.on !== "delivery" ? "on" : ""}">Roast date</button><button data-on="delivery" class="${q.on === "delivery" ? "on" : ""}">Delivery date</button></div></div>
+        <div><label>${q.on === "delivery" ? "Delivery date" : "Roast date"}</label><input type="date" id="q-date" value="${esc(q.date)}" /></div>
         <div><label>Coffee</label><select id="q-coffee"><option value="">— pick —</option>${coffee_opts}</select></div>
         <div><label>Where it went</label><select id="q-shop"><option value="">— pick —</option>${shop_opts}</select></div>`
       : `<div><label>Cropster id</label><input id="q-cropster" value="${esc(q.cropster)}" placeholder="e.g. 14231" autocomplete="off" /></div>`}
@@ -372,6 +383,10 @@ function render() {
     state.mode = b.dataset.mode; state.result = null; state.err = ""; render();
   }));
   document.getElementById("q-date")?.addEventListener("change", e => { state.q.date = e.target.value; });
+  main.querySelectorAll("[data-on]").forEach(b => b.addEventListener("click", () => {
+    if (state.q.on === b.dataset.on) return;
+    state.q.on = b.dataset.on; state.result = null; state.err = ""; render();
+  }));
   document.getElementById("q-coffee")?.addEventListener("change", e => { state.q.coffee_id = e.target.value; });
   document.getElementById("q-shop")?.addEventListener("change", e => { state.q.shop = e.target.value; });
   document.getElementById("q-type").addEventListener("change", e => {
@@ -405,11 +420,13 @@ function result_html(r) {
   const coffee = state.coffees.find(c => c.id === r.coffee_id)?.name || "Coffee";
   const head = `
     <div class="doc-title">${esc(coffee)}${r.filter ? ` · ${esc(r.filter)}` : ""} · ${esc(r.shop)}</div>
-    <div class="doc-sub">Date given: ${esc(nice_date(r.date))} · prepared ${esc(nice_date(local_iso(new Date())))}</div>`;
+    <div class="doc-sub">${r.on === "delivery" ? "Delivered" : "Roasted"}: ${esc(nice_date(r.date))} · prepared ${esc(nice_date(local_iso(new Date())))}</div>`;
   if (!r.roasts.length) {
     return `<div class="doc">${head}
-      <div class="empty">No ${esc(coffee)}${r.filter ? ` ${esc(r.filter)}` : ""} roasted on ${esc(nice_date(r.date))}, or delivered that day, went to ${esc(r.shop)}.</div>
-      ${r.near.length ? `<div class="near">${esc(coffee)} roasts close to that date: ${r.near.map(d => `<button data-near="${d}">${esc(nice_date(d))}</button>`).join("")}</div>` : ""}
+      <div class="empty">${r.on === "delivery"
+        ? `No ${esc(coffee)}${r.filter ? ` ${esc(r.filter)}` : ""} was delivered to ${esc(r.shop)} on ${esc(nice_date(r.date))}.`
+        : `No ${esc(coffee)}${r.filter ? ` ${esc(r.filter)}` : ""} roasted on ${esc(nice_date(r.date))} went to ${esc(r.shop)}.`}</div>
+      ${r.near.length ? `<div class="near">${r.on === "delivery" ? `Deliveries of ${esc(coffee)} to ${esc(r.shop)}` : `${esc(coffee)} roasts`} close to that date: ${r.near.map(d => `<button data-near="${d}">${esc(nice_date(d))}</button>`).join("")}</div>` : ""}
     </div>`;
   }
   const groups = merge_roasts(r.roasts);
