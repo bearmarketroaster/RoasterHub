@@ -183,7 +183,7 @@ const state = {
   how: {},                     // { "coffeeId|size": true } "How?" breakdown open for that size
   dispatches: [],              // for the revenue/profit view
   shop_mappings: [],
-  fp_codes: [],
+  fp_assignments: [],          // FP code → coffee by date (codes can be reused)
   fillmap: {},                 // fill_id -> coffee_id (from roast sessions)
   money_from: "",
   money_to: "",
@@ -345,8 +345,9 @@ async function load() {
   state.dispatches = (disp || []).map(d => ({ ...d, lines: d.dispatch_lines || [] }));
   const { data: maps } = await supabaseClient.from("shop_mappings").select("master_name, kind");
   state.shop_mappings = maps || [];
-  const { data: fps } = await supabaseClient.from("fp_codes").select("fp_code, coffee_id");
-  state.fp_codes = fps || [];
+  // FP code → coffee, by date (a code can be reused for another coffee later)
+  state.fp_assignments = await fetch_all(() => supabaseClient.from("fp_assignments")
+    .select("id, fp_code, coffee_id, effective_start, effective_end").order("id"));
   const rs = await fetch_all(() => supabaseClient.from("roast_sessions").select("id, fill_id, coffee_id").order("date").order("id"));
   const fm = {};
   (rs || []).forEach(r => { if (r.fill_id && r.coffee_id != null && !(r.fill_id in fm)) fm[r.fill_id] = r.coffee_id; });
@@ -547,10 +548,18 @@ function build_how(cid, size) {
 }
 
 // ── Revenue / profit ────────────────────────────────────────────────────────
-function line_coffee_id(l) {
-  let id = null;
-  if (l.fp_code) id = state.fp_codes.find(x => x.fp_code === l.fp_code)?.coffee_id ?? null;
-  if (id == null && l.fill_id) id = state.fillmap[l.fill_id] ?? null;
+// The coffee a dispatch line really was: the roast it was packed from, else what its FP code meant on that
+// date (start inclusive, end exclusive) — never the code's current coffee, which may be a later reuse.
+function fp_coffee_on(fp_code, date) {
+  const a = state.fp_assignments.filter(x => x.fp_code === fp_code
+    && (x.effective_start == null || x.effective_start <= date)
+    && (x.effective_end == null || date < x.effective_end));
+  a.sort((x, y) => (x.effective_start || "").localeCompare(y.effective_start || ""));
+  return a.length ? a[a.length - 1].coffee_id : null;
+}
+function line_coffee_id(l, date) {
+  let id = l.fill_id ? (state.fillmap[l.fill_id] ?? null) : null;
+  if (id == null && l.fp_code) id = fp_coffee_on(l.fp_code, date);
   return state.coffees.some(c => c.id === id) ? id : null;   // active coffees only
 }
 
@@ -560,7 +569,7 @@ function line_coffee_id(l) {
 function value_line(l, channel, date) {
   const bs = l.bag_size;
   if (bs === "30g sample" || bs === "Emptied") return null;     // samples & write-offs aren't sales
-  const cid = line_coffee_id(l);
+  const cid = line_coffee_id(l, date);
   if (cid == null) return { unpriced: true };
   const green = green_on(cid, date);
   const r = roasted_per_kg(cid, green);

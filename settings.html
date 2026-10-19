@@ -638,6 +638,20 @@ async function rename_coffee(id, new_name) {
 
 // ── FP CODES ──────────────────────────────────────────────────────────────────
 async function add_fp_code(coffee_id, fp_code, bag_size) {
+  // A code can only exist once. If it already does: still in use → say where; retired (on its own or with a
+  // finished coffee) → offer to reuse it for this coffee from a date. The old coffee keeps its history.
+  const code = fp_code.toUpperCase();
+  for (const owner of state.coffees) {
+    const f = owner.fp_codes.find(x => x.fp_code === code);
+    if (!f) continue;
+    if (owner.id === coffee_id && !f.retired_at) {
+      state.ui.new_fp[coffee_id] = { ...state.ui.new_fp[coffee_id], err: `${code} is already on this coffee.` }; render(); return;
+    }
+    if (!f.retired_at && !owner.retired_at) {
+      state.ui.new_fp[coffee_id] = { ...state.ui.new_fp[coffee_id], err: `${code} is in use on ${owner.name} (${f.bag_size}). Retire it there first, or use ⇄ Reassign on ${owner.name}.` }; render(); return;
+    }
+    return reuse_fp_code(f, owner, coffee_id, bag_size);
+  }
   const { data, error } = await supabaseClient.from("fp_codes")
     .insert({ coffee_id, fp_code: fp_code.toUpperCase(), bag_size })
     .select().single();
@@ -653,11 +667,46 @@ async function add_fp_code(coffee_id, fp_code, bag_size) {
   render();
 }
 
+// Reuse a retired FP code for another coffee from an effective date. Its earlier versions (the old coffee,
+// their labels) stay in fp_assignments untouched, so everything before the date still resolves to the old
+// coffee; the new version starts with a blank label.
+async function reuse_fp_code(f, old_coffee, coffee_id, bag_size) {
+  const new_coffee = state.coffees.find(c => c.id === coffee_id);
+  const versions = assignments_for(f.fp_code);
+  const last = versions[versions.length - 1];
+  const earliest = [last?.effective_end, last?.effective_start].filter(Boolean).sort().pop() || null;
+  const was = `${old_coffee.name} ${f.bag_size}${old_coffee.retired_at ? " — coffee retired" : " — code retired"}`;
+  const eff = (prompt(
+    `${f.fp_code} was ${was}.\n\nReuse it for ${new_coffee?.name} (${bag_size})?\n\n` +
+    `Everything before the date below stays as ${old_coffee.name}, and its history is kept. The label starts blank.\n\n` +
+    `Reuse from (YYYY-MM-DD):`, today()) || "").trim();
+  if (!eff) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(eff) || isNaN(new Date(eff + "T12:00:00"))) { alert("Please enter the date as YYYY-MM-DD, e.g. " + today()); return; }
+  if (earliest && eff < earliest) { alert(`The date must be on or after ${earliest}, when ${f.fp_code} last belonged to ${old_coffee.name}.`); return; }
+
+  // Close any version still open (a code retired on its own already has its version closed)
+  await close_open_assignment(f.fp_code, eff);
+  const { error } = await supabaseClient.from("fp_codes")
+    .update({ coffee_id, bag_size, retired_at: null, retired_by: null }).eq("id", f.id);
+  if (error) { alert(`Couldn't reuse ${f.fp_code}: ${error.message}`); render(); return; }
+  await open_new_assignment(f.fp_code, coffee_id, bag_size, eff);
+
+  old_coffee.fp_codes = old_coffee.fp_codes.filter(x => x.id !== f.id);
+  Object.assign(f, { coffee_id, bag_size, retired_at: null, retired_by: null });
+  if (new_coffee) { new_coffee.fp_codes.push(f); new_coffee.fp_codes.sort((a,b)=>a.fp_code.localeCompare(b.fp_code)); }
+  state.ui.new_fp[coffee_id] = { fp_code:"", bag_size:"100g", err:"" };
+  render();
+}
+
 async function delete_fp_code(coffee_id, fp_id) {
   const coffee = state.coffees.find(c=>c.id===coffee_id);
   const fp = coffee?.fp_codes.find(f=>f.id===fp_id);
   const fp_code_val = fp?.fp_code;
   if (error_guard_missing(fp_code_val)) return;
+  // Deleting removes every version of the code. If it ever belonged to another coffee, that would wipe the
+  // other coffee's history too — retire it instead.
+  const others = [...new Set(assignments_for(fp_code_val).filter(a => a.coffee_id !== coffee_id).map(a => coffee_name_by_id(a.coffee_id) || "another coffee"))];
+  if (others.length) { alert(`${fp_code_val} also has history under ${others.join(", ")}, so it can't be deleted — that would erase that history.\n\nRetire it instead.`); return; }
   // Permanent delete: clear dependents first (label FKs an assignment), then the code.
   await supabaseClient.from("fp_label_data").delete().eq("fp_code", fp_code_val);
   await supabaseClient.from("fp_assignments").delete().eq("fp_code", fp_code_val);
@@ -1408,6 +1457,7 @@ function build_coffees_section() {
                   <button class="btn btn-amber btn-sm add-fp-btn" data-cid="${c.id}" style="margin-top:18px">+ Add</button>
                 </div>
                 ${nfp.err?`<p class="inline-err">${esc(nfp.err)}</p>`:""}
+                <p class="hint" style="font-size:11px;margin-top:6px">A code from a retired coffee can be reused — type it here and you'll be asked from which date.</p>
               </div>`}
             </div>
 

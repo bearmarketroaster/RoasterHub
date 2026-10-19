@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trace a Coffee — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    .header { background: #1a1a1a; color: #fff; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 4px 0; }
+    .header-back:hover { color: #fff; }
+    .header-logo { font-size: 28px; }
+    .header-title { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+    .header-sub   { font-size: 12px; color: #999; margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
+    .btn-auth { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-auth:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .main { padding: 28px 32px; max-width: 1000px; margin: 0 auto; }
+    .controls { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 16px; margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+    .controls label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #666; margin-bottom: 5px; }
+    .controls input, .controls select { padding: 8px 10px; border: 1px solid #e8e6e1; border-radius: 6px; font-size: 14px; font-family: inherit; background: #fff; min-width: 170px; }
+    .btn { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 700; cursor: pointer; }
+    .btn-light { background: #fff; color: #1a1a1a; border: 1px solid #d8d4cc; }
+    .doc { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 24px; }
+    .doc-title { font-size: 21px; font-weight: 800; }
+    .doc-sub { font-size: 13px; color: #666; margin-top: 4px; }
+    .roast { border: 1px solid #e8e6e1; border-radius: 10px; margin-top: 18px; overflow: hidden; break-inside: avoid; }
+    .roast-head { background: #f4f2ed; padding: 12px 14px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+    .roast-name { font-size: 16px; font-weight: 800; }
+    .why { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: #e7f5ec; color: #16a34a; margin-left: 6px; }
+    .sec { padding: 12px 14px; border-top: 1px solid #f0eee9; }
+    .sec-title { font-size: 11px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: #666; margin-bottom: 8px; }
+    .kv { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 14px; }
+    .kv b { font-weight: 800; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 7px 8px; background: #faf9f7; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; }
+    td { padding: 7px 8px; border-top: 1px solid #f0eee9; vertical-align: top; }
+    td.num, th.num { text-align: right; }
+    .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+    .muted { color: #999; }
+    .hl { background: #fff8e6; }
+    .est { font-size: 11px; color: #999; font-style: italic; margin-top: 6px; }
+    .tag { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+    .tag-ok { background: #e7f5ec; color: #16a34a; }
+    .tag-wait { background: #fff7ed; color: #d97706; }
+    .empty { padding: 26px; text-align: center; color: #888; font-size: 14px; }
+    .near { margin-top: 10px; font-size: 13px; color: #555; }
+    .near button { margin: 4px 6px 0 0; background: #f4f2ed; border: 1px solid #e0ddd6; border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; }
+    @media (max-width: 600px) { .header { padding: 16px 20px; flex-wrap: wrap; row-gap: 10px; } .main { padding: 18px 12px; } .doc { padding: 14px; } input, select { font-size: 16px !important; } }
+    @page { size: A4; margin: 12mm; }
+    @media print {
+      body { background: #fff; }
+      .header, .controls { display: none !important; }
+      .main { padding: 0; max-width: none; }
+      .doc { border: none; padding: 0; }
+      .hl { background: #fff8e6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <button class="header-back" id="go-reports">← Reports</button>
+      <div style="width:1px;height:28px;background:#333;margin:0 4px"></div>
+      <div class="header-logo">🔎</div>
+      <div><div class="header-title">Trace a Coffee</div><div class="header-sub">Bear Mrkt · date + coffee + where it went</div></div>
+    </div>
+    <button class="btn-auth" id="auth-btn">Log Out</button>
+  </div>
+  <div class="main" id="main"><div class="empty">Loading…</div></div>
+
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trace: given a DATE + COFFEE + LOCATION (e.g. 24/09/26, Holy Roast, Sandyford), find the roast(s) and show
+// the drum(s), the Cropster roasts, the green ICO / lot used, and every place that roast was dispatched to.
+// The date may be the roast date (often on the bag) or the delivery date, so both are matched:
+//   • roasts of that coffee ON that date, and
+//   • roasts behind that coffee's deliveries to that location ON that date.
+// A "roast" here is one fill (one drum's roast, or a combined roast across drums).
+// Green lot: the app records which COFFEE a roast used, not which sack — so the ICO / lot is worked out
+// first-in-first-out from the coffee's deliveries and stock movements (oldest green used first).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function kg(n) { return (Math.round((Number(n)||0) * 100) / 100).toFixed(2).replace(/\.?0+$/, "") + "kg"; }
+function nice_date(iso) {
+  if (!iso) return "—";
+  const d = new Date(String(iso).slice(0, 10) + "T12:00:00");
+  return d.toLocaleDateString("en-IE", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+}
+function local_iso(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function add_days(iso, n) { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return local_iso(d); }
+
+const params = new URLSearchParams(location.search);
+const state = {
+  loaded: false,
+  coffees: [],          // [{ id, name, retired_at }]
+  shops: [],            // [master_name]
+  q: { date: params.get("date") || "", coffee_id: params.get("coffee") || "", shop: params.get("shop") || "" },
+  busy: false,
+  result: null,         // built by run_trace()
+  err: "",
+};
+
+document.getElementById("go-reports").addEventListener("click", () => window.location.href = "reports.html");
+document.getElementById("auth-btn").addEventListener("click", async () => {
+  await supabaseClient.auth.signOut(); window.location.href = "login.html";
+});
+
+async function fetch_all(build) {
+  const PAGE = 1000, out = [];
+  for (let i = 0; i < 100; i++) {
+    const { data, error } = await build().range(i * PAGE, i * PAGE + PAGE - 1);
+    if (error) throw error;
+    out.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop() + location.search); return; }
+  const [{ data: coffees }, { data: maps }] = await Promise.all([
+    supabaseClient.from("coffees").select("id, name, retired_at").order("name"),
+    supabaseClient.from("shop_mappings").select("master_name, kind"),
+  ]);
+  state.coffees = coffees || [];
+  state.shops = [...new Set((maps || []).map(m => m.master_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  state.loaded = true;
+  render();
+  if (state.q.date && state.q.coffee_id && state.q.shop) run_trace();
+})();
+
+// ── The trace ───────────────────────────────────────────────────────────────
+async function run_trace() {
+  const { date, shop } = state.q;
+  const coffee_id = Number(state.q.coffee_id);
+  if (!date || !coffee_id || !shop) { state.err = "Pick a date, a coffee and where it went."; render(); return; }
+  state.busy = true; state.err = ""; state.result = null; render();
+  history.replaceState(null, "", `?date=${date}&coffee=${coffee_id}&shop=${encodeURIComponent(shop)}`);
+  try {
+    // Every roast of this coffee (with its Cropster batches), its green deliveries and green movements
+    const [sessions, deliveries, movements, shop_disp] = await Promise.all([
+      fetch_all(() => supabaseClient.from("roast_sessions")
+        .select("id, date, container_id, fill_id, roasted_weight, is_test, saved_at, roast_batches(batch_number, cropster_id, green_weight)")
+        .eq("coffee_id", coffee_id).order("date").order("id")),
+      fetch_all(() => supabaseClient.from("green_deliveries")
+        .select("id, arrived_on, supplier, origin, green_name, lot_number, ico_number, bags, weight_kg")
+        .eq("coffee_id", coffee_id).order("arrived_on").order("id")),
+      fetch_all(() => supabaseClient.from("green_movements")
+        .select("id, occurred_on, change_kg, kind, delivery_id, roast_session_id")
+        .eq("coffee_id", coffee_id).order("occurred_on").order("id")),
+      // That location's deliveries on that date (in case the date is the delivery date)
+      fetch_all(() => supabaseClient.from("dispatches")
+        .select("id, date, shop, dispatch_lines(fill_id)").eq("shop", shop).eq("date", date).order("id")),
+    ]);
+    const fills_of_coffee = new Set(sessions.map(s => s.fill_id).filter(Boolean));
+    const by_roast_date = new Set(sessions.filter(s => s.date === date && s.fill_id).map(s => s.fill_id));
+    const by_delivery_date = new Set(shop_disp.flatMap(d => (d.dispatch_lines || []).map(l => l.fill_id)).filter(f => f && fills_of_coffee.has(f)));
+    const fills = [...new Set([...by_roast_date, ...by_delivery_date])];
+
+    // Where those roasts went: every dispatch line packed from them, with its dispatch
+    let lines = [];
+    for (let i = 0; i < fills.length; i += 50) {
+      lines.push(...await fetch_all(() => supabaseClient.from("dispatch_lines")
+        .select("id, fill_id, container_id, type, bag_size, bags, kg, fp_code, dispatch_id, dispatches(id, shop, date, confirmed_at)")
+        .in("fill_id", fills.slice(i, i + 50)).order("id")));
+    }
+    const dispatch_ids = [...new Set(lines.map(l => l.dispatch_id))];
+    let dbuckets = [];
+    for (let i = 0; i < dispatch_ids.length; i += 100) {
+      const chunk = dispatch_ids.slice(i, i + 100);
+      dbuckets.push(...await fetch_all(() => supabaseClient.from("dispatch_buckets").select("id, dispatch_id, bucket_id").in("dispatch_id", chunk).order("id")));
+    }
+    const bucket_ids = [...new Set(dbuckets.map(b => b.bucket_id))];
+    const bucket_names = {};
+    if (bucket_ids.length) {
+      const { data: bk } = await supabaseClient.from("buckets").select("id, name").in("id", bucket_ids);
+      (bk || []).forEach(b => { bucket_names[b.id] = b.name || b.id; });
+    }
+    const combined = {};
+    if (fills.length) {
+      const { data: cb } = await supabaseClient.from("combined_batches").select("fill_id, name").in("fill_id", fills);
+      (cb || []).forEach(c => { combined[c.fill_id] = c.name; });
+    }
+
+    const lots = fifo_lots(deliveries, movements);
+    const roasts = fills.map(fill => {
+      const ss = sessions.filter(s => s.fill_id === fill);
+      const ls = lines.filter(l => l.fill_id === fill);
+      const by_disp = {};
+      ls.forEach(l => {
+        const d = l.dispatches || { id: l.dispatch_id };
+        const e = (by_disp[d.id] = by_disp[d.id] || { ...d, lines: [] });
+        e.lines.push(l);
+      });
+      const dispatches = Object.values(by_disp).map(d => ({
+        ...d, buckets: dbuckets.filter(b => b.dispatch_id === d.id).map(b => bucket_names[b.bucket_id] || b.bucket_id),
+      })).sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)));
+      // Green lots behind this roast (FIFO), merged across its roasts
+      const lot_kg = {};
+      ss.forEach(s => (lots.by_session[s.id] || []).forEach(a => { lot_kg[a.lot_key] = (lot_kg[a.lot_key] || 0) + a.kg; }));
+      return {
+        fill, name: combined[fill] || null,
+        why: [by_roast_date.has(fill) ? "roasted that day" : null, by_delivery_date.has(fill) ? `delivered to ${shop} that day` : null].filter(Boolean),
+        sessions: ss,
+        drums: [...new Set(ss.map(s => s.container_id).filter(Boolean))],
+        dispatches,
+        lots: Object.entries(lot_kg).map(([k, v]) => ({ ...lots.lots[k], kg: v })).sort((a, b) => (a.date || "").localeCompare(b.date || "")),
+        green_unallocated: ss.some(s => !(lots.by_session[s.id] || []).length),
+      };
+    }).sort((a, b) => (a.sessions[0]?.date || "").localeCompare(b.sessions[0]?.date || ""));
+
+    // Nothing matched: offer the nearest roast dates of that coffee
+    const near = roasts.length ? [] : [...new Set(sessions.map(s => s.date))]
+      .filter(d => d >= add_days(date, -14) && d <= add_days(date, 14))
+      .sort((a, b) => Math.abs(new Date(a) - new Date(date)) - Math.abs(new Date(b) - new Date(date))).slice(0, 6);
+
+    state.result = { date, coffee_id, shop, roasts, near };
+  } catch (e) {
+    state.err = "Couldn't run the trace: " + (e.message || e);
+  }
+  state.busy = false;
+  render();
+}
+
+// First-in-first-out green: which delivery (ICO / lot) each roast's green most likely came from.
+// Stock arrives as intakes (a delivery) or openings / upward corrections (no lot recorded); every outflow
+// (roast, sample, spill, downward correction) takes the oldest green still in stock.
+function fifo_lots(deliveries, movements) {
+  const lots = {}, queue = [], by_session = {};
+  const del = Object.fromEntries(deliveries.map(d => [d.id, d]));
+  const evs = movements.map(m => ({ ...m, change_kg: Number(m.change_kg) || 0 }))
+    .sort((a, b) => (a.occurred_on || "").localeCompare(b.occurred_on || "") || (b.change_kg > 0) - (a.change_kg > 0) || String(a.id).localeCompare(String(b.id)));
+  for (const m of evs) {
+    if (m.change_kg > 0) {
+      const d = m.delivery_id ? del[m.delivery_id] : null;
+      const key = d ? `D:${d.id}` : `X:${m.id}`;
+      lots[key] = d
+        ? { key, date: d.arrived_on, supplier: d.supplier, ico: d.ico_number, lot: d.lot_number, green_name: d.green_name, origin: d.origin }
+        : { key, date: m.occurred_on, unknown: true, kind: m.kind };
+      queue.push({ key, left: m.change_kg });
+    } else {
+      let need = -m.change_kg;
+      while (need > 1e-9 && queue.length) {
+        const q = queue[0], take = Math.min(q.left, need);
+        if (m.roast_session_id) (by_session[m.roast_session_id] ||= []).push({ lot_key: q.key, kg: take });
+        q.left -= take; need -= take;
+        if (q.left <= 1e-9) queue.shift();
+      }
+    }
+  }
+  return { lots, by_session };
+}
+
+// ── Render ──────────────────────────────────────────────────────────────────
+function render() {
+  const main = document.getElementById("main");
+  if (!state.loaded) return;
+  const q = state.q;
+  const coffee_opts = state.coffees.map(c => `<option value="${c.id}" ${String(q.coffee_id) === String(c.id) ? "selected" : ""}>${esc(c.name)}${c.retired_at ? " (retired)" : ""}</option>`).join("");
+  const shop_opts = state.shops.map(s => `<option ${q.shop === s ? "selected" : ""}>${esc(s)}</option>`).join("");
+  main.innerHTML = `
+    <div class="controls">
+      <div><label>Date (roast or delivery)</label><input type="date" id="q-date" value="${esc(q.date)}" /></div>
+      <div><label>Coffee</label><select id="q-coffee"><option value="">— pick —</option>${coffee_opts}</select></div>
+      <div><label>Where it went</label><select id="q-shop"><option value="">— pick —</option>${shop_opts}</select></div>
+      <button class="btn" id="q-go" ${state.busy ? "disabled" : ""}>${state.busy ? "Tracing…" : "🔎 Trace"}</button>
+      ${state.result && state.result.roasts.length ? `<button class="btn btn-light" id="q-print">🖨️ Print / PDF</button>` : ""}
+    </div>
+    ${state.err ? `<div class="doc empty" style="color:#dc2626">${esc(state.err)}</div>` : ""}
+    ${state.result ? result_html(state.result) : (state.busy ? "" : `<div class="doc empty">Enter the date, coffee and where it went — e.g. 24/09/2026, Holy Roast, Sandyford.</div>`)}`;
+
+  document.getElementById("q-date").addEventListener("change", e => { state.q.date = e.target.value; });
+  document.getElementById("q-coffee").addEventListener("change", e => { state.q.coffee_id = e.target.value; });
+  document.getElementById("q-shop").addEventListener("change", e => { state.q.shop = e.target.value; });
+  document.getElementById("q-go").addEventListener("click", run_trace);
+  document.getElementById("q-print")?.addEventListener("click", () => window.print());
+  main.querySelectorAll("[data-near]").forEach(b => b.addEventListener("click", () => { state.q.date = b.dataset.near; run_trace(); }));
+}
+
+function result_html(r) {
+  const coffee = state.coffees.find(c => c.id === r.coffee_id)?.name || "Coffee";
+  const head = `
+    <div class="doc-title">Trace — ${esc(coffee)} · ${esc(r.shop)} · ${esc(nice_date(r.date))}</div>
+    <div class="doc-sub">${r.roasts.length} roast${r.roasts.length === 1 ? "" : "s"} found · prepared ${esc(nice_date(local_iso(new Date())))}</div>`;
+  if (!r.roasts.length) {
+    return `<div class="doc">${head}
+      <div class="empty">No ${esc(coffee)} was roasted on ${esc(nice_date(r.date))}, and no ${esc(coffee)} was delivered to ${esc(r.shop)} that day.</div>
+      ${r.near.length ? `<div class="near">${esc(coffee)} roasts close to that date: ${r.near.map(d => `<button data-near="${d}">${esc(nice_date(d))}</button>`).join("")}</div>` : ""}
+    </div>`;
+  }
+  return `<div class="doc">${head}${r.roasts.map(x => roast_html(x, r.shop)).join("")}</div>`;
+}
+
+function roast_html(x, shop) {
+  const roast_dates = [...new Set(x.sessions.map(s => s.date))];
+  const total = x.sessions.reduce((a, s) => a + (Number(s.roasted_weight) || 0), 0);
+  const to_shop = x.dispatches.filter(d => d.shop === shop);
+  const elsewhere = x.dispatches.filter(d => d.shop !== shop);
+
+  const cropster = x.sessions.map(s => {
+    const bs = (s.roast_batches || []).slice().sort((a, b) => a.batch_number - b.batch_number);
+    return bs.map((b, i) => `<tr>
+      ${i === 0 ? `<td rowspan="${bs.length}">${esc(nice_date(s.date))}</td><td rowspan="${bs.length}" class="mono">${esc(s.container_id || "—")}</td>` : ""}
+      <td class="mono">${esc(b.cropster_id || "—")}</td><td class="num">${b.green_weight != null ? kg(b.green_weight) : "—"}</td>
+      ${i === 0 ? `<td rowspan="${bs.length}" class="num">${kg(s.roasted_weight)}${s.is_test ? ` <span class="muted">(test)</span>` : ""}</td>` : ""}
+    </tr>`).join("") || `<tr><td>${esc(nice_date(s.date))}</td><td class="mono">${esc(s.container_id || "—")}</td><td colspan="2" class="muted">no batches recorded</td><td class="num">${kg(s.roasted_weight)}</td></tr>`;
+  }).join("");
+
+  const lots = x.lots.length ? `<table>
+      <thead><tr><th>ICO number</th><th>Lot</th><th>Green</th><th>Supplier</th><th>Arrived</th><th class="num">Green used (est.)</th></tr></thead>
+      <tbody>${x.lots.map(l => l.unknown
+        ? `<tr><td colspan="5" class="muted">Stock from before deliveries were logged / a stock correction (${esc(nice_date(l.date))}) — no ICO recorded</td><td class="num">${kg(l.kg)}</td></tr>`
+        : `<tr><td class="mono"><b>${esc(l.ico || "—")}</b></td><td class="mono">${esc(l.lot || "—")}</td><td>${esc(l.green_name || l.origin || "—")}</td><td>${esc(l.supplier || "—")}</td><td>${esc(nice_date(l.date))}</td><td class="num">${kg(l.kg)}</td></tr>`).join("")}</tbody>
+    </table>`
+    : `<div class="muted" style="font-size:13px">No green deduction recorded for this roast, so its ICO can't be worked out.</div>`;
+
+  const disp_rows = list => list.map(d => {
+    const parts = d.lines.map(l => l.bag_size === "Bar 5kg" ? `${l.bags || 1} × 5kg bucket` : l.type === "bulk" ? `${kg(l.kg)} ${esc(l.bag_size || "bulk")}` : `${l.bags || "?"} × ${esc(l.bag_size || "?")}`);
+    const total_kg = d.lines.reduce((a, l) => a + (Number(l.kg) || 0), 0);
+    const fps = [...new Set(d.lines.map(l => l.fp_code).filter(Boolean))];
+    return `<tr class="${d.shop === shop ? "hl" : ""}">
+      <td>${esc(nice_date(d.date))}</td><td><b>${esc(d.shop || "—")}</b></td><td>${parts.join(", ")}</td><td class="num">${kg(total_kg)}</td>
+      <td class="mono">${esc(fps.join(", ") || "—")}</td><td>${esc(d.buckets.join(", ") || "—")}</td>
+      <td>${d.confirmed_at ? `<span class="tag tag-ok">delivered ${esc(nice_date(d.confirmed_at).replace(/^\w+ /, ""))}</span>` : `<span class="tag tag-wait">not confirmed</span>`}</td>
+      <td class="mono muted">${esc(d.id)}</td>
+    </tr>`;
+  }).join("");
+  const disp_table = list => `<table>
+      <thead><tr><th>Date</th><th>To</th><th>What</th><th class="num">Kg</th><th>FP codes</th><th>Buckets on delivery</th><th>Status</th><th>Ref</th></tr></thead>
+      <tbody>${disp_rows(list)}</tbody></table>`;
+
+  return `
+    <div class="roast">
+      <div class="roast-head">
+        <div class="roast-name">${x.name ? `🔗 ${esc(x.name)}` : `Roast ${esc(roast_dates.map(nice_date).join(" + "))}`}
+          ${x.why.map(w => `<span class="why">${esc(w)}</span>`).join("")}</div>
+        <div class="mono muted">${esc(x.fill)}</div>
+      </div>
+      <div class="sec">
+        <div class="kv">
+          <span>Container${x.drums.length === 1 ? "" : "s"}: <b>${esc(x.drums.join(", ") || "—")}</b></span>
+          <span>Roasted: <b>${esc(roast_dates.map(nice_date).join(", "))}</b></span>
+          <span>Total roasted: <b>${kg(total)}</b></span>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-title">Cropster roasts</div>
+        <table><thead><tr><th>Roast date</th><th>Drum</th><th>Cropster id</th><th class="num">Green in</th><th class="num">Roasted out</th></tr></thead><tbody>${cropster}</tbody></table>
+      </div>
+      <div class="sec">
+        <div class="sec-title">Green coffee used — ICO / lot</div>
+        ${lots}
+        <div class="est">Estimated first-in-first-out: the oldest green in stock is taken to be used first. The app records the coffee used in each roast, not the individual sack.${x.green_unallocated ? " Some of this roast's green deduction couldn't be matched to stock." : ""}</div>
+      </div>
+      <div class="sec">
+        <div class="sec-title">Delivered to ${esc(shop)}</div>
+        ${to_shop.length ? disp_table(to_shop) : `<div class="muted" style="font-size:13px">None of this roast went to ${esc(shop)}${elsewhere.length ? " — see below for where it did go" : ""}.</div>`}
+      </div>
+      ${elsewhere.length ? `<div class="sec">
+        <div class="sec-title">This roast also went to</div>
+        ${disp_table(elsewhere)}
+      </div>` : ""}
+    </div>`;
+}
+</script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
+</body>
+</html>
