@@ -178,9 +178,11 @@ async function run_trace() {
     const by_delivery_date = new Set(shop_disp.flatMap(d => (d.dispatch_lines || []).filter(line_matches).map(l => l.fill_id)).filter(f => f && fills_of_coffee.has(f)));
     const fills = [...new Set([...by_roast_date, ...by_delivery_date])];
     const why = fill => [by_roast_date.has(fill) ? "roasted that day" : null, by_delivery_date.has(fill) ? `delivered to ${shop} that day` : null].filter(Boolean);
-    let roasts = await trace_fills(fills, { sessions, deliveries, movements }, why);
-    // With a Type filter, only roasts that actually sent that type to that location are the answer
-    if (state.q.type) roasts = roasts.filter(x => x.dispatches.some(d => d.shop === shop));
+    // Only roasts that actually went to that location (of that type, if filtered) are the answer — and only
+    // their deliveries to that location are listed: a clean report for that location
+    const roasts = (await trace_fills(fills, { sessions, deliveries, movements }, why))
+      .map(x => ({ ...x, dispatches: x.dispatches.filter(d => d.shop === shop) }))
+      .filter(x => x.dispatches.length);
 
     // Nothing matched: offer the nearest roast dates of that coffee
     const near = roasts.length ? [] : [...new Set(sessions.map(s => s.date))]
@@ -389,9 +391,7 @@ function result_html(r) {
     <div class="doc-sub">${r.roasts.length} roast${r.roasts.length === 1 ? "" : "s"} found · prepared ${esc(nice_date(local_iso(new Date())))}</div>`;
   if (!r.roasts.length) {
     return `<div class="doc">${head}
-      <div class="empty">${r.filter
-        ? `No ${esc(coffee)} ${esc(r.filter)} roasted on ${esc(nice_date(r.date))} or delivered that day went to ${esc(r.shop)}.`
-        : `No ${esc(coffee)} was roasted on ${esc(nice_date(r.date))}, and no ${esc(coffee)} was delivered to ${esc(r.shop)} that day.`}</div>
+      <div class="empty">No ${esc(coffee)}${r.filter ? ` ${esc(r.filter)}` : ""} roasted on ${esc(nice_date(r.date))}, or delivered that day, went to ${esc(r.shop)}.</div>
       ${r.near.length ? `<div class="near">${esc(coffee)} roasts close to that date: ${r.near.map(d => `<button data-near="${d}">${esc(nice_date(d))}</button>`).join("")}</div>` : ""}
     </div>`;
   }
@@ -429,13 +429,12 @@ function filter_qs() {
   return (state.q.type ? `&type=${encodeURIComponent(state.q.type)}` : "") + (state.q.type === "Bags" && state.q.size ? `&size=${encodeURIComponent(state.q.size)}` : "");
 }
 
-// shop: the location searched for (highlighted), or null for a Cropster backtrace (list everywhere it went)
+// shop: the location searched for (only its deliveries are listed), or null for a Cropster backtrace (everywhere it went)
 // hl_cropster: the Cropster id searched for (its row highlighted)
 function roast_html(x, shop, hl_cropster) {
   const roast_dates = [...new Set(x.sessions.map(s => s.date))];
   const total = x.sessions.reduce((a, s) => a + (Number(s.roasted_weight) || 0), 0);
   const to_shop = x.dispatches.filter(d => d.shop === shop);
-  const elsewhere = x.dispatches.filter(d => d.shop !== shop);
 
   const cropster = x.sessions.map(s => {
     const bs = (s.roast_batches || []).slice().sort((a, b) => a.batch_number - b.batch_number);
@@ -460,7 +459,7 @@ function roast_html(x, shop, hl_cropster) {
     const status = d.confirmed_at ? `<span class="tag tag-ok">delivered ${esc(short_date(d.confirmed_at))}</span>` : `<span class="tag tag-wait">not confirmed</span>`;
     return items.map((l, i) => {
       const t = line_type(l);
-      return `<tr class="${d.shop === shop ? "hl" : ""}${i ? " cont" : ""}">
+      return `<tr class="${i ? "cont" : ""}">
         <td class="nw">${i ? "" : esc(short_date(d.date))}</td><td class="nw">${i ? "" : `<b>${esc(d.shop || "—")}</b>`}</td>
         <td><span class="type type-${t.type.toLowerCase().replace(/\W+/g, "-")}">${esc(t.type)}</span></td><td>${esc(t.size)}</td>
         <td class="num">${t.qty}</td><td class="num">${kg(l.kg)}</td><td class="mono">${esc(l.fp_code || "—")}</td>
@@ -500,7 +499,7 @@ function roast_html(x, shop, hl_cropster) {
           <span>Container${x.drums.length === 1 ? "" : "s"}: <b>${esc(x.drums.join(", ") || "—")}</b></span>
           <span>Roasted: <b>${esc(roast_dates.map(nice_date).join(", "))}</b></span>
           <span>Total roasted: <b>${kg(total)}</b></span>
-          <span>Sent out${state.result?.filter ? ` (${esc(state.result.filter)})` : ""}: <b>${kg(sent_kg)}</b></span>
+          <span>${shop == null ? "Sent out" : `Sent to ${esc(shop)}`}${state.result?.filter ? ` (${esc(state.result.filter)})` : ""}: <b>${kg(sent_kg)}</b></span>
         </div>
         ${totals ? `<div class="kv" style="margin-top:6px">${totals}</div>` : ""}
       </div>
@@ -518,12 +517,8 @@ function roast_html(x, shop, hl_cropster) {
         ${x.dispatches.length ? disp_table(x.dispatches) : `<div class="muted" style="font-size:13px">Nothing from this roast has been dispatched yet.</div>`}
       </div>` : `<div class="sec">
         <div class="sec-title">Delivered to ${esc(shop)}</div>
-        ${to_shop.length ? disp_table(to_shop) : `<div class="muted" style="font-size:13px">None of this roast went to ${esc(shop)}${elsewhere.length ? " — see below for where it did go" : ""}.</div>`}
-      </div>
-      ${elsewhere.length ? `<div class="sec">
-        <div class="sec-title">This roast also went to</div>
-        ${disp_table(elsewhere)}
-      </div>` : ""}`}
+        ${disp_table(to_shop)}
+      </div>`}
     </div>`;
 }
 </script>
