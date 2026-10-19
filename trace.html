@@ -477,12 +477,15 @@ function simple_html(x, shop, i, count) {
     d.lines.forEach(l => {
       const t = line_type(l);
       const k = t.type === "Bags" ? `${t.size} bag` : t.type === "Bucket" ? "5kg bucket" : t.type.toLowerCase();
-      const e = (parts[k] = parts[k] || { counted: t.counted, qty: 0, kg: 0 });
+      const e = (parts[k] = parts[k] || { counted: t.counted, qty: 0, kg: 0, order: TYPE_ORDER.indexOf(t.type) * 10 + Math.max(0, BAG_SIZES.indexOf(t.size)) });
       e.qty += Number(t.qty) || 0; e.kg += Number(l.kg) || 0;
     });
-    return Object.entries(parts).map(([k, e]) => e.counted ? `${e.qty} × ${k}${e.qty === 1 ? "" : "s"}` : `${kg(e.kg)} ${k}`).join(", ");
+    // Bags smallest first, then buckets, batch brew, samples
+    return Object.entries(parts).sort((a, b) => a[1].order - b[1].order).map(([k, e]) => e.counted ? `${e.qty} × ${k}${e.qty === 1 ? "" : "s"}` : `${kg(e.kg)} ${k}`).join(", ");
   };
-  const deliveries = x.dispatches.map(d => `<b>${esc(what(d))}</b>${shop == null ? ` to <b>${esc(d.shop)}</b>` : ""} on ${esc(nice_date(d.date))}`);
+  const deliveries = x.dispatches.map(d => `<b>${esc(what(d))}</b> on ${esc(nice_date(d.date))}`);
+  // Cropster search: just the forms the batch went into, added up across everything sent out (write-offs aside)
+  const went_into = what({ lines: x.dispatches.flatMap(d => d.lines).filter(l => line_type(l).type !== "Write-off") });
   // The page title already says coffee · place · date; a card only needs a label when there's more than one
   // (or, for a Cropster search, which coffee it is)
   const label = shop == null ? coffee : count > 1 ? `Batch ${i + 1}` : "";
@@ -492,7 +495,9 @@ function simple_html(x, shop, i, count) {
       <div class="simple-row">Roasted <b>${esc(roast_dates)}</b> in ${x.drums.length > 1 ? "drums" : "drum"} <b>${esc(x.drums.join(", ") || "—")}</b>${x.name ? ` <span class="muted">(combined roast)</span>` : ""}</div>
       <div class="simple-row">Cropster roast${cropster.length === 1 ? "" : "s"}: <b>${esc(cropster.join(", ") || "none recorded")}</b></div>
       <div class="simple-row">Green coffee: ${icos.length ? `ICO ${icos.join("<br>and ICO ")}` : `<span class="muted">not known</span>`}</div>
-      <div class="simple-row">${shop == null ? "Went to" : "Delivered"}: ${deliveries.length ? deliveries.join("<br>") : `<span class="muted">not dispatched yet</span>`}</div>
+      ${shop == null
+        ? `<div class="simple-row">Went into: ${went_into ? `<b>${esc(went_into)}</b>` : `<span class="muted">nothing packed from it yet</span>`}</div>`
+        : `<div class="simple-row">Delivered: ${deliveries.length ? deliveries.join("<br>") : `<span class="muted">not dispatched yet</span>`}</div>`}
     </div>`;
 }
 
