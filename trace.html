@@ -43,6 +43,14 @@
     .mono { font-family: ui-monospace, monospace; font-size: 12px; }
     .muted { color: #999; }
     .hl { background: #fff8e6; }
+    tr.cont td { border-top: 1px dashed #f0eee9; }
+    td.nw { white-space: nowrap; }
+    .type { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; background: #f0eee9; color: #444; }
+    .type-bags { background: #eef2ff; color: #3730a3; }
+    .type-bucket { background: #e0f2fe; color: #075985; }
+    .type-batch-brew { background: #fef3c7; color: #92400e; }
+    .type-samples { background: #f3e8ff; color: #6b21a8; }
+    .type-write-off { background: #fee2e2; color: #991b1b; }
     .est { font-size: 11px; color: #999; font-style: italic; margin-top: 6px; }
     .tag { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
     .tag-ok { background: #e7f5ec; color: #16a34a; }
@@ -61,7 +69,7 @@
       .header, .controls { display: none !important; }
       .main { padding: 0; max-width: none; }
       .doc { border: none; padding: 0; }
-      .hl { background: #fff8e6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .hl, .type { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   </style>
 </head>
@@ -97,6 +105,10 @@ function nice_date(iso) {
   if (!iso) return "—";
   const d = new Date(String(iso).slice(0, 10) + "T12:00:00");
   return d.toLocaleDateString("en-IE", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+}
+function short_date(iso) {
+  if (!iso) return "—";
+  return new Date(String(iso).slice(0, 10) + "T12:00:00").toLocaleDateString("en-IE", { day: "numeric", month: "short", year: "2-digit" });
 }
 function local_iso(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 function add_days(iso, n) { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + n); return local_iso(d); }
@@ -372,6 +384,19 @@ function result_html(r) {
   return `<div class="doc">${head}${r.roasts.map(x => roast_html(x, r.shop)).join("")}</div>`;
 }
 
+// What a dispatch line is: Bags (by size), Bucket (5kg), Batch brew, Samples, Write-off (emptied), Bulk.
+// counted = sold by the unit (qty × size); otherwise by weight.
+const TYPE_ORDER = ["Bags", "Bucket", "Batch brew", "Samples", "Bulk", "Write-off"];
+function line_type(l) {
+  const bs = l.bag_size || "";
+  if (bs === "Bar 5kg") return { type: "Bucket", size: "5kg", qty: l.bags || 1, counted: true };
+  if (bs === "Batch brew") return { type: "Batch brew", size: "", qty: "", counted: false };
+  if (bs === "30g sample") return { type: "Samples", size: "30g", qty: l.bags || "", counted: true };
+  if (bs === "Emptied") return { type: "Write-off", size: "", qty: "", counted: false };
+  if (l.type === "bulk") return { type: "Bulk", size: bs, qty: "", counted: false };
+  return { type: "Bags", size: bs || "?", qty: l.bags || "", counted: true };
+}
+
 // shop: the location searched for (highlighted), or null for a Cropster backtrace (list everywhere it went)
 // hl_cropster: the Cropster id searched for (its row highlighted)
 function roast_html(x, shop, hl_cropster) {
@@ -397,20 +422,39 @@ function roast_html(x, shop, hl_cropster) {
     </table>`
     : `<div class="muted" style="font-size:13px">No green deduction recorded for this roast, so its ICO can't be worked out.</div>`;
 
+  // One row per item on each delivery, with its type; the date / place / status show once per delivery
   const disp_rows = list => list.map(d => {
-    const parts = d.lines.map(l => l.bag_size === "Bar 5kg" ? `${l.bags || 1} × 5kg bucket` : l.type === "bulk" ? `${kg(l.kg)} ${esc(l.bag_size || "bulk")}` : `${l.bags || "?"} × ${esc(l.bag_size || "?")}`);
-    const total_kg = d.lines.reduce((a, l) => a + (Number(l.kg) || 0), 0);
-    const fps = [...new Set(d.lines.map(l => l.fp_code).filter(Boolean))];
-    return `<tr class="${d.shop === shop ? "hl" : ""}">
-      <td>${esc(nice_date(d.date))}</td><td><b>${esc(d.shop || "—")}</b></td><td>${parts.join(", ")}</td><td class="num">${kg(total_kg)}</td>
-      <td class="mono">${esc(fps.join(", ") || "—")}</td><td>${esc(d.buckets.join(", ") || "—")}</td>
-      <td>${d.confirmed_at ? `<span class="tag tag-ok">delivered ${esc(nice_date(d.confirmed_at).replace(/^\w+ /, ""))}</span>` : `<span class="tag tag-wait">not confirmed</span>`}</td>
-      <td class="mono muted">${esc(d.id)}</td>
-    </tr>`;
+    const items = d.lines.slice().sort((a, b) => TYPE_ORDER.indexOf(line_type(a).type) - TYPE_ORDER.indexOf(line_type(b).type));
+    const status = d.confirmed_at ? `<span class="tag tag-ok">delivered ${esc(short_date(d.confirmed_at))}</span>` : `<span class="tag tag-wait">not confirmed</span>`;
+    return items.map((l, i) => {
+      const t = line_type(l);
+      return `<tr class="${d.shop === shop ? "hl" : ""}${i ? " cont" : ""}">
+        <td class="nw">${i ? "" : esc(short_date(d.date))}</td><td class="nw">${i ? "" : `<b>${esc(d.shop || "—")}</b>`}</td>
+        <td><span class="type type-${t.type.toLowerCase().replace(/\W+/g, "-")}">${esc(t.type)}</span></td><td>${esc(t.size)}</td>
+        <td class="num">${t.qty}</td><td class="num">${kg(l.kg)}</td><td class="mono">${esc(l.fp_code || "—")}</td>
+        <td class="nw">${t.type === "Bucket" ? esc(d.buckets.join(", ") || "—") : ""}</td>
+        <td class="nw">${i ? "" : status}</td><td class="mono muted">${i ? "" : esc(d.id)}</td>
+      </tr>`;
+    }).join("");
   }).join("");
-  const disp_table = list => `<table>
-      <thead><tr><th>Date</th><th>To</th><th>What</th><th class="num">Kg</th><th>FP codes</th><th>Buckets on delivery</th><th>Status</th><th>Ref</th></tr></thead>
-      <tbody>${disp_rows(list)}</tbody></table>`;
+  const disp_table = list => `<div style="overflow-x:auto"><table>
+      <thead><tr><th>Date</th><th>To</th><th>Type</th><th>Size</th><th class="num">Qty</th><th class="num">Kg</th><th>FP code</th><th>Buckets</th><th>Status</th><th>Ref</th></tr></thead>
+      <tbody>${disp_rows(list)}</tbody></table></div>`;
+
+  // Totals for the whole roast, by type
+  const tot = {};
+  x.dispatches.forEach(d => d.lines.forEach(l => {
+    const t = line_type(l), k = `${t.type}|${t.size}`;
+    const e = (tot[k] = tot[k] || { ...t, qty: 0, kg: 0 });
+    e.qty += Number(t.qty) || 0; e.kg += Number(l.kg) || 0;
+  }));
+  const totals = TYPE_ORDER.map(type => {
+    const rows = Object.values(tot).filter(t => t.type === type);
+    if (!rows.length) return "";
+    const parts = rows.map(t => t.counted ? `${t.qty} × ${t.size}` : kg(t.kg));
+    return `<span>${esc(type === "Bucket" ? "Buckets" : type)}: <b>${esc(parts.join(", "))}</b></span>`;
+  }).filter(Boolean).join("");
+  const sent_kg = x.dispatches.reduce((a, d) => a + d.lines.reduce((b, l) => b + (Number(l.kg) || 0), 0), 0);
 
   return `
     <div class="roast">
@@ -424,7 +468,9 @@ function roast_html(x, shop, hl_cropster) {
           <span>Container${x.drums.length === 1 ? "" : "s"}: <b>${esc(x.drums.join(", ") || "—")}</b></span>
           <span>Roasted: <b>${esc(roast_dates.map(nice_date).join(", "))}</b></span>
           <span>Total roasted: <b>${kg(total)}</b></span>
+          <span>Sent out: <b>${kg(sent_kg)}</b></span>
         </div>
+        ${totals ? `<div class="kv" style="margin-top:6px">${totals}</div>` : ""}
       </div>
       <div class="sec">
         <div class="sec-title">Cropster roasts</div>
