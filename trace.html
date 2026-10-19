@@ -120,7 +120,8 @@ const state = {
   shops: [],            // [master_name]
   mode: params.get("cropster") ? "cropster" : "date",   // "date" = date + coffee + location · "cropster" = backtrace
   q: { date: params.get("date") || "", coffee_id: params.get("coffee") || "", shop: params.get("shop") || "",
-       cropster: params.get("cropster") || "" },
+       cropster: params.get("cropster") || "",
+       type: params.get("type") || "", size: params.get("size") || "" },   // optional filter: what was sent
   busy: false,
   result: null,         // built by run_trace()
   err: "",
@@ -163,28 +164,30 @@ async function run_trace() {
   const coffee_id = Number(state.q.coffee_id);
   if (!date || !coffee_id || !shop) { state.err = "Pick a date, a coffee and where it went."; render(); return; }
   state.busy = true; state.err = ""; state.result = null; render();
-  history.replaceState(null, "", `?date=${date}&coffee=${coffee_id}&shop=${encodeURIComponent(shop)}`);
+  history.replaceState(null, "", `?date=${date}&coffee=${coffee_id}&shop=${encodeURIComponent(shop)}${filter_qs()}`);
   try {
     // Every roast of this coffee (with its Cropster batches), its green deliveries and green movements
     const [sessions, deliveries, movements, shop_disp] = await Promise.all([
       ...coffee_data(coffee_id),
       // That location's deliveries on that date (in case the date is the delivery date)
       fetch_all(() => supabaseClient.from("dispatches")
-        .select("id, date, shop, dispatch_lines(fill_id)").eq("shop", shop).eq("date", date).order("id")),
+        .select("id, date, shop, dispatch_lines(fill_id, bag_size, type, bags)").eq("shop", shop).eq("date", date).order("id")),
     ]);
     const fills_of_coffee = new Set(sessions.map(s => s.fill_id).filter(Boolean));
     const by_roast_date = new Set(sessions.filter(s => s.date === date && s.fill_id).map(s => s.fill_id));
-    const by_delivery_date = new Set(shop_disp.flatMap(d => (d.dispatch_lines || []).map(l => l.fill_id)).filter(f => f && fills_of_coffee.has(f)));
+    const by_delivery_date = new Set(shop_disp.flatMap(d => (d.dispatch_lines || []).filter(line_matches).map(l => l.fill_id)).filter(f => f && fills_of_coffee.has(f)));
     const fills = [...new Set([...by_roast_date, ...by_delivery_date])];
     const why = fill => [by_roast_date.has(fill) ? "roasted that day" : null, by_delivery_date.has(fill) ? `delivered to ${shop} that day` : null].filter(Boolean);
-    const roasts = await trace_fills(fills, { sessions, deliveries, movements }, why);
+    let roasts = await trace_fills(fills, { sessions, deliveries, movements }, why);
+    // With a Type filter, only roasts that actually sent that type to that location are the answer
+    if (state.q.type) roasts = roasts.filter(x => x.dispatches.some(d => d.shop === shop));
 
     // Nothing matched: offer the nearest roast dates of that coffee
     const near = roasts.length ? [] : [...new Set(sessions.map(s => s.date))]
       .filter(d => d >= add_days(date, -14) && d <= add_days(date, 14))
       .sort((a, b) => Math.abs(new Date(a) - new Date(date)) - Math.abs(new Date(b) - new Date(date))).slice(0, 6);
 
-    state.result = { mode: "date", date, coffee_id, shop, roasts, near };
+    state.result = { mode: "date", date, coffee_id, shop, roasts, near, filter: filter_label() };
   } catch (e) {
     state.err = "Couldn't run the trace: " + (e.message || e);
   }
@@ -198,7 +201,7 @@ async function run_cropster() {
   const cid = String(state.q.cropster || "").trim();
   if (!cid) { state.err = "Type a Cropster id."; render(); return; }
   state.busy = true; state.err = ""; state.result = null; render();
-  history.replaceState(null, "", `?cropster=${encodeURIComponent(cid)}`);
+  history.replaceState(null, "", `?cropster=${encodeURIComponent(cid)}${filter_qs()}`);
   try {
     const hits = await fetch_all(() => supabaseClient.from("roast_batches")
       .select("id, roast_session_id, cropster_id, roast_sessions(id, coffee_id, fill_id)").eq("cropster_id", cid).order("id"));
@@ -210,7 +213,7 @@ async function run_cropster() {
       (await trace_fills([...fills], { sessions, deliveries, movements }, () => [`Cropster ${cid}`]))
         .forEach(r => roasts.push({ ...r, coffee_id: Number(coffee_id) }));
     }
-    state.result = { mode: "cropster", cropster: cid, roasts, unlinked: hits.length && !roasts.length };
+    state.result = { mode: "cropster", cropster: cid, roasts, unlinked: hits.length && !roasts.length, filter: filter_label() };
   } catch (e) {
     state.err = "Couldn't run the trace: " + (e.message || e);
   }
@@ -242,6 +245,7 @@ async function trace_fills(fills, { sessions, deliveries, movements }, why) {
         .select("id, fill_id, container_id, type, bag_size, bags, kg, fp_code, dispatch_id, dispatches(id, shop, date, confirmed_at)")
         .in("fill_id", fills.slice(i, i + 50)).order("id")));
     }
+    lines = lines.filter(line_matches);   // the Type / Size filter, if one is set
     const dispatch_ids = [...new Set(lines.map(l => l.dispatch_id))];
     let dbuckets = [];
     for (let i = 0; i < dispatch_ids.length; i += 100) {
@@ -335,6 +339,8 @@ function render() {
         <div><label>Coffee</label><select id="q-coffee"><option value="">— pick —</option>${coffee_opts}</select></div>
         <div><label>Where it went</label><select id="q-shop"><option value="">— pick —</option>${shop_opts}</select></div>`
       : `<div><label>Cropster id</label><input id="q-cropster" value="${esc(q.cropster)}" placeholder="e.g. 14231" autocomplete="off" /></div>`}
+      <div><label>Type</label><select id="q-type" style="min-width:130px"><option value="">All</option>${FILTER_TYPES.map(t => `<option value="${t}" ${q.type === t ? "selected" : ""}>${t === "Bucket" ? "Buckets" : t}</option>`).join("")}</select></div>
+      ${q.type === "Bags" ? `<div><label>Size</label><select id="q-size" style="min-width:110px"><option value="">Any</option>${BAG_SIZES.map(s => `<option ${q.size === s ? "selected" : ""}>${s}</option>`).join("")}</select></div>` : ""}
       <button class="btn" id="q-go" ${state.busy ? "disabled" : ""}>${state.busy ? "Tracing…" : "🔎 Trace"}</button>
       ${state.result && state.result.roasts.length ? `<button class="btn btn-light" id="q-print">🖨️ Print / PDF</button>` : ""}
     </div>
@@ -350,6 +356,12 @@ function render() {
   document.getElementById("q-date")?.addEventListener("change", e => { state.q.date = e.target.value; });
   document.getElementById("q-coffee")?.addEventListener("change", e => { state.q.coffee_id = e.target.value; });
   document.getElementById("q-shop")?.addEventListener("change", e => { state.q.shop = e.target.value; });
+  document.getElementById("q-type").addEventListener("change", e => {
+    state.q.type = e.target.value;
+    if (state.q.type !== "Bags") state.q.size = "";
+    render();   // shows / hides the Size box
+  });
+  document.getElementById("q-size")?.addEventListener("change", e => { state.q.size = e.target.value; });
   const cr = document.getElementById("q-cropster");
   if (cr) {
     cr.addEventListener("input", e => { state.q.cropster = e.target.value; });
@@ -364,7 +376,7 @@ function render() {
 function result_html(r) {
   if (r.mode === "cropster") {
     const head = `
-      <div class="doc-title">Backtrace — Cropster ${esc(r.cropster)}</div>
+      <div class="doc-title">Backtrace — Cropster ${esc(r.cropster)}${r.filter ? ` · ${esc(r.filter)} only` : ""}</div>
       <div class="doc-sub">${r.roasts.length ? `${esc([...new Set(r.roasts.map(x => state.coffees.find(c => c.id === x.coffee_id)?.name || "Coffee"))].join(", "))} · ` : ""}prepared ${esc(nice_date(local_iso(new Date())))}</div>`;
     if (!r.roasts.length) return `<div class="doc">${head}<div class="empty">${r.unlinked
       ? `Cropster ${esc(r.cropster)} is logged, but its roast isn't linked to a drum, so there's nothing to follow.`
@@ -373,11 +385,13 @@ function result_html(r) {
   }
   const coffee = state.coffees.find(c => c.id === r.coffee_id)?.name || "Coffee";
   const head = `
-    <div class="doc-title">Trace — ${esc(coffee)} · ${esc(r.shop)} · ${esc(nice_date(r.date))}</div>
+    <div class="doc-title">Trace — ${esc(coffee)}${r.filter ? ` ${esc(r.filter)}` : ""} · ${esc(r.shop)} · ${esc(nice_date(r.date))}</div>
     <div class="doc-sub">${r.roasts.length} roast${r.roasts.length === 1 ? "" : "s"} found · prepared ${esc(nice_date(local_iso(new Date())))}</div>`;
   if (!r.roasts.length) {
     return `<div class="doc">${head}
-      <div class="empty">No ${esc(coffee)} was roasted on ${esc(nice_date(r.date))}, and no ${esc(coffee)} was delivered to ${esc(r.shop)} that day.</div>
+      <div class="empty">${r.filter
+        ? `No ${esc(coffee)} ${esc(r.filter)} roasted on ${esc(nice_date(r.date))} or delivered that day went to ${esc(r.shop)}.`
+        : `No ${esc(coffee)} was roasted on ${esc(nice_date(r.date))}, and no ${esc(coffee)} was delivered to ${esc(r.shop)} that day.`}</div>
       ${r.near.length ? `<div class="near">${esc(coffee)} roasts close to that date: ${r.near.map(d => `<button data-near="${d}">${esc(nice_date(d))}</button>`).join("")}</div>` : ""}
     </div>`;
   }
@@ -395,6 +409,24 @@ function line_type(l) {
   if (bs === "Emptied") return { type: "Write-off", size: "", qty: "", counted: false };
   if (l.type === "bulk") return { type: "Bulk", size: bs, qty: "", counted: false };
   return { type: "Bags", size: bs || "?", qty: l.bags || "", counted: true };
+}
+
+// The Type / Size filter: does this dispatch line count?
+const FILTER_TYPES = ["Bags", "Bucket", "Batch brew", "Samples"];
+const BAG_SIZES = ["100g", "200g", "500g", "1kg"];
+function line_matches(l) {
+  const { type, size } = state.q;
+  if (!type) return true;
+  const t = line_type(l);
+  return t.type === type && (type !== "Bags" || !size || t.size === size);
+}
+function filter_label() {
+  const { type, size } = state.q;
+  if (!type) return "";
+  return type === "Bags" ? `${size ? size + " " : ""}bags` : type === "Bucket" ? "buckets" : type.toLowerCase();
+}
+function filter_qs() {
+  return (state.q.type ? `&type=${encodeURIComponent(state.q.type)}` : "") + (state.q.type === "Bags" && state.q.size ? `&size=${encodeURIComponent(state.q.size)}` : "");
 }
 
 // shop: the location searched for (highlighted), or null for a Cropster backtrace (list everywhere it went)
@@ -468,7 +500,7 @@ function roast_html(x, shop, hl_cropster) {
           <span>Container${x.drums.length === 1 ? "" : "s"}: <b>${esc(x.drums.join(", ") || "—")}</b></span>
           <span>Roasted: <b>${esc(roast_dates.map(nice_date).join(", "))}</b></span>
           <span>Total roasted: <b>${kg(total)}</b></span>
-          <span>Sent out: <b>${kg(sent_kg)}</b></span>
+          <span>Sent out${state.result?.filter ? ` (${esc(state.result.filter)})` : ""}: <b>${kg(sent_kg)}</b></span>
         </div>
         ${totals ? `<div class="kv" style="margin-top:6px">${totals}</div>` : ""}
       </div>
