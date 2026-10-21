@@ -112,7 +112,32 @@
 // delivery-confirm.html before this script runs.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+// "Saving…" sign: shown in the corner while the page waits on the database for more than a moment, so a
+// save or reload never looks like the page has frozen. Counts requests in flight through this client.
+const busy_sign = (() => {
+  let in_flight = 0, timer = null, el = null;
+  const show = on => {
+    if (!el) {
+      el = document.createElement("div");
+      el.textContent = "Saving…";
+      el.style.cssText = "position:fixed;top:12px;right:12px;z-index:9999;background:#1a1a1a;color:#fff;padding:6px 12px;border-radius:16px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.25);pointer-events:none;transition:opacity .15s;opacity:0";
+      document.body.appendChild(el);
+    }
+    el.style.opacity = on ? "1" : "0";
+  };
+  return {
+    start() { if (in_flight++ === 0) timer = setTimeout(() => show(true), 250); },   // only if it takes a moment
+    end()   { if (--in_flight === 0) { clearTimeout(timer); show(false); } },
+  };
+})();
+const tracked_fetch = async (...args) => {
+  // Login checks (session-guard.js, token renewal) aren't saves — don't show the sign for those
+  if (String(args[0]?.url || args[0]).includes("/auth/v1/")) return fetch(...args);
+  busy_sign.start();
+  try { return await fetch(...args); } finally { busy_sign.end(); }
+};
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY,
+  { global: { fetch: tracked_fetch } });
 
 supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
   // Come back here after logging in, so any unsaved work (kept in sessionStorage) is restored
@@ -234,13 +259,18 @@ async function set_container_status(container_id, new_status) {
     }
   }
   const now = new Date().toISOString();
+  // Move the card straight away, then save — so the tap feels instant instead of the card sitting still
+  // for the save + reload. If the save fails, the reload below puts it back where the database has it.
+  if (c) { c.status = new_status; c.status_changed_at = now; render(); }
+  let error;
   if (c && c.combined) {
     // Every drum still holding the batch moves together
-    await supabaseClient.from("containers").update({ status: new_status, status_changed_at: now }).in("id", c.drums);
+    ({ error } = await supabaseClient.from("containers").update({ status: new_status, status_changed_at: now }).in("id", c.drums));
   } else {
     // Make sure the container row exists, then update status
-    await supabaseClient.from("containers").upsert({ id: container_id, status: new_status, status_changed_at: now }, { onConflict: "id" });
+    ({ error } = await supabaseClient.from("containers").upsert({ id: container_id, status: new_status, status_changed_at: now }, { onConflict: "id" }));
   }
+  if (error) alert(`Couldn't move ${c ? source_label(c) : container_id}: ${error.message}\n\nIt's been put back — try again.`);
   await load_data();
   render();
 }
@@ -1078,10 +1108,16 @@ async function save_filled_buckets() {
     if (!dispatch_id) {
       alert(`The buckets were filled, but the dispatch to ${dest} couldn't be saved.\n\nThey're in stock as filled — send them from + New Dispatch.`);
     } else {
-      await Promise.all([
+      const [link_res, flip_res] = await Promise.all([
         supabaseClient.from("dispatch_buckets").insert(bucket_ids.map(id => ({ dispatch_id, bucket_id: id }))),
-        supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids),
+        supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids).select("id"),
       ]);
+      // Never let this fail quietly: a bucket left "filled" after its dispatch is counted twice against the drum
+      const flipped = (flip_res.data || []).length;
+      if (link_res.error || flip_res.error || flipped !== bucket_ids.length) {
+        alert(`The dispatch to ${dest} was saved, but the buckets weren't all marked as sent `
+          + `(${flipped} of ${bucket_ids.length}).\n\n${link_res.error?.message || flip_res.error?.message || ""}\n\nTell an admin before filling more.`);
+      }
     }
   }
 
@@ -2896,12 +2932,18 @@ function attach_listeners() {
       // Record bucket → dispatch link and flip the buckets to dispatched. Independent writes, so both
       // requests go out together rather than one after the other.
       const bucket_ids = packing_state.scanned_buckets.map(b => b.id);
-      await Promise.all([
+      const [link_res, flip_res] = await Promise.all([
         supabaseClient.from("dispatch_buckets").insert(
           packing_state.scanned_buckets.map(b => ({ dispatch_id, bucket_id: b.id }))
         ),
-        supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids),
+        supabaseClient.from("buckets").update({ status: "dispatched" }).in("id", bucket_ids).select("id"),
       ]);
+      // Never let this fail quietly: a bucket left "filled" after its dispatch is counted twice against the drum
+      const flipped = (flip_res.data || []).length;
+      if (link_res.error || flip_res.error || flipped !== bucket_ids.length) {
+        alert(`The dispatch was saved, but the buckets weren't all marked as sent `
+          + `(${flipped} of ${bucket_ids.length}).\n\n${link_res.error?.message || flip_res.error?.message || ""}\n\nTell an admin before packing more.`);
+      }
     }
     // ONE reload, after every write above is done. This has to come before the auto-empty check below:
     // until the just-dispatched buckets are re-read as "dispatched" they'd count as BOTH held and packed
