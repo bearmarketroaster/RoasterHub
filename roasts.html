@@ -187,15 +187,15 @@ async function save_session() {
   if (state.saving) return;   // already saving — ignore a second tap
   state.saving = true; render();
   const s = state.session;
-  // A Cropster id belongs to one roast. If any are already logged, this roast has been saved before.
+  // A Cropster id belongs to one roast. If any are already logged, warn — it may have been saved before —
+  // but let the roaster save anyway (e.g. an earlier roast was given this id by mistake).
   const cropster_ids = [...new Set(s.batches.map(b => String(b.cropster_id || "").trim()).filter(Boolean))];
   if (cropster_ids.length) {
     const { data: dup, error: dup_err } = await supabaseClient.from("roast_batches")
       .select("cropster_id, roast_session_id").in("cropster_id", cropster_ids);
     if (!dup_err && dup && dup.length) {
-      state.saving = false;
-      alert(`Already logged: Cropster ${[...new Set(dup.map(d => d.cropster_id))].join(", ")} (roast ${dup[0].roast_session_id}).\n\nThis roast looks like it's been saved before, so it hasn't been saved again. Check the Cropster ids — if a number was mistyped, correct it on step 2.`);
-      render(); return;
+      const ok = confirm(`Already logged: Cropster ${[...new Set(dup.map(d => d.cropster_id))].join(", ")} (roast ${dup[0].roast_session_id}).\n\nIf this roast has already been saved, press Cancel so it isn't saved twice.\n\nPress OK to save it anyway (e.g. the earlier roast had this id by mistake).`);
+      if (!ok) { state.saving = false; render(); return; }
     }
   }
   const total_green = s.batches.reduce((sum,b) => sum+(Number(b.green_weight)||0), 0);
