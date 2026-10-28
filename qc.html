@@ -296,7 +296,15 @@ async function load_deliveries() {
 const in_stock_deliveries = coffee_id => (state.deliveries || [])
   .filter(d => String(d.coffee_id) === String(coffee_id) && d.left > 0.05)
   .sort((a, b) => (b.arrived_on || "").localeCompare(a.arrived_on || ""));
-const delivery_tested = id => state.entries.green.some(e => e.green_delivery_id === id);
+// The delivery a check was taken on: the one picked when it was logged, else (a check logged without one)
+// the coffee's delivery current on that date — the newest that had arrived by then. Trace uses the same rule.
+function check_delivery(e) {
+  if (e.green_delivery_id) return state.delivery_by_id?.[e.green_delivery_id] || null;
+  return (state.deliveries || [])
+    .filter(d => String(d.coffee_id) === String(e.coffee_id) && d.arrived_on <= e.measured_at)
+    .sort((a, b) => (b.arrived_on || "").localeCompare(a.arrived_on || "") || String(b.id).localeCompare(String(a.id)))[0] || null;
+}
+const delivery_tested = id => state.entries.green.some(e => check_delivery(e)?.id === id);
 // What the ICO box is filled in with: the newest delivery not yet tested, else the newest in stock
 function default_delivery(coffee_id) {
   const ds = in_stock_deliveries(coffee_id);
@@ -525,7 +533,11 @@ function build_qc_log(kind, title) {
                   ${is_tds ? `<td style="font-weight:600">${esc(e.shop)}</td>` : ""}
                   <td${is_tds ? "" : ' style="font-weight:600"'}>${esc(e.coffee)}</td>
                   ${is_tds ? `<td>${esc(e.brew_method || "—")}</td>` : ""}
-                  ${kind === "green" ? `<td class="hint">${esc(state.delivery_by_id?.[e.green_delivery_id]?.ico_number || "—")}</td>` : ""}
+                  ${kind === "green" ? (() => {
+                    const d = check_delivery(e);
+                    if (!d) return `<td class="hint">—</td>`;
+                    return `<td class="hint"${e.green_delivery_id ? "" : ` title="Logged without a delivery — this is the delivery current on that date"`}>${esc(d.ico_number || "no ICO")}${e.green_delivery_id ? "" : " <span style=\"font-size:11px\">(by date)</span>"}</td>`;
+                  })() : ""}
                   ${measures.map(m => reading_cell(e, m)).join("")}
                   <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.notes||"")}">${esc(e.notes||"")}</td>
                   <td><button class="delete-btn" data-delete-qc="${kind}|${esc(e.id)}" title="Delete">✕</button></td>
