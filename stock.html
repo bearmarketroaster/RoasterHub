@@ -133,9 +133,14 @@ function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"
 // Slashes, spaces or dots between the parts become dashes. Anything not in three parts is left as typed.
 function format_ico(raw) {
   const s = String(raw || "").trim();
+  if (/^\d{8,}$/.test(s)) return ico_digits_mask(s);   // typed as one run of digits: split 3-4-rest
   const parts = s.split(/\s*[\/\-.\s]\s*/).filter(Boolean);
   if (parts.length !== 3 || !/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) return s;
   return `${parts[0].padStart(3, "0")}-${parts[1].padStart(4, "0")}-${parts[2]}`;
+}
+// Digits only → dashes after the 3rd and 7th digit, as they're typed: 0020030 → 002-0030
+function ico_digits_mask(digits) {
+  return digits.slice(0, 3) + (digits.length > 3 ? "-" + digits.slice(3, 7) : "") + (digits.length > 7 ? "-" + digits.slice(7) : "");
 }
 function gen_id(prefix) {
   const r = crypto.randomUUID().split("-")[0].toUpperCase();
@@ -1385,12 +1390,25 @@ function attach_listeners() {
   sync(".item-lot","lot_number"); sync(".item-ico","ico_number"); sync(".item-bags","bags"); sync(".item-weight","weight_kg"); sync(".item-price","price_per_kg");
   sync(".item-contract","contract_id");
   // ICO boxes tidy themselves when you leave them: 3/4322/00007 → 003-4322-00007
-  app.querySelectorAll(".item-ico, .det-input[data-key='ico_number']").forEach(el => el.addEventListener("blur", () => {
-    const v = format_ico(el.value);
-    if (v === el.value) return;
-    el.value = v;
-    el.dispatchEvent(new Event("input"));
-  }));
+  app.querySelectorAll(".item-ico, .det-input[data-key='ico_number']").forEach(el => {
+    el.addEventListener("blur", () => {
+      const v = format_ico(el.value);
+      if (v === el.value) return;
+      el.value = v;
+      el.dispatchEvent(new Event("input"));
+    });
+    // Typing just digits fills in the dashes as you go (002 0030 0400… → 002-0030-0400…). Typing your own
+    // separators (3-4322-…) is left alone until you leave the box, then padded.
+    el.addEventListener("input", () => {
+      const v = el.value;
+      const dashes_ours = [...v].every((ch, i) => ch !== "-" || i === 3 || i === 8);
+      if (!/^[\d-]*$/.test(v) || !dashes_ours || el.selectionStart !== v.length) return;
+      const masked = ico_digits_mask(v.replace(/-/g, ""));
+      if (masked === v) return;
+      el.value = masked;
+      el.dispatchEvent(new Event("input"));
+    });
+  });
 
   app.querySelector("#save-delivery")?.addEventListener("click", () => {
     app.querySelectorAll(".item-coffee").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].coffee_id=el.value; });
