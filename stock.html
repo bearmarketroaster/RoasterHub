@@ -355,6 +355,31 @@ async function delete_arrival(arrival_id) {
   await load_data(); render();
 }
 
+// Save the labelling details (ICO, lot, green name, origin) of a delivery's coffees — one update per changed line
+async function save_delivery_details() {
+  const e = state.ui.details_edit;
+  if (!e || e.saving) return;   // already saving — ignore a second tap
+  const arrival = state.deliveries.find(d => d.id === e.arrival_id);
+  if (!arrival) { e.err = "That delivery is no longer loaded — reload and try again."; render(); return; }
+  const KEYS = ["ico_number", "lot_number", "green_name", "origin"];
+  const changes = arrival.items.map(item => {
+    const patch = {};
+    KEYS.forEach(k => {
+      const v = (e.lines[item.id]?.[k] ?? "").trim() || null;
+      if (v !== (item[k] || null)) patch[k] = v;
+    });
+    return { id: item.id, patch };
+  }).filter(c => Object.keys(c.patch).length);
+  if (!changes.length) { state.ui.details_edit = null; render(); return; }
+  e.saving = true; e.err = ""; render();
+  for (const c of changes) {
+    const { error } = await supabaseClient.from("green_deliveries").update(c.patch).eq("id", c.id);
+    if (error) { e.saving = false; e.err = "Failed to save: " + error.message; await load_data(); render(); return; }
+  }
+  state.ui.details_edit = null;
+  await load_data(); render();
+}
+
 async function save_invoice_detail() {
   const e = state.ui.invoice_edit;
   if (!e) return;
@@ -722,6 +747,36 @@ function build_deliveries() {
 
   // Invoice editor. Opens under the arrival it belongs to. Deliberately narrow: an invoice
   // arriving weeks later tells you the reference and the price, not what physically turned up.
+  // Labelling details per coffee on the delivery — ICO, lot, green name, origin. Weight, bags and price
+  // aren't here: changing them would shift green stock and past revenue figures.
+  const details_editor_html = (d) => {
+    const e = state.ui.details_edit;
+    if (!e || e.arrival_id !== d.id) return "";
+    const inp = (item, key, ph) => `<input class="det-input" data-line="${esc(item.id)}" data-key="${key}" value="${esc(e.lines[item.id]?.[key] ?? "")}" placeholder="${ph}" />`;
+    return `
+      <div style="border-top:1px solid #e8e6e1;margin-top:12px;padding-top:12px">
+        <div style="background:#faf9f7;border-radius:8px;padding:14px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:4px">Edit details</div>
+          <p class="hint" style="font-size:12px;margin-bottom:10px">ICO, lot number, green name and origin, as on the invoice. Weight, bags and price can't be changed here.</p>
+          ${d.items.map(item => `
+            <div style="margin-bottom:12px">
+              <div style="font-weight:600;font-size:13px;margin-bottom:6px">${esc(item.coffee)} · ${Number(item.weight_kg).toFixed(1)}kg</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+                <div><label class="lbl">ICO No.</label>${inp(item, "ico_number", "e.g. 002/4600/0524")}</div>
+                <div><label class="lbl">Lot No.</label>${inp(item, "lot_number", "")}</div>
+                <div><label class="lbl">Green name</label>${inp(item, "green_name", "")}</div>
+                <div><label class="lbl">Origin</label>${inp(item, "origin", "")}</div>
+              </div>
+            </div>`).join("")}
+          ${e.err ? `<p class="err" style="margin-bottom:8px">${esc(e.err)}</p>` : ""}
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-dark btn-sm" id="det-save" ${e.saving ? "disabled" : ""}>${e.saving ? "Saving…" : "Save details"}</button>
+            <button class="btn btn-ghost btn-sm" id="det-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+  };
+
   const invoice_editor_html = (d) => {
     const e = state.ui.invoice_edit;
     if (!e || e.arrival_id !== d.id) return "";
@@ -822,6 +877,7 @@ function build_deliveries() {
             ${invoice_state_html(d)}
             ${d.invoice_path?`<button class="btn btn-ghost btn-sm" style="font-size:11px" data-download-invoice="${esc(d.invoice_path)}">📄 Download PDF</button>`:""}
             <button class="btn btn-ghost btn-sm" style="font-size:11px" data-edit-invoice="${esc(d.id)}">${d.invoice_ref?"✏️ Edit invoice":"+ Add invoice"}</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px" data-edit-details="${esc(d.id)}" title="ICO, lot number, green name, origin">✏️ Edit details</button>
             <button class="btn btn-ghost btn-sm" style="font-size:11px;color:#dc2626" data-delete-arrival="${esc(d.id)}" title="Remove this delivery and the stock it added">🗑️</button>
           </div>
           <div style="text-align:right">
@@ -846,6 +902,7 @@ function build_deliveries() {
               </div>
             </div>`).join("")}
         </div>
+        ${details_editor_html(d)}
         ${invoice_editor_html(d)}
       </div>`;
   }).join("");
@@ -1238,6 +1295,23 @@ function attach_listeners() {
     };
     render();
   }));
+  app.querySelectorAll("[data-edit-details]").forEach(btn => btn.addEventListener("click", () => {
+    const id = btn.dataset.editDetails;
+    const d = state.deliveries.find(x => x.id === id);
+    state.ui.details_edit = state.ui.details_edit?.arrival_id === id ? null : {
+      arrival_id: id,
+      lines: Object.fromEntries((d?.items || []).map(i => [i.id,
+        { ico_number: i.ico_number || "", lot_number: i.lot_number || "", green_name: i.green_name || "", origin: i.origin || "" }])),
+      err: "", saving: false,
+    };
+    render();
+  }));
+  app.querySelectorAll(".det-input").forEach(inp => inp.addEventListener("input", () => {
+    const e = state.ui.details_edit;
+    if (e?.lines[inp.dataset.line]) e.lines[inp.dataset.line][inp.dataset.key] = inp.value;
+  }));
+  app.querySelector("#det-save")?.addEventListener("click", save_delivery_details);
+  app.querySelector("#det-cancel")?.addEventListener("click", () => { state.ui.details_edit = null; render(); });
   app.querySelector("#inv-cancel")?.addEventListener("click", () => { state.ui.invoice_edit = null; render(); });
   app.querySelector("#inv-ref")?.addEventListener("input", e => { if (state.ui.invoice_edit) state.ui.invoice_edit.invoice_ref = e.target.value; });
   // Re-render on blur so the "also covers…" hint appears once a known reference is typed.
