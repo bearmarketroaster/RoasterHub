@@ -178,8 +178,9 @@ async function run_trace() {
     // Every roast of this coffee (with its Cropster batches), its green deliveries and green movements, and —
     // for a delivery date — that location's deliveries in the fortnight either side (the day itself + nearby days
     // to suggest if nothing matches)
-    const [sessions, deliveries, movements, shop_disp] = await Promise.all([
+    const [sessions, deliveries, movements, qc, shop_disp] = await Promise.all([
       ...coffee_data(coffee_id),
+      qc_data(coffee_id),
       on === "delivery"
         ? fetch_all(() => supabaseClient.from("dispatches")
             .select("id, date, shop, dispatch_lines(fill_id, bag_size, type, bags)").eq("shop", shop)
@@ -193,7 +194,7 @@ async function run_trace() {
       ? [...new Set(sessions.filter(s => s.date === date && s.fill_id).map(s => s.fill_id))]
       : [...new Set(shop_disp.filter(d => d.date === date).flatMap(d => coffee_lines(d).map(l => l.fill_id)))];
     // Only that location's deliveries are listed (a clean report) — for a delivery date, only that day's
-    const roasts = (await trace_fills(fills, { sessions, deliveries, movements }, () => []))
+    const roasts = (await trace_fills(fills, { sessions, deliveries, movements, qc }, () => []))
       .map(x => ({ ...x, dispatches: x.dispatches.filter(d => d.shop === shop && (on === "roast" || d.date === date)) }))
       .filter(x => x.dispatches.length);
 
@@ -227,8 +228,8 @@ async function run_cropster() {
     const by_coffee = {};
     hits.forEach(h => { const s = h.roast_sessions; if (s && s.fill_id && s.coffee_id != null) (by_coffee[s.coffee_id] ||= new Set()).add(s.fill_id); });
     for (const [coffee_id, fills] of Object.entries(by_coffee)) {
-      const [sessions, deliveries, movements] = await Promise.all(coffee_data(Number(coffee_id)));
-      (await trace_fills([...fills], { sessions, deliveries, movements }, () => [`Cropster ${cid}`]))
+      const [sessions, deliveries, movements, qc] = await Promise.all([...coffee_data(Number(coffee_id)), qc_data(Number(coffee_id))]);
+      (await trace_fills([...fills], { sessions, deliveries, movements, qc }, () => [`Cropster ${cid}`]))
         .forEach(r => roasts.push({ ...r, coffee_id: Number(coffee_id) }));
     }
     state.result = { mode: "cropster", cropster: cid, roasts, unlinked: hits.length && !roasts.length, filter: filter_label() };
@@ -243,7 +244,7 @@ async function run_cropster() {
 function coffee_data(coffee_id) {
   return [
     fetch_all(() => supabaseClient.from("roast_sessions")
-      .select("id, date, container_id, fill_id, roasted_weight, is_test, saved_at, roast_batches(batch_number, cropster_id, green_weight)")
+      .select("id, date, container_id, fill_id, roasted_weight, is_test, saved_at, green_delivery_id, roast_batches(batch_number, cropster_id, green_weight)")
       .eq("coffee_id", coffee_id).order("date").order("id")),
     fetch_all(() => supabaseClient.from("green_deliveries")
       .select("id, arrived_on, supplier, origin, green_name, lot_number, ico_number, bags, weight_kg, contract_id")
@@ -262,8 +263,21 @@ function coffee_data(coffee_id) {
   ];
 }
 
+// One coffee's QC spot checks: green (moisture, density, water activity) and roast colour (Agtron)
+async function qc_data(coffee_id) {
+  const [green, colour] = await Promise.all([
+    fetch_all(() => supabaseClient.from("green_qc_entries")
+      .select("id, measured_at, created_at, density_1, density_2, density_3, moisture_1, moisture_2, moisture_3, water_activity_1, water_activity_2, water_activity_3")
+      .eq("coffee_id", coffee_id).order("measured_at").order("id")),
+    fetch_all(() => supabaseClient.from("qc_agtron_entries")
+      .select("id, measured_at, created_at, whole_bean_1, whole_bean_2, whole_bean_3, ground_1, ground_2, ground_3")
+      .eq("coffee_id", coffee_id).order("measured_at").order("id")),
+  ]);
+  return { green, colour };
+}
+
 // The full card data for a set of roasts (fills) of one coffee: drums, Cropster roasts, green lots, deliveries
-async function trace_fills(fills, { sessions, deliveries, movements }, why) {
+async function trace_fills(fills, { sessions, deliveries, movements, qc }, why) {
     // Where those roasts went: every dispatch line packed from them, with its dispatch
     let lines = [];
     for (let i = 0; i < fills.length; i += 50) {
@@ -291,6 +305,20 @@ async function trace_fills(fills, { sessions, deliveries, movements }, why) {
     }
 
     const lots = fifo_lots(deliveries, movements);
+    // Each delivery is "the" green until the next delivery of the coffee arrives — the window its green
+    // QC readings are matched in
+    const by_date = [...deliveries].sort((a, b) => (a.arrived_on || "").localeCompare(b.arrived_on || ""));
+    const until = Object.fromEntries(by_date.map(d => [d.id, by_date.find(n => n.arrived_on > d.arrived_on)?.arrived_on || null]));
+    Object.values(lots.lots).forEach(l => { if (l.delivery_id) l.until = until[l.delivery_id]; });
+    const del = Object.fromEntries(deliveries.map(d => [d.id, d]));
+    // The green this roast used: the delivery recorded on it when it was logged, else the first-in-first-out estimate
+    const session_lots = s => {
+      const d = s.green_delivery_id && del[s.green_delivery_id];
+      if (!d) return lots.by_session[s.id] || [];
+      const key = `D:${d.id}`;
+      lots.lots[key] = lots.lots[key] || { ...delivery_lot(d, key), until: until[d.id] };
+      return [{ lot_key: key, kg: (s.roast_batches || []).reduce((t, b) => t + (Number(b.green_weight) || 0), 0) }];
+    };
     return fills.map(fill => {
       const ss = sessions.filter(s => s.fill_id === fill);
       const ls = lines.filter(l => l.fill_id === fill);
@@ -305,15 +333,15 @@ async function trace_fills(fills, { sessions, deliveries, movements }, why) {
       })).sort((a, b) => (a.date || "").localeCompare(b.date || "") || String(a.id).localeCompare(String(b.id)));
       // Green lots behind this roast (FIFO), merged across its roasts
       const lot_kg = {};
-      ss.forEach(s => (lots.by_session[s.id] || []).forEach(a => { lot_kg[a.lot_key] = (lot_kg[a.lot_key] || 0) + a.kg; }));
+      ss.forEach(s => session_lots(s).forEach(a => { lot_kg[a.lot_key] = (lot_kg[a.lot_key] || 0) + a.kg; }));
       return {
-        fill, name: combined[fill] || null,
+        fill, name: combined[fill] || null, qc,
         why: why(fill),
         sessions: ss,
         drums: [...new Set(ss.map(s => s.container_id).filter(Boolean))],
         dispatches,
         lots: Object.entries(lot_kg).map(([k, v]) => ({ ...lots.lots[k], kg: v })).sort((a, b) => (a.date || "").localeCompare(b.date || "")),
-        green_unallocated: ss.some(s => !(lots.by_session[s.id] || []).length),
+        green_unallocated: ss.some(s => !session_lots(s).length),
       };
     }).sort((a, b) => (a.sessions[0]?.date || "").localeCompare(b.sessions[0]?.date || ""));
 }
@@ -330,10 +358,7 @@ function fifo_lots(deliveries, movements) {
     if (m.change_kg > 0) {
       const d = m.delivery_id ? del[m.delivery_id] : null;
       const key = d ? `D:${d.id}` : `X:${m.id}`;
-      lots[key] = d
-        ? { key, date: d.arrived_on, supplier: d.supplier, ico: d.ico_number, lot: d.lot_number, green_name: d.green_name, origin: d.origin,
-            contract_logged: d.contract?.created_at || null, contract_supplier: d.contract?.supplier || null }
-        : { key, date: m.occurred_on, unknown: true, kind: m.kind };
+      lots[key] = d ? delivery_lot(d, key) : { key, date: m.occurred_on, unknown: true, kind: m.kind };
       queue.push({ key, left: m.change_kg });
     } else {
       let need = -m.change_kg;
@@ -346,6 +371,45 @@ function fifo_lots(deliveries, movements) {
     }
   }
   return { lots, by_session };
+}
+
+function delivery_lot(d, key) {
+  return { key, delivery_id: d.id, date: d.arrived_on, supplier: d.supplier, ico: d.ico_number, lot: d.lot_number,
+           green_name: d.green_name, origin: d.origin,
+           contract_logged: d.contract?.created_at || null, contract_supplier: d.contract?.supplier || null };
+}
+
+// ── QC spot checks ──────────────────────────────────────────────────────────
+// The average of a reading's (up to) three measurements, or null when none were taken
+function qc_avg(r, m) {
+  const v = [1, 2, 3].map(i => r[`${m}_${i}`]).filter(x => x !== null && x !== undefined && x !== "").map(Number).filter(Number.isFinite);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+const newest_first = (a, b) => (b.measured_at || "").localeCompare(a.measured_at || "") || (b.created_at || "").localeCompare(a.created_at || "");
+
+// Green QC for a delivery: the newest check of the coffee taken while that delivery was its green
+// (from its arrival until the next delivery arrived). Nothing → not tested; another delivery's numbers aren't borrowed.
+function green_qc_html(lot, qc) {
+  const r = (qc?.green || []).filter(g => g.measured_at >= lot.date && (!lot.until || g.measured_at < lot.until)).sort(newest_first)[0];
+  if (!r) return `<span class="muted">not tested</span>`;
+  const parts = [
+    ["moisture", v => `${v.toFixed(1)}%`], ["density", v => `${Math.round(v)} g/L`], ["water_activity", v => `${v.toFixed(2)} aw`],
+  ].map(([m, f]) => { const v = qc_avg(r, m); return v === null ? null : `${m.replace("_", " ")} <b>${f(v)}</b>`; }).filter(Boolean);
+  return parts.length ? `${parts.join(" · ")} <span class="muted">(checked ${esc(nice_date(r.measured_at))})</span>` : `<span class="muted">not tested</span>`;
+}
+
+// Roast colour: the coffee's spot check closest to the roast date (within a month either side). Checks are
+// weekly spot checks, not per batch, so it's labelled with its date.
+function colour_html(roast_date, coffee, qc) {
+  const day = iso => new Date(iso + "T12:00:00").getTime();
+  const gap = r => Math.abs(day(r.measured_at) - day(roast_date));
+  const r = (qc?.colour || []).filter(c => c.measured_at && gap(c) <= 31 * 86400000)
+    .sort((a, b) => gap(a) - gap(b) || newest_first(a, b))[0];
+  if (!r) return `<span class="muted">no spot check within a month of roasting</span>`;
+  const wb = qc_avg(r, "whole_bean"), gr = qc_avg(r, "ground");
+  const nums = [wb !== null ? `<b>${wb.toFixed(1)}</b> whole bean` : null, gr !== null ? `<b>${gr.toFixed(1)}</b> ground` : null].filter(Boolean);
+  if (!nums.length) return `<span class="muted">no spot check within a month of roasting</span>`;
+  return `${nums.join(" / ")} <span class="muted">(spot check of ${esc(coffee)}, ${esc(nice_date(r.measured_at))})</span>`;
 }
 
 // ── Render ──────────────────────────────────────────────────────────────────
@@ -468,7 +532,8 @@ function simple_html(x, shop, i, count) {
   const roast_dates = [...new Set(x.sessions.map(s => s.date))].map(nice_date).join(" and ");
   const cropster = [...new Set(x.sessions.flatMap(s => (s.roast_batches || []).map(b => b.cropster_id)).filter(Boolean))];
   // Each green lot: ICO (green, supplier) — when it was delivered, and when its contract was logged if it has one
-  const icos = x.lots.filter(l => !l.unknown).map(l => `<b>${esc(l.ico || "no ICO entered")}</b>`
+  const known_lots = x.lots.filter(l => !l.unknown);
+  const icos = known_lots.map(l => `<b>${esc(l.ico || "no ICO entered")}</b>`
     + (l.green_name || l.supplier ? ` <span class="muted">(${esc([l.green_name, l.supplier].filter(Boolean).join(", "))})</span>` : "")
     + ` — delivered <b>${esc(nice_date(l.date))}</b>`
     + (l.contract_logged ? `, on the ${esc(l.contract_supplier || "")} contract logged ${esc(nice_date(l.contract_logged))}` : ""));
@@ -495,6 +560,9 @@ function simple_html(x, shop, i, count) {
       <div class="simple-row">Roasted <b>${esc(roast_dates)}</b> in ${x.drums.length > 1 ? "drums" : "drum"} <b>${esc(x.drums.join(", ") || "—")}</b>${x.name ? ` <span class="muted">(combined roast)</span>` : ""}</div>
       <div class="simple-row">Cropster roast${cropster.length === 1 ? "" : "s"}: <b>${esc(cropster.join(", ") || "none recorded")}</b></div>
       <div class="simple-row">Green coffee: ${icos.length ? `ICO ${icos.join("<br>and ICO ")}` : `<span class="muted">not known</span>`}</div>
+      ${known_lots.length ? `<div class="simple-row">Green QC: ${known_lots.length === 1 ? green_qc_html(known_lots[0], x.qc)
+        : known_lots.map(l => `ICO ${esc(l.ico || "—")}: ${green_qc_html(l, x.qc)}`).join("<br>")}</div>` : ""}
+      <div class="simple-row">Roast colour: ${colour_html(x.sessions[0]?.date, coffee, x.qc)}</div>
       ${shop == null
         ? `<div class="simple-row">Went into: ${went_into ? `<b>${esc(went_into)}</b>` : `<span class="muted">nothing packed from it yet</span>`}</div>`
         : `<div class="simple-row">Delivered: ${deliveries.length ? deliveries.join("<br>") : `<span class="muted">not dispatched yet</span>`}</div>`}

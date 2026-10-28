@@ -136,7 +136,71 @@ function new_session() {
     is_test: false,
     combine: false,          // part of a combined batch (several drums = one packing source)
     combine_with: "",        // fill_id of the open batch to join; "" = start a new one
+    green_delivery_id: null, // the green delivery (ICO) used — filled in with the oldest still in stock
   };
+}
+
+// The green deliveries of a coffee with what's left of each, oldest first. Stock is used first-in-first-out,
+// so the oldest delivery with green left is the one going into the roaster — the default on step 2.
+async function load_green_lots(coffee_id) {
+  // Reloaded each time step 2 opens: what's left changes with every roast saved
+  if (coffee_id == null || (state.green_lots?.coffee_id === coffee_id && state.green_lots.loading)) return;
+  state.green_lots = { coffee_id, loading: true, options: [] };
+  try {
+    const page = async build => {
+      const out = [];
+      for (let i = 0; i < 100; i++) {
+        const { data, error } = await build().range(i * 1000, i * 1000 + 999);
+        if (error) throw error;
+        out.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+      return out;
+    };
+    const [deliveries, movements] = await Promise.all([
+      page(() => supabaseClient.from("green_deliveries").select("id, arrived_on, ico_number, lot_number, green_name, supplier")
+        .eq("coffee_id", coffee_id).order("arrived_on").order("id")),
+      page(() => supabaseClient.from("green_movements").select("id, occurred_on, change_kg, delivery_id")
+        .eq("coffee_id", coffee_id).order("occurred_on").order("id")),
+    ]);
+    // Intakes join the queue; every outflow takes the oldest green still in stock
+    const left = {}, queue = [];
+    movements.map(m => ({ ...m, change_kg: Number(m.change_kg) || 0 }))
+      .sort((a, b) => (a.occurred_on || "").localeCompare(b.occurred_on || "") || (b.change_kg > 0) - (a.change_kg > 0) || String(a.id).localeCompare(String(b.id)))
+      .forEach(m => {
+        if (m.change_kg > 0) { const q = { key: m.delivery_id || `X:${m.id}`, left: m.change_kg }; queue.push(q); return; }
+        let need = -m.change_kg;
+        while (need > 1e-9 && queue.length) {
+          const q = queue[0], take = Math.min(q.left, need);
+          q.left -= take; need -= take;
+          if (q.left <= 1e-9) queue.shift();
+        }
+      });
+    queue.forEach(q => { left[q.key] = (left[q.key] || 0) + q.left; });
+    const options = deliveries.map(d => ({ ...d, left: left[d.id] || 0 }));
+    const in_stock = options.filter(d => d.left > 0.05);
+    if (state.green_lots?.coffee_id !== coffee_id) return;   // the coffee was changed meanwhile
+    state.green_lots = {
+      coffee_id, loading: false,
+      // In stock (oldest first), then the five most recent used-up deliveries in case one was mis-logged
+      options: [...in_stock, ...options.filter(d => d.left <= 0.05).slice(-5).reverse()],
+      in_stock_ids: new Set(in_stock.map(d => d.id)),
+    };
+    if (state.session.coffee_id === coffee_id && !state.session.green_delivery_id && in_stock.length) {
+      state.session.green_delivery_id = in_stock[0].id;
+    }
+  } catch (e) {
+    console.error("Couldn't load green deliveries:", e);
+    state.green_lots = { coffee_id, loading: false, options: [], failed: true };
+  }
+  if (state.view === "new" && state.ui.step >= 2) render();
+}
+
+function green_lot_label(d) {
+  const dt = new Date(d.arrived_on + "T12:00:00");
+  const when = `${dt.toLocaleDateString("en-IE", { weekday: "short" })} ${dt.getDate()} ${dt.toLocaleDateString("en-IE", { month: "short" })}`;   // e.g. "Fri 2 Oct"
+  return `ICO ${d.ico_number || "not entered"}${d.green_name ? ` · ${d.green_name}` : ""} — delivered ${when}`
+    + (d.left > 0.05 ? ` (${d.left.toFixed(1)}kg left)` : " (used up)");
 }
 
 function today() { return new Date().toISOString().split("T")[0]; }
@@ -243,6 +307,7 @@ async function save_session() {
   const { error: session_err } = await supabaseClient.from("roast_sessions").insert({
     id, coffee: coffee_name, coffee_id, date: s.date, container_id,
     roasted_weight: Number(s.roasted_weight), fill_id,
+    green_delivery_id: s.green_delivery_id || null,
     roaster_id: user?.id || null,
     is_test: !!s.is_test,
   });
@@ -297,6 +362,7 @@ async function save_session() {
 // The coffee being roasted is identified by id; its name is kept alongside for display
 function set_session_coffee(coffee_id) {
   const id = coffee_id === "" || coffee_id == null ? null : Number(coffee_id);
+  if (state.session.coffee_id !== id) state.session.green_delivery_id = null;   // another coffee's green
   state.session.coffee_id = id;
   state.session.coffee = id == null ? "" : (state.coffee_names[id] ?? "");
 }
@@ -346,6 +412,7 @@ async function init() {
   }
   state.loading = false;
   render();
+  if (state.view === "new" && state.ui.step >= 2) load_green_lots(state.session.coffee_id);
   if (saved) UnsavedWork.notice(UnsavedWork.RESTORED_MSG);
 }
 
@@ -543,12 +610,34 @@ function build_step2() {
       <p class="hint mb-12">Enter the Cropster roast ID and green weight for each batch going into ${s.is_test?'this <strong>test roast</strong>':`<strong>${esc(s.container_id)}</strong>`}.</p>
       ${batch_rows}
       ${total_green>0?`<div style="background:#f4f2ed;border-radius:8px;padding:10px 14px;font-size:13px;margin-top:4px">Total green weight in: <strong>${total_green.toFixed(1)}kg</strong></div>`:""}
+      ${build_green_lot()}
       <p id="s2-err" class="err" style="display:none"></p>
       <div style="display:flex;gap:8px;margin-top:16px">
         <button class="btn btn-dark btn-lg" id="s2-next">Next — Enter Roasted Weight →</button>
         <button class="btn btn-ghost btn-lg" id="s2-back">← Back</button>
       </div>
     </div>`;
+}
+
+// Which green delivery (ICO) went in — filled in with the oldest still in stock, changed only if a
+// different sack was used. Saved on the roast so Trace can show the real ICO.
+function build_green_lot() {
+  const s = state.session, g = state.green_lots;
+  let body;
+  if (!g || g.coffee_id !== s.coffee_id || g.loading) body = `<p class="hint">Finding the green in stock…</p>`;
+  else if (g.failed) body = `<p class="hint" style="color:#d97706">Couldn't load the green deliveries — the roast will be saved without one.</p>`;
+  else if (!g.options.length) body = `<p class="hint">No green deliveries logged for ${esc(s.coffee)} — the roast will be saved without one.</p>`;
+  else {
+    const opt = d => `<option value="${esc(d.id)}" ${s.green_delivery_id === d.id ? "selected" : ""}>${esc(green_lot_label(d))}</option>`;
+    const stock = g.options.filter(d => g.in_stock_ids.has(d.id)), used = g.options.filter(d => !g.in_stock_ids.has(d.id));
+    body = `<select id="s2-green">
+        ${s.green_delivery_id ? "" : `<option value="" selected>— not known —</option>`}
+        ${stock.length ? `<optgroup label="In stock">${stock.map(opt).join("")}</optgroup>` : ""}
+        ${used.length ? `<optgroup label="Used up">${used.map(opt).join("")}</optgroup>` : ""}
+      </select>
+      <p class="hint" style="font-size:12px;margin-top:4px">Filled in with the oldest delivery still in stock — change it only if a different sack was used.</p>`;
+  }
+  return `<div style="margin-top:14px"><label class="lbl">Green used</label>${body}</div>`;
 }
 
 function build_step3() {
@@ -704,7 +793,9 @@ function attach_listeners() {
     state.session.batch_count=count;
     state.session.batches=Array.from({length:count},(_,i) => state.session.batches[i]||{cropster_id:"",green_weight:""});
     state.ui.step=2; render();
+    load_green_lots(state.session.coffee_id);
   });
+  app.querySelector("#s2-green")?.addEventListener("change", e => { state.session.green_delivery_id = e.target.value || null; render(); });
 
   app.querySelectorAll(".b-id").forEach(inp => inp.addEventListener("input", e => { state.session.batches[Number(inp.dataset.idx)].cropster_id=e.target.value.trim(); }));
   app.querySelectorAll(".b-green").forEach(inp => inp.addEventListener("input", e => { state.session.batches[Number(inp.dataset.idx)].green_weight=e.target.value; }));
