@@ -128,6 +128,15 @@ function cid(v) { return v === "" || v == null ? null : Number(v); }
 
 function today() { return new Date().toISOString().split("T")[0]; }
 function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+// One ICO format whatever the supplier wrote: country (3 digits) - exporter (4 digits) - lot as written.
+// Short numbers are padded (3 → 003, 82 → 0082), never cut — a longer part is kept as it is.
+// Slashes, spaces or dots between the parts become dashes. Anything not in three parts is left as typed.
+function format_ico(raw) {
+  const s = String(raw || "").trim();
+  const parts = s.split(/\s*[\/\-.\s]\s*/).filter(Boolean);
+  if (parts.length !== 3 || !/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) return s;
+  return `${parts[0].padStart(3, "0")}-${parts[1].padStart(4, "0")}-${parts[2]}`;
+}
 function gen_id(prefix) {
   const r = crypto.randomUUID().split("-")[0].toUpperCase();
   return `${prefix}-${today().replace(/-/g,"")}-${r}`;
@@ -292,7 +301,7 @@ async function save_delivery() {
     origin: item.origin || null,
     green_name: item.green_name || null,
     lot_number: item.lot_number || null,
-    ico_number: item.ico_number || null,
+    ico_number: format_ico(item.ico_number) || null,
     bags: Number(item.bags) || null,
     weight_kg: Number(item.weight_kg),
     arrived_on: d.date,
@@ -365,7 +374,8 @@ async function save_delivery_details() {
   const changes = arrival.items.map(item => {
     const patch = {};
     KEYS.forEach(k => {
-      const v = (e.lines[item.id]?.[k] ?? "").trim() || null;
+      const raw = (e.lines[item.id]?.[k] ?? "").trim();
+      const v = (k === "ico_number" ? format_ico(raw) : raw) || null;
       if (v !== (item[k] || null)) patch[k] = v;
     });
     return { id: item.id, patch };
@@ -762,7 +772,7 @@ function build_deliveries() {
             <div style="margin-bottom:12px">
               <div style="font-weight:600;font-size:13px;margin-bottom:6px">${esc(item.coffee)} · ${Number(item.weight_kg).toFixed(1)}kg</div>
               <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
-                <div><label class="lbl">ICO No.</label>${inp(item, "ico_number", "e.g. 002/4600/0524")}</div>
+                <div><label class="lbl">ICO No.</label>${inp(item, "ico_number", "e.g. 002-4600-0524")}</div>
                 <div><label class="lbl">Lot No.</label>${inp(item, "lot_number", "")}</div>
                 <div><label class="lbl">Green name</label>${inp(item, "green_name", "")}</div>
                 <div><label class="lbl">Origin</label>${inp(item, "origin", "")}</div>
@@ -865,7 +875,25 @@ function build_deliveries() {
     return `<span class="tag" style="background:#fff7ed;color:#d97706;font-weight:700">⏳ AWAITING INVOICE</span>`;
   };
 
-  const delivery_list = state.deliveries.map(d => {
+  // Find a delivery: by coffee, and/or only those with a coffee missing its ICO
+  const df = state.ui.deliv_filter || (state.ui.deliv_filter = { coffee_id: "", missing_ico: false });
+  const line_matches = i => (!df.coffee_id || String(i.coffee_id) === df.coffee_id) && (!df.missing_ico || !i.ico_number);
+  const shown = state.deliveries.filter(d => d.items.some(line_matches));
+  const deliv_coffees = [...new Map(state.deliveries.flatMap(d => d.items).map(i => [String(i.coffee_id), i.coffee])).entries()]
+    .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  const filter_html = state.deliveries.length ? `
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <select id="deliv-coffee" style="max-width:260px">
+        <option value="">All coffees</option>
+        ${deliv_coffees.map(([id, name]) => `<option value="${esc(id)}" ${df.coffee_id === id ? "selected" : ""}>${esc(name)}</option>`).join("")}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="deliv-missing-ico" ${df.missing_ico ? "checked" : ""} /> Missing ICO only
+      </label>
+      <span class="hint">${shown.length} of ${state.deliveries.length} deliveries</span>
+    </div>` : "";
+
+  const delivery_list = shown.map(d => {
     const total_kg    = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0), 0);
     const total_value = d.items.reduce((s,i) => s+(Number(i.weight_kg)||0)*(Number(i.price_per_kg)||0), 0);
     return `
@@ -916,7 +944,7 @@ function build_deliveries() {
     ${awaiting_html}
     ${state.deliveries.length===0&&!show_delivery_form
       ? `<div class="card empty"><div class="icon">📦</div>No deliveries logged yet.</div>`
-      : delivery_list}`;
+      : filter_html + (delivery_list || `<div class="card empty">No deliveries match.</div>`)}`;
 }
 function build_delivery_item_row(item, i) {
   return `
@@ -935,7 +963,7 @@ function build_delivery_item_row(item, i) {
         <div><label class="lbl">Green Name</label><input class="item-green-name" data-idx="${i}" value="${esc(item.green_name||"")}" placeholder="e.g. Ethiopia Yirgacheffe Kochere Gr.1" /></div>
         <div><label class="lbl">Origin / Country</label><input class="item-origin" data-idx="${i}" value="${esc(item.origin)}" placeholder="e.g. Ethiopia" /></div>
         <div><label class="lbl">Lot No.</label><input class="item-lot" data-idx="${i}" value="${esc(item.lot_number)}" placeholder="e.g. LOT-4600" /></div>
-        <div><label class="lbl">ICO No.</label><input class="item-ico" data-idx="${i}" value="${esc(item.ico_number||"")}" placeholder="e.g. 002/4600/0524" title="From the invoice — the traceability reference" /></div>
+        <div><label class="lbl">ICO No.</label><input class="item-ico" data-idx="${i}" value="${esc(item.ico_number||"")}" placeholder="e.g. 002-4600-0524" title="From the invoice — the traceability reference" /></div>
         <div><label class="lbl">No. of Bags</label><input type="number" inputmode="decimal" class="item-bags" data-idx="${i}" value="${item.bags}" placeholder="0" /></div>
         <div><label class="lbl">Total Weight (kg) *</label><input type="number" inputmode="decimal" class="item-weight" data-idx="${i}" value="${item.weight_kg}" placeholder="0.0" step="0.1" /></div>
         <div><label class="lbl">Price per kg (€)</label><input type="number" inputmode="decimal" class="item-price" data-idx="${i}" value="${item.price_per_kg}" placeholder="0.00" step="0.01" /></div>
@@ -1295,6 +1323,8 @@ function attach_listeners() {
     };
     render();
   }));
+  app.querySelector("#deliv-coffee")?.addEventListener("change", e => { state.ui.deliv_filter.coffee_id = e.target.value; render(); });
+  app.querySelector("#deliv-missing-ico")?.addEventListener("change", e => { state.ui.deliv_filter.missing_ico = e.target.checked; render(); });
   app.querySelectorAll("[data-edit-details]").forEach(btn => btn.addEventListener("click", () => {
     const id = btn.dataset.editDetails;
     const d = state.deliveries.find(x => x.id === id);
@@ -1354,6 +1384,13 @@ function attach_listeners() {
   sync(".item-coffee","coffee_id"); sync(".item-green-name","green_name"); sync(".item-origin","origin");
   sync(".item-lot","lot_number"); sync(".item-ico","ico_number"); sync(".item-bags","bags"); sync(".item-weight","weight_kg"); sync(".item-price","price_per_kg");
   sync(".item-contract","contract_id");
+  // ICO boxes tidy themselves when you leave them: 3/4322/00007 → 003-4322-00007
+  app.querySelectorAll(".item-ico, .det-input[data-key='ico_number']").forEach(el => el.addEventListener("blur", () => {
+    const v = format_ico(el.value);
+    if (v === el.value) return;
+    el.value = v;
+    el.dispatchEvent(new Event("input"));
+  }));
 
   app.querySelector("#save-delivery")?.addEventListener("click", () => {
     app.querySelectorAll(".item-coffee").forEach(el     => { state.ui.delivery.items[Number(el.dataset.idx)].coffee_id=el.value; });
