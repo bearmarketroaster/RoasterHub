@@ -267,7 +267,7 @@ function coffee_data(coffee_id) {
 async function qc_data(coffee_id) {
   const [green, colour] = await Promise.all([
     fetch_all(() => supabaseClient.from("green_qc_entries")
-      .select("id, measured_at, created_at, density_1, density_2, density_3, moisture_1, moisture_2, moisture_3, water_activity_1, water_activity_2, water_activity_3")
+      .select("id, measured_at, created_at, green_delivery_id, density_1, density_2, density_3, moisture_1, moisture_2, moisture_3, water_activity_1, water_activity_2, water_activity_3")
       .eq("coffee_id", coffee_id).order("measured_at").order("id")),
     fetch_all(() => supabaseClient.from("qc_agtron_entries")
       .select("id, measured_at, created_at, whole_bean_1, whole_bean_2, whole_bean_3, ground_1, ground_2, ground_3")
@@ -387,10 +387,13 @@ function qc_avg(r, m) {
 }
 const newest_first = (a, b) => (b.measured_at || "").localeCompare(a.measured_at || "") || (b.created_at || "").localeCompare(a.created_at || "");
 
-// Green QC for a delivery: the newest check of the coffee taken while that delivery was its green
-// (from its arrival until the next delivery arrived). Nothing → not tested; another delivery's numbers aren't borrowed.
+// Green QC for a delivery: its newest check logged against that delivery (ICO). Checks logged before the QC
+// page recorded the delivery count for the delivery that was current then (from its arrival until the next
+// delivery arrived). Nothing → not tested; another delivery's numbers aren't borrowed.
 function green_qc_html(lot, qc) {
-  const r = (qc?.green || []).filter(g => g.measured_at >= lot.date && (!lot.until || g.measured_at < lot.until)).sort(newest_first)[0];
+  const r = (qc?.green || []).filter(g => g.green_delivery_id
+      ? g.green_delivery_id === lot.delivery_id
+      : g.measured_at >= lot.date && (!lot.until || g.measured_at < lot.until)).sort(newest_first)[0];
   if (!r) return `<span class="muted">not tested</span>`;
   const parts = [
     ["moisture", v => `${v.toFixed(1)}%`], ["density", v => `${Math.round(v)} g/L`], ["water_activity", v => `${v.toFixed(2)} aw`],

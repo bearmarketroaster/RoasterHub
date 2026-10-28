@@ -134,6 +134,7 @@ function new_qc_form(kind, carry = {}) {
     shop: carry.shop || "",
     brew_method: carry.brew_method || "",
     measured_at: carry.measured_at || today_iso(),
+    green_delivery_id: "",  // green only: the delivery (ICO) tested — filled in with the newest untested one
     notes: "",
     readings: Object.fromEntries(QC_FORMS[kind].measures.map(m => [m, Array(N_READINGS).fill("")])),
     saving: false,
@@ -242,6 +243,8 @@ async function load() {
     state.entries[kind] = data || [];
   }));
 
+  await load_deliveries();
+
   // Sample roasts. Offer samples we may not own, so no join to coffees or green stock.
   const { data: samples } = await supabaseClient
     .from("sample_roasts")
@@ -251,6 +254,59 @@ async function load() {
   state.samples = samples || [];
 
   state.loaded = true;
+}
+
+// Green deliveries, each with how much of it is still in stock. Stock is used first-in-first-out (every
+// outflow takes the oldest green), so a delivery is in stock until the roasts after it have used it up.
+async function load_deliveries() {
+  const page = async build => {
+    const out = [];
+    for (let i = 0; i < 100; i++) {
+      const { data, error } = await build().range(i * 1000, i * 1000 + 999);
+      if (error) { console.error("QC: couldn't load green deliveries:", error); return out; }
+      out.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    return out;
+  };
+  const [deliveries, movements] = await Promise.all([
+    page(() => supabaseClient.from("green_deliveries").select("id, coffee_id, arrived_on, ico_number, green_name, supplier").order("arrived_on").order("id")),
+    page(() => supabaseClient.from("green_movements").select("id, coffee_id, occurred_on, change_kg, delivery_id").order("occurred_on").order("id")),
+  ]);
+  const queues = {};   // coffee_id → [{ key, left }], oldest first
+  movements.map(m => ({ ...m, change_kg: Number(m.change_kg) || 0 }))
+    .sort((a, b) => (a.occurred_on || "").localeCompare(b.occurred_on || "") || (b.change_kg > 0) - (a.change_kg > 0) || String(a.id).localeCompare(String(b.id)))
+    .forEach(m => {
+      const queue = (queues[m.coffee_id] ||= []);
+      if (m.change_kg > 0) { queue.push({ key: m.delivery_id || `X:${m.id}`, left: m.change_kg }); return; }
+      let need = -m.change_kg;
+      while (need > 1e-9 && queue.length) {
+        const q = queue[0], take = Math.min(q.left, need);
+        q.left -= take; need -= take;
+        if (q.left <= 1e-9) queue.shift();
+      }
+    });
+  const left = {};
+  Object.values(queues).flat().forEach(q => { left[q.key] = (left[q.key] || 0) + q.left; });
+  state.deliveries = deliveries.map(d => ({ ...d, left: left[d.id] || 0 }));
+  state.delivery_by_id = Object.fromEntries(state.deliveries.map(d => [d.id, d]));
+}
+
+// A coffee's deliveries still in stock, newest first
+const in_stock_deliveries = coffee_id => (state.deliveries || [])
+  .filter(d => String(d.coffee_id) === String(coffee_id) && d.left > 0.05)
+  .sort((a, b) => (b.arrived_on || "").localeCompare(a.arrived_on || ""));
+const delivery_tested = id => state.entries.green.some(e => e.green_delivery_id === id);
+// What the ICO box is filled in with: the newest delivery not yet tested, else the newest in stock
+function default_delivery(coffee_id) {
+  const ds = in_stock_deliveries(coffee_id);
+  return (ds.find(d => !delivery_tested(d.id)) || ds[0])?.id || "";
+}
+function delivery_label(d, with_stock = true) {
+  const dt = new Date(d.arrived_on + "T12:00:00");
+  const when = `${dt.toLocaleDateString("en-IE", { weekday: "short" })} ${dt.getDate()} ${dt.toLocaleDateString("en-IE", { month: "short" })}`;
+  return `ICO ${d.ico_number || "not entered"}${d.green_name ? ` · ${d.green_name}` : ""} — arrived ${when}`
+    + (with_stock ? ` (${d.left.toFixed(0)}kg left)` : "");
 }
 
 const mean = vals => vals.reduce((a, b) => a + b, 0) / vals.length;
@@ -312,6 +368,7 @@ async function save_qc(kind) {
     payload.shop = f.shop;
     payload.brew_method = f.brew_method || null;
   }
+  if (kind === "green") payload.green_delivery_id = f.green_delivery_id || null;
   for (const m of QC_FORMS[kind].measures) {
     f.readings[m].forEach((v, i) => { payload[`${m}_${i + 1}`] = v === "" ? null : Number(v); });
   }
@@ -457,7 +514,7 @@ function build_qc_log(kind, title) {
         <div style="overflow-x:auto">
           <table>
             <thead><tr>
-              <th>Date</th>${is_tds ? "<th>Shop</th>" : ""}<th>Coffee</th>${is_tds ? "<th>Brew</th>" : ""}
+              <th>Date</th>${is_tds ? "<th>Shop</th>" : ""}<th>Coffee</th>${is_tds ? "<th>Brew</th>" : ""}${kind === "green" ? "<th>ICO</th>" : ""}
               ${measures.map(m => `<th class="num">${MEASURES[m].label} (${MEASURES[m].unit})</th>`).join("")}
               <th>Notes</th><th></th>
             </tr></thead>
@@ -468,6 +525,7 @@ function build_qc_log(kind, title) {
                   ${is_tds ? `<td style="font-weight:600">${esc(e.shop)}</td>` : ""}
                   <td${is_tds ? "" : ' style="font-weight:600"'}>${esc(e.coffee)}</td>
                   ${is_tds ? `<td>${esc(e.brew_method || "—")}</td>` : ""}
+                  ${kind === "green" ? `<td class="hint">${esc(state.delivery_by_id?.[e.green_delivery_id]?.ico_number || "—")}</td>` : ""}
                   ${measures.map(m => reading_cell(e, m)).join("")}
                   <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.notes||"")}">${esc(e.notes||"")}</td>
                   <td><button class="delete-btn" data-delete-qc="${kind}|${esc(e.id)}" title="Delete">✕</button></td>
@@ -489,8 +547,39 @@ function build_green_tab() {
     : build_qc_form("green", "Log a measurement",
         field("Coffee *", build_select("green", "coffee_id",
           greens.map(g => ({ value: String(g.coffee_id), label: `${g.coffee} (${g.remaining.toFixed(0)}kg)` })), "— Pick green coffee —")) +
-        field("Date *", date_input("green")));
-  return form + build_qc_log("green", "QC Log");
+        field("Date *", date_input("green")) +
+        build_delivery_field());
+  return build_waiting_list() + form + build_qc_log("green", "QC Log");
+}
+
+// Which delivery (ICO) was tested — filled in with the newest untested one of the coffee, changeable
+function build_delivery_field() {
+  const f = state.forms.green;
+  if (!f.coffee_id) return "";
+  const ds = in_stock_deliveries(f.coffee_id);
+  if (!ds.length) return field("Delivery (ICO)", `<p class="hint" style="padding-top:8px">No delivery of this coffee in stock</p>`);
+  return field("Delivery (ICO)", build_select("green", "green_delivery_id",
+    ds.map(d => ({ value: d.id, label: delivery_label(d) + (delivery_tested(d.id) ? " · tested" : "") })), "— not known —"));
+}
+
+// Deliveries in stock with no green QC yet: test on arrival, before green is taken from the pallet
+function build_waiting_list() {
+  const active = new Set(state.in_stock_greens.map(g => String(g.coffee_id)));
+  const waiting = (state.deliveries || [])
+    .filter(d => d.left > 0.05 && active.has(String(d.coffee_id)) && !delivery_tested(d.id))
+    .sort((a, b) => (a.arrived_on || "").localeCompare(b.arrived_on || ""));
+  if (!waiting.length) return "";
+  const name = id => state.in_stock_greens.find(g => String(g.coffee_id) === String(id))?.coffee || "";
+  return `
+    <div class="card" style="border-left:3px solid #d97706">
+      <div class="section-label">Waiting for green QC (${waiting.length})</div>
+      <p class="hint" style="margin-bottom:10px">Deliveries in stock that haven't been tested — test on arrival, or before green is taken from the pallet.</p>
+      ${waiting.map(d => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #f0eee9">
+          <div><strong>${esc(name(d.coffee_id))}</strong> <span class="hint">${esc(delivery_label(d))}</span></div>
+          <button class="btn btn-ghost" data-test-delivery="${esc(d.id)}" style="white-space:nowrap">Test now →</button>
+        </div>`).join("")}
+    </div>`;
 }
 
 function build_roasted_tab() {
@@ -668,6 +757,19 @@ function attach_listeners() {
     el.addEventListener("input", store);
     el.addEventListener("change", store);
   });
+  // Green: picking the coffee fills in the delivery (ICO) box with its newest untested delivery
+  document.querySelector('[data-field="green|coffee_id"]')?.addEventListener("change", e => {
+    state.forms.green.green_delivery_id = default_delivery(e.target.value);
+    render();
+  });
+  document.querySelectorAll("[data-test-delivery]").forEach(btn => btn.addEventListener("click", () => {
+    const d = state.delivery_by_id[btn.dataset.testDelivery];
+    Object.assign(state.forms.green, { coffee_id: String(d.coffee_id), green_delivery_id: d.id, err: "", ok: false });
+    render();
+    const first = document.querySelector(`[data-reading="green|${QC_FORMS.green.measures[0]}|0"]`);
+    first?.scrollIntoView({ block: "center" });
+    first?.focus();
+  }));
 
   document.querySelectorAll("[data-reading]").forEach(el => el.addEventListener("input", e => {
     const [kind, m, i] = el.dataset.reading.split("|");
