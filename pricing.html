@@ -809,7 +809,6 @@ function render_results() {
         </div>
       </div>`;
 
-    if (!g) return `<div class="card">${head}<div class="no-green">No green price — enter one above to see costs.</div></div>`;
     if (!o.sizes.length) return `<div class="card">${head}<div class="hint">No sizes ticked.</div></div>`;
 
     const rows = SIZES.filter(s => o.sizes.includes(s.label)).map(s => {
@@ -817,7 +816,20 @@ function render_results() {
       const sell = sell_for(coffee.id, s.label);
       const key = `${coffee.id}|${s.label}`;
       if (!c || c.cost == null) {
-        return `<tr><td class="size">${esc(s.label)}</td><td colspan="7" class="no-green">No packaging cost for ${esc(s.label)} — set it in Settings above.</td></tr>`;
+        // No cost to work from yet, but the saved prices still show (and can be set) — they're what the
+        // labels print; only the cost, margins and band need the green price / packaging cost
+        const why = !g ? "No green price — enter one above to see cost and margins"
+                       : `No packaging cost for ${esc(s.label)} — set it in Settings above`;
+        return `
+          <tr>
+            <td class="size">${esc(s.label)}</td>
+            <td class="num">—</td>
+            <td class="num"><div class="your-wrap"><span class="eur-pre">€</span>
+              <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${key}|wholesale" value="${money_val(roastery_for(coffee.id, s.label))}" placeholder="—" /></div></td>
+            <td class="num"><div class="your-wrap"><span class="eur-pre">€</span>
+              <input type="number" inputmode="decimal" step="0.01" min="0" class="final-input" data-final="${key}|retail" value="${money_val(sell)}" placeholder="—" /></div></td>
+            <td colspan="4" class="no-green">${why}</td>
+          </tr>`;
       }
       const open = !!state.how[key];
       return `

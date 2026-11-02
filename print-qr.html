@@ -412,14 +412,17 @@
         render_grid();
       }));
 
-      const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }, { data: fp_label_data }, { data: fp_assignments }] = await Promise.all([
+      const [{ data: buckets }, { data: containers }, { data: fp_codes }, { data: shop_mappings }, { data: fp_label_data }, { data: fp_assignments }, { data: pricing_final }] = await Promise.all([
         supabaseClient.from("buckets").select("id, name, retired_at, created_at, label_printed_at").order("created_at", { ascending: false }),
         supabaseClient.from("containers").select("id, name, retired_at").order("id"),
-        supabaseClient.from("fp_codes").select("fp_code, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
+        supabaseClient.from("fp_codes").select("fp_code, coffee_id, bag_size, retired_at, coffees(name, retired_at)").order("fp_code"),
         supabaseClient.from("shop_mappings").select("master_name, shop_qr_id").order("master_name"),
         supabaseClient.from("fp_label_data").select("*"),
         supabaseClient.from("fp_assignments").select("id, fp_code, effective_end").order("fp_code"),
+        supabaseClient.from("pricing_final").select("coffee_id, bag_size, retail"),
       ]);
+      // Shop sell prices saved on the Pricing page — printed on a label when there is one
+      state.pricing_retail = Object.fromEntries((pricing_final || []).filter(r => r.retail != null).map(r => [`${r.coffee_id}|${r.bag_size}`, Number(r.retail)]));
       state.buckets = (buckets||[]).filter(b => !b.retired_at).sort((a,b)=>{ const n=x=>{const m=String(x.name||x.id||"").match(/(\d+)\s*$/);return m?+m[1]:Infinity;}; return n(a)-n(b)||String(a.name||a.id).localeCompare(String(b.name||b.id)); });
       state.containers = (containers||[]).filter(c => !c.retired_at);
       // Print/label workflows are forward-only — never need retired FPs or retired coffees.
@@ -427,7 +430,7 @@
       state.fp_codes = (fp_codes||[])
         .filter(f => !f.retired_at)
         .filter(f => !f.coffees?.retired_at)
-        .map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", bag_size: f.bag_size||"" }));
+        .map(f => ({ id: f.fp_code, label: `${f.coffees?.name||""} ${f.bag_size}`, coffee_name: f.coffees?.name||"", coffee_id: f.coffee_id, bag_size: f.bag_size||"" }));
       // Labels are per-version. A fresh print uses the OPEN version's label, so map
       // each fp_code to the label row whose assignment is the current/open one.
       const open_aid_by_fp = {};
@@ -628,6 +631,9 @@
         return;
       }
       const label_data = state.fp_label_data[fp_code] || {};
+      // Price: the Pricing page's shop sell price when it has one, else the price typed in Settings
+      const priced = state.pricing_retail?.[`${fp.coffee_id}|${fp.bag_size === "Bar 5kg" ? "5kg" : fp.bag_size}`];
+      const price = priced != null ? `€${priced.toFixed(2)}` : label_data.price;
 
       // Build a single bag-label HTML block (gets repeated 21 times)
       const flavours = [label_data.flavour_1, label_data.flavour_2, label_data.flavour_3].filter(Boolean).join(" · ");
@@ -638,7 +644,7 @@
           ${label_data.roast_type ? `<div class="bl-roast">${esc(label_data.roast_type)}</div>` : ""}
           ${origin_lines.length ? `<div class="bl-origin">${origin_lines.map(l => esc(l)).join("<br>")}</div>` : ""}
           ${flavours ? `<div class="bl-flavours">${esc(flavours)}</div>` : ""}
-          ${label_data.price && !state.hide_price ? `<div class="bl-price">${esc(label_data.price)}</div>` : ""}`;
+          ${price && !state.hide_price ? `<div class="bl-price">${esc(price)}</div>` : ""}`;
       // 21 copies (3 cols × 7 rows) — each positioned absolutely in mm.
       // OnlineLabels EU30015GM / Avery L7160 spec:
       // top  = 15.15mm + row × 38.1mm

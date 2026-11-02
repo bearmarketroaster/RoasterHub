@@ -271,6 +271,17 @@ async function load_shop_mappings() {
   state.shop_mappings = data || [];
 }
 
+// Shop sell prices saved on the Pricing page — a label shows this price when there is one ("Bar 5kg" = "5kg")
+async function load_pricing_retail() {
+  const { data, error } = await supabaseClient.from("pricing_final").select("coffee_id, bag_size, retail");
+  if (error) { console.error("Failed to load Pricing prices:", error); return; }
+  state.pricing_retail = Object.fromEntries((data || []).filter(r => r.retail != null).map(r => [`${r.coffee_id}|${r.bag_size}`, Number(r.retail)]));
+}
+function pricing_price_for(coffee_id, bag_size) {
+  const v = state.pricing_retail?.[`${coffee_id}|${bag_size === "Bar 5kg" ? "5kg" : bag_size}`];
+  return v == null ? null : `€${v.toFixed(2)}`;
+}
+
 async function load_fp_label_data() {
   const { data, error } = await supabaseClient.from("fp_label_data").select("*");
   if (error) { console.error("Failed to load fp_label_data:", error); return; }
@@ -556,7 +567,7 @@ async function init() {
   await load_current_user();
   // Viewers shouldn't be in Settings at all — redirect to Reports
   if (state.current_user?.role !== "admin") { window.location.href = "reports.html"; return; }
-  await Promise.all([load_coffees(), load_shop_mappings(), load_fp_label_data(), load_fp_assignments(), load_users(), load_buckets(), load_containers()]);
+  await Promise.all([load_coffees(), load_shop_mappings(), load_fp_label_data(), load_pricing_retail(), load_fp_assignments(), load_users(), load_buckets(), load_containers()]);
   state.loading = false;
   const restored = restore_unsaved();
   render();
@@ -1609,7 +1620,15 @@ function build_label_data_section() {
               </div>
               <div>
                 <label class="lbl">Price</label>
-                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="price" value="${esc(d.price||"")}" placeholder="e.g. €14.00" />
+                ${(() => {
+                  // The Pricing page's shop sell price wins; the typed price is only used when Pricing has none
+                  const from_pricing = pricing_price_for(g.coffee.id, f.bag_size);
+                  return from_pricing
+                    ? `<input value="${esc(from_pricing)}" disabled style="background:#f4f2ed;color:#1a1a1a" />
+                       <div style="font-size:11px;color:#666;margin-top:3px">From Pricing — change it on the Pricing page</div>`
+                    : `<input class="label-input" data-fp="${esc(f.fp_code)}" data-field="price" value="${esc(d.price||"")}" placeholder="e.g. €14.00" />
+                       <div style="font-size:11px;color:#d97706;margin-top:3px">No Pricing price — this typed price is printed</div>`;
+                })()}
               </div>
             </div>
             <div style="display:flex;gap:10px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid #f0eee9">
