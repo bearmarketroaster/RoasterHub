@@ -362,12 +362,13 @@ async function load() {
 }
 
 // ── Pricing maths ───────────────────────────────────────────────────────────
-// Effective green price for a coffee: manual override wins, else latest delivery.
+// Effective green price for a coffee: the latest priced delivery; the price typed here is only the
+// STARTING price, used while the coffee has no priced delivery (user, 9 Nov).
 function green_for(coffeeId) {
-  const ov = state.green_override[coffeeId];
-  if (ov != null && !isNaN(ov)) return { price: ov, source: "manual" };
   const d = state.green_delivery[coffeeId];
   if (d) return { price: d.price, source: "delivery", date: d.date };
+  const ov = state.green_override[coffeeId];
+  if (ov != null && !isNaN(ov)) return { price: ov, source: "manual" };
   return null;
 }
 function opts_for(coffeeId) {
@@ -455,11 +456,13 @@ function price_on(coffeeId, size, field, date) {
   for (const x of h) { if (x.date <= date) row = x; else break; }
   return row[field];
 }
-// Green €/kg on `date`: the latest priced delivery on or before it (else the first one). A coffee with no
-// priced deliveries uses its current green price.
+// Green €/kg on `date`: the latest priced delivery on or before it. Before the first priced delivery:
+// the starting price typed here, else the first delivery's. No priced deliveries: the starting price.
 function green_on(coffeeId, date) {
   const h = state.green_history?.[coffeeId];
   if (!h || !h.length) return green_for(coffeeId)?.price ?? null;
+  const start = state.green_override[coffeeId];
+  if (start != null && !isNaN(start) && date < h[0].date) return start;
   let price = h[0].price;
   for (const x of h) { if (x.date <= date) price = x.price; else break; }
   return price;
@@ -531,7 +534,7 @@ function build_how(cid, size) {
   return `
     <div class="drilldown">
       <div class="dl-head">How ${esc(size)} is priced</div>
-      ${step("1", `Green ${d4(c.green)}/kg <span style="color:#999">(${g?.source === "manual" ? "entered here" : `latest delivery${g?.date ? ` ${esc(g.date)}` : ""}`})</span> + shipping ${d4(c.shipping)}/kg = landed <b>${d4(c.landed)}/kg</b>`)}
+      ${step("1", `Green ${d4(c.green)}/kg <span style="color:#999">(${g?.source === "manual" ? "starting price, entered here" : `latest delivery${g?.date ? ` ${esc(g.date)}` : ""}`})</span> + shipping ${d4(c.shipping)}/kg = landed <b>${d4(c.landed)}/kg</b>`)}
       ${step("2", `Landed ÷ (1 − ${loss}% roast loss) = roasted <b>${d4(c.roasted)}/kg</b> <span style="color:#999">— coffee is lost in the roast, so each roasted kg costs more</span>`)}
       ${step("3", `Roasted ${d4(c.roasted)} × ${SIZE_KG[size]}kg = ${d4(c.roasted * SIZE_KG[size])} coffee + ${d4(c.packaging)} packaging <span style="color:#999">(${c.packaging_source === "Standard" ? `standard ${esc(size)} bag` : esc(c.packaging_source)})</span> = cost <b>${eur(c.cost)}</b>`)}
       ${step("4", `Cost ÷ (1 − ${m}% roastery margin) = ${d4(raw_shop)}${rounding ? `, ${rounding}` : ""} = calculated roastery → shop <b>${eur(c.shop_calc)}</b>`
@@ -772,13 +775,16 @@ function render_results() {
     const g = green_for(coffee.id);
     const o = opts_for(coffee.id);
     const r = roasted_per_kg(coffee.id);
-    const input_val = state.green_override[coffee.id] != null
-      ? state.green_override[coffee.id]
-      : (state.green_delivery[coffee.id]?.price ?? "");
+    // A coffee with a priced delivery shows that price (read-only — it changes in Stock); otherwise the box
+    // takes the starting price, used until the first priced delivery is logged.
+    const from_delivery = g && g.source === "delivery";
+    const input_val = from_delivery ? g.price : (state.green_override[coffee.id] ?? "");
+    const start = state.green_override[coffee.id];
     let src_hint = "";
-    if (g && g.source === "delivery") src_hint = `from delivery${g.date?` ${esc(g.date)}`:""}`;
-    else if (g && g.source === "manual") src_hint = "manual entry";
-    else src_hint = "enter a price";
+    if (from_delivery) src_hint = `from delivery${g.date?` ${esc(g.date)}`:""} · change it in Stock`
+      + (start != null ? ` · starting price ${eur(start)} used before the first delivery` : "");
+    else if (g && g.source === "manual") src_hint = "starting price — used until a priced delivery is logged";
+    else src_hint = "enter a starting price";
     const ship_val = state.shipping_override[coffee.id] != null ? state.shipping_override[coffee.id] : "";
     const pkg_options = ["", ...names, ...(o.packaging && !names.includes(o.packaging) ? [o.packaging] : [])]
       .map(n => `<option value="${esc(n)}" ${(o.packaging || "") === n ? "selected" : ""}>${n ? esc(n) + (names.includes(n) ? "" : " (missing)") : "Standard"}</option>`).join("");
@@ -788,7 +794,7 @@ function render_results() {
         <div class="coffee-name">${esc(coffee.name)}</div>
         <div class="coffee-params">
           <span class="lbl">Green €/kg</span>
-          <input type="number" inputmode="decimal" step="0.01" min="0" class="num-input" data-green="${coffee.id}" value="${input_val}" placeholder="0.00" />
+          <input type="number" inputmode="decimal" step="0.01" min="0" class="num-input" data-green="${coffee.id}" value="${input_val}" placeholder="0.00"${from_delivery ? ` readonly title="From the latest priced delivery — change it in Stock → Deliveries" style="background:#f3f1ec;color:#555"` : ""} />
           <span class="src">${src_hint}</span>
           <span class="sep">·</span>
           <span class="lbl">Shipping €/kg</span>
