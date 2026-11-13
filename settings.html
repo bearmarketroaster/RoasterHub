@@ -886,6 +886,7 @@ async function save_fp_label_data(fp_code) {
     region:     m.region     || null,
     process:    m.process    || null,
     altitude:   m.altitude   || null,
+    varietal:   m.varietal   || null,
     flavour_1:  m.flavour_1  || null,
     flavour_2:  m.flavour_2  || null,
     flavour_3:  m.flavour_3  || null,
@@ -1607,6 +1608,10 @@ function build_label_data_section() {
                 <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="altitude" value="${esc(d.altitude||"")}" placeholder="e.g. 1800 Masl" />
               </div>
               <div>
+                <label class="lbl">Varietal <span style="font-weight:400;color:#999">(optional · black box labels)</span></label>
+                <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="varietal" value="${esc(d.varietal||"")}" placeholder="e.g. Geisha, Pink Bourbon" />
+              </div>
+              <div>
                 <label class="lbl">Flavour 1</label>
                 <input class="label-input" data-fp="${esc(f.fp_code)}" data-field="flavour_1" value="${esc(d.flavour_1||"")}" placeholder="e.g. Chocolate" />
               </div>
@@ -1953,6 +1958,7 @@ function attach_listeners() {
       region:     source.region     || "",
       process:    source.process    || "",
       altitude:   source.altitude   || "",
+      varietal:   source.varietal   || "",
       flavour_1:  source.flavour_1  || "",
       flavour_2:  source.flavour_2  || "",
       flavour_3:  source.flavour_3  || "",
