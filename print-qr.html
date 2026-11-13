@@ -665,9 +665,8 @@
 
       // Build a single bag-label HTML block (gets repeated 21 times)
       const flavours = [label_data.flavour_1, label_data.flavour_2, label_data.flavour_3].filter(Boolean).join(" · ");
-      // Varietal (optional) prints on the black box labels only, under the region
-      const varietal = state.a4_sheet === "box" ? label_data.varietal : null;
-      const origin_lines = [label_data.region, varietal, label_data.process, label_data.altitude].filter(Boolean);
+      // Varietal (optional) prints under the region, on both label sizes
+      const origin_lines = [label_data.region, label_data.varietal, label_data.process, label_data.altitude].filter(Boolean);
       const label_inner = `
           ${!state.hide_price ? `<div class="bl-qr" data-value="${esc_attr(fp_code)}"></div>` : ""}
           <div class="bl-name">${esc(fp.coffee_name || "")}</div>
