@@ -146,6 +146,17 @@
       image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges; image-rendering: pixelated;
     }
 
+    /* BLACK BOX sheet — The Label Network EU30045 (silver): 70 × 42.3mm, 21 per A4 (3 × 7), edge to edge.
+       No side margins / gaps; top & bottom 0.45mm ((297 − 7 × 42.3) ÷ 2). Content is inset more (≈4.5mm)
+       because printers can't print the outer few mm of the page and the outer labels touch the edge. */
+    body.mode-a4_21.sheet-box .bag-label { width: 70mm; height: 42.3mm; padding: 4mm 4.5mm; }
+    body.mode-a4_21.sheet-box .bag-label .bl-name { font-size: 15pt; max-width: 38mm; }
+    body.mode-a4_21.sheet-box .bag-label.no-qr .bl-name { max-width: 61mm; }
+    body.mode-a4_21.sheet-box .bag-label .bl-origin { left: 4.5mm; top: 21mm; }
+    body.mode-a4_21.sheet-box .bag-label .bl-flavours { left: 4.5mm; bottom: 4mm; right: 19mm; }
+    body.mode-a4_21.sheet-box .bag-label .bl-price { right: 4.5mm; bottom: 3.5mm; font-size: 11pt; }
+    body.mode-a4_21.sheet-box .bag-label .bl-qr { right: 4.5mm; top: 4mm; width: 20mm; height: 20mm; }
+
     .pdf-btn { position: absolute; top: 4px; right: 4px; background: rgba(255,255,255,0.95); border: 1px solid #e8e6e1; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer; color: #1a1a1a; opacity: 0; transition: opacity 0.15s; }
     .qr-tile:hover .pdf-btn { opacity: 1; }
     .pdf-btn:hover { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
@@ -301,6 +312,11 @@
         </div>
       </div>
       <div id="a4-21-controls" style="display:none;align-items:center;gap:8px">
+        <label>Labels</label>
+        <select id="a4-21-sheet-select">
+          <option value="bag">Bag stickers · 63.5 × 38.1mm</option>
+          <option value="box">Black box · 70 × 42.3mm (silver)</option>
+        </select>
         <label>FP Code</label>
         <select id="a4-21-fp-select" style="min-width:240px"></select>
         <label style="display:flex;align-items:center;gap:5px;margin-left:6px;cursor:pointer;color:#ccc">
@@ -348,6 +364,13 @@
       hide_price: false,     // A4 bag labels: omit the price when printing
       selected_ids: new Set(init_ids || []),
       a4_21_fp: null,        // currently selected FP code for A4 21-up mode
+      a4_sheet: "bag",       // A4 21-up label stock: "bag" (63.5×38.1, L7160) | "box" (70×42.3 edge to edge, black boxes)
+    };
+
+    // A4 21-up label stocks: label size, page edges and spacing (mm). Label N: row = N÷3, col = N%3.
+    const A4_SHEETS = {
+      bag: { w: 63.5, h: 38.1, top: 15.15, left: 7.21, col_pitch: 66.04, row_pitch: 38.1 },  // OnlineLabels EU30015 / Avery L7160
+      box: { w: 70,   h: 42.3, top: 0.45,  left: 0,    col_pitch: 70,    row_pitch: 42.3 },  // The Label Network EU30045, edge to edge
     };
 
     async function init() {
@@ -460,6 +483,10 @@
       populate_a4_21_fp_select();
       document.getElementById("a4-21-fp-select").addEventListener("change", e => {
         state.a4_21_fp = e.target.value || null;
+        render_a4_21_sheet();
+      });
+      document.getElementById("a4-21-sheet-select").addEventListener("change", e => {
+        state.a4_sheet = A4_SHEETS[e.target.value] ? e.target.value : "bag";
         render_a4_21_sheet();
       });
       document.getElementById("hide-price-toggle").addEventListener("change", e => {
@@ -619,6 +646,7 @@
     function render_a4_21_sheet() {
       const grid = document.getElementById("grid");
       if (state.mode !== "a4_21") return;
+      document.body.classList.toggle("sheet-box", state.a4_sheet === "box");
 
       const fp_code = state.a4_21_fp;
       if (!fp_code) {
@@ -645,16 +673,14 @@
           ${origin_lines.length ? `<div class="bl-origin">${origin_lines.map(l => esc(l)).join("<br>")}</div>` : ""}
           ${flavours ? `<div class="bl-flavours">${esc(flavours)}</div>` : ""}
           ${price && !state.hide_price ? `<div class="bl-price">${esc(price)}</div>` : ""}`;
-      // 21 copies (3 cols × 7 rows) — each positioned absolutely in mm.
-      // OnlineLabels EU30015GM / Avery L7160 spec:
-      // top  = 15.15mm + row × 38.1mm
-      // left = 7.21mm  + col × 66.04mm  (66.04 = 63.5 label + 2.54 gap)
+      // 21 copies (3 cols × 7 rows) — each positioned absolutely in mm, per the chosen label stock (A4_SHEETS).
+      const S = A4_SHEETS[state.a4_sheet] || A4_SHEETS.bag;
       const all_labels = [];
       for (let i = 0; i < 21; i++) {
         const row = Math.floor(i / 3);
         const col = i % 3;
-        const top_mm  = 15.15 + row * 38.1;
-        const left_mm = 7.21  + col * 66.04;
+        const top_mm  = +(S.top  + row * S.row_pitch).toFixed(2);
+        const left_mm = +(S.left + col * S.col_pitch).toFixed(2);
         all_labels.push(`<div class="bag-label${state.hide_price ? " no-qr" : ""}" style="top:${top_mm}mm;left:${left_mm}mm">${label_inner}</div>`);
       }
       grid.innerHTML = `<div class="a4-sheet">${all_labels.join("")}</div>`;
