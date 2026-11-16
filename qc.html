@@ -96,6 +96,8 @@ function new_sample_form() {
     process: "",
     additional_info: "",
     sample_roaster_roast_id: "",
+    density: "",
+    water_activity: "",
     roasted_on: today_iso(),
     saving: false,
     err: "",
@@ -621,6 +623,10 @@ async function save_sample_roast() {
   if (f.saving) return;   // already saving — ignore a second tap
   if (!f.supplier.trim())  { f.err = "Enter a supplier."; render(); return; }
   if (!f.roasted_on)       { f.err = "Enter the date roasted."; render(); return; }
+  const num = v => { const s = String(v ?? "").trim().replace(",", "."); return s === "" ? null : Number(s); };
+  const density = num(f.density), water_activity = num(f.water_activity);
+  if (density != null && !(density > 0))                                  { f.err = "Density should be a number (g/L)."; render(); return; }
+  if (water_activity != null && !(water_activity >= 0 && water_activity <= 1)) { f.err = "Water activity should be between 0 and 1 (aw)."; render(); return; }
 
   f.saving = true; f.err = ""; f.ok = false; render();
 
@@ -633,6 +639,8 @@ async function save_sample_roast() {
     process: f.process.trim() || null,
     additional_info: f.additional_info.trim() || null,
     sample_roaster_roast_id: f.sample_roaster_roast_id.trim() || null,
+    density,
+    water_activity,
     roasted_on: f.roasted_on,
     created_by: user?.id || null,
   };
@@ -696,9 +704,19 @@ function build_samples_tab() {
           <input type="date" id="sr-date" value="${esc(f.roasted_on)}" />
         </div>
       </div>
-      <div style="margin-bottom:12px">
-        <label class="lbl">Sample roaster roast ID</label>
-        <input type="text" id="sr-roast-id" value="${esc(f.sample_roaster_roast_id)}" placeholder="Roast ID from the sample roaster" />
+      <div class="grid-3" style="margin-bottom:12px">
+        <div>
+          <label class="lbl">Sample roaster roast ID</label>
+          <input type="text" id="sr-roast-id" value="${esc(f.sample_roaster_roast_id)}" placeholder="Roast ID from the sample roaster" />
+        </div>
+        <div>
+          <label class="lbl">Green density (g/L)</label>
+          <input type="number" inputmode="decimal" step="any" min="0" id="sr-density" value="${esc(f.density)}" placeholder="e.g. 720" />
+        </div>
+        <div>
+          <label class="lbl">Green water activity (aw)</label>
+          <input type="number" inputmode="decimal" step="any" min="0" max="1" id="sr-wa" value="${esc(f.water_activity)}" placeholder="e.g. 0.55" />
+        </div>
       </div>
       <div style="margin-bottom:12px">
         <label class="lbl">Additional info</label>
@@ -726,6 +744,7 @@ function build_samples_tab() {
             <thead><tr>
               <th>Roasted</th><th>ID</th><th>Supplier</th><th>Their ref</th>
               <th>Origin</th><th>Process</th><th>Roaster ID</th>
+              <th>Density</th><th>WA</th>
               <th>Info</th><th></th>
             </tr></thead>
             <tbody>
@@ -738,6 +757,8 @@ function build_samples_tab() {
                   <td>${dash(s.origin)}</td>
                   <td>${dash(s.process)}</td>
                   <td>${dash(s.sample_roaster_roast_id)}</td>
+                  <td>${s.density != null ? `${esc(s.density)} g/L` : "—"}</td>
+                  <td>${s.water_activity != null ? `${esc(s.water_activity)} aw` : "—"}</td>
                   <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.additional_info||"")}">${esc(s.additional_info||"")}</td>
                   <td><button class="delete-btn" data-delete-sample="${esc(s.id)}" title="Delete">✕</button></td>
                 </tr>`).join("")}
@@ -813,6 +834,8 @@ function attach_listeners() {
   bind_sr("sr-process",  "process");
   bind_sr("sr-date",     "roasted_on");
   bind_sr("sr-roast-id", "sample_roaster_roast_id");
+  bind_sr("sr-density",  "density");
+  bind_sr("sr-wa",       "water_activity");
   bind_sr("sr-info",     "additional_info");
 
   document.getElementById("sr-save-btn")?.addEventListener("click", save_sample_roast);
