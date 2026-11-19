@@ -91,6 +91,11 @@
         <div><div class="module-name">Packing Today</div><div class="module-desc">Live container breakdown — what's been packed from each drum today and how much is left.</div></div>
         <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
       </a>
+      <a class="module-card" href="online-orders.html">
+        <div class="module-icon">🛒</div>
+        <div><div class="module-name">Online Orders</div><div class="module-desc">Shopify orders to pack — sorted one coffee at a time, with totals and the orders to put together.</div></div>
+        <div class="module-footer"><span class="module-status status-active">● Active</span><span class="module-arrow">→</span></div>
+      </a>
       <a class="module-card" href="reports.html">
         <div class="module-icon">📊</div>
         <div><div class="module-name">Reports</div><div class="module-desc">Track shop volume, coffee performance, and dispatch trends across any date range.</div></div>
@@ -138,8 +143,8 @@
       const role = role_row?.role;
       if (role === "viewer") { window.location.href = "reports.html"; return; }
       if (role === "packer") {
-        // Packers see only Traceability + Reports
-        const allowed = ["roastery-traceability", "reports.html"];
+        // Packers see only Traceability, Online Orders + Reports
+        const allowed = ["roastery-traceability", "online-orders", "reports.html"];
         document.querySelectorAll(".module-card").forEach(card => {
           const href = card.getAttribute("href") || "";
           if (!allowed.some(a => href.includes(a))) card.style.display = "none";

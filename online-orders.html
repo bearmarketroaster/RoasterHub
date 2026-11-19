@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Online Orders — Bear Mrkt</title>
+  <link rel="icon" type="image/png" href="bear-icon.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #fafaf8; min-height: 100vh; color: #1a1a1a; }
+    .header { background: #1a1a1a; color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-back { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; }
+    .header-back:hover { color: #fff; }
+    .header-title { font-weight: 700; font-size: 18px; }
+    .header-sub { font-size: 12px; color: #999; margin-top: 1px; }
+    .btn-logout { background: none; border: 1px solid #666; color: #ccc; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-logout:hover { background: #fff; color: #1a1a1a; border-color: #fff; }
+    .content { padding: 24px; max-width: 920px; margin: 0 auto; }
+    .loading { text-align: center; padding: 60px; color: #999; }
+    .err-box { background: #fdf2f2; border: 1px solid #f3c4c4; color: #b91c1c; border-radius: 12px; padding: 14px 16px; font-size: 14px; margin-bottom: 16px; }
+
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+    .bar .d { font-size: 13px; color: #666; }
+    .bar .d strong { color: #1a1a1a; }
+    .btn { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .btn-ghost { background: #fff; color: #1a1a1a; border: 1px solid #ddd; }
+    .btn:disabled { opacity: .5; cursor: default; }
+
+    .totals { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+    .tstat { flex: 1; min-width: 120px; background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 14px 16px; }
+    .tstat .n { font-size: 26px; font-weight: 800; line-height: 1; }
+    .tstat .l { font-size: 12px; color: #888; margin-top: 5px; text-transform: uppercase; letter-spacing: .03em; }
+
+    .card { background: #fff; border: 1px solid #e8e6e1; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .card h2 { font-size: 15px; margin-bottom: 4px; }
+    .card .hint { font-size: 12px; color: #888; margin-bottom: 12px; }
+
+    .step { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid #f0eee9; }
+    .step:first-of-type { border-top: none; }
+    .step input[type=checkbox] { width: 22px; height: 22px; margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+    .step .num { font-weight: 800; color: #bbb; width: 22px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .step .what { flex: 1; }
+    .step .coffee { font-weight: 800; font-size: 16px; }
+    .step .grind { font-weight: 600; color: #555; }
+    .step .bags { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .bagchip { background: #f3f1ec; border-radius: 8px; padding: 5px 10px; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .bagchip span { color: #888; font-weight: 500; font-size: 12px; }
+    .step .kg { font-size: 13px; color: #666; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .step.done .what { opacity: .45; text-decoration: line-through; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #888; padding: 6px 8px; border-bottom: 1px solid #e8e6e1; }
+    td { padding: 7px 8px; border-bottom: 1px solid #f4f2ed; font-variant-numeric: tabular-nums; }
+    tr.total td { font-weight: 800; border-top: 2px solid #1a1a1a; border-bottom: none; }
+
+    .order { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid #f0eee9; align-items: flex-start; }
+    .order:first-of-type { border-top: none; }
+    .order input[type=checkbox] { width: 22px; height: 22px; margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+    .order .o-h { font-weight: 800; }
+    .order .o-h span { font-weight: 400; color: #888; font-size: 12px; margin-left: 6px; }
+    .order ul { list-style: none; margin-top: 4px; }
+    .order li { font-size: 14px; padding: 1px 0; }
+    .order li b { font-variant-numeric: tabular-nums; }
+    .order .note { font-size: 12px; color: #92400e; background: #fffbeb; border-radius: 6px; padding: 4px 8px; margin-top: 6px; display: inline-block; }
+    .order.done .o-body { opacity: .45; }
+    .other { color: #666; }
+    .tag-partial { background: #eef2ff; color: #3730a3; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+
+    @media (max-width: 600px) { .header { flex-wrap: wrap; row-gap: 10px; } .content { padding: 16px; } }
+
+    /* Print: the packing order + totals on the first page, the orders to put together after */
+    @media print {
+      @page { size: A4; margin: 12mm; }
+      body { background: #fff; }
+      .header, .no-print { display: none !important; }
+      .content { padding: 0; max-width: none; }
+      .card { box-shadow: none; border: 1px solid #ccc; break-inside: auto; }
+      .step, .order { break-inside: avoid; }
+      .page-break { break-before: page; }
+      .print-title { display: block !important; font-size: 18px; font-weight: 800; margin-bottom: 10px; }
+    }
+    .print-title { display: none; }
+  </style>
+</head>
+<body>
+<div id="app"><div class="loading">Loading…</div></div>
+<script>
+const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+function esc(s){ return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function kg(n){ return (Math.round((Number(n)||0)*100)/100).toFixed(2).replace(/\.?0+$/, "") || "0"; }
+
+// ── ONLINE ORDERS ──────────────────────────────────────────────────────────
+// Shopify orders still to pack (paid, open, not shipped), read live through the shopify-orders Edge
+// Function (read-only; supabase/functions/shopify-orders). Turned into:
+//   1. a PACKING ORDER — one coffee at a time, whole bean first then each grind, all sizes together,
+//      so everything can be weighed in one go on the scale;
+//   2. TOTALS per coffee and size;
+//   3. the ORDERS to put together at the end.
+// Nothing is saved and no drum stock is touched — the bags still get scanned out in Traceability.
+// Ticks are kept on this device only (browser storage) so a reload doesn't lose them.
+
+const state = { loading: true, err: "", orders: [], fetched_at: null, coffees: [], fp: {}, ticks: {} };
+
+const TICKS_KEY = "online-orders-ticks";
+function load_ticks() { try { state.ticks = JSON.parse(localStorage.getItem(TICKS_KEY) || "{}") || {}; } catch (_) { state.ticks = {}; } }
+function save_ticks() { try { localStorage.setItem(TICKS_KEY, JSON.stringify(state.ticks)); } catch (_) {} }
+
+(async () => {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop()); return; }
+  const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
+  if (role_row?.role !== "admin" && role_row?.role !== "packer") { window.location.href = "reports.html"; return; }
+  load_ticks();
+  const [{ data: coffees }, { data: fps }] = await Promise.all([
+    supabaseClient.from("coffees").select("id, name, retired_at").order("name"),
+    supabaseClient.from("fp_codes").select("fp_code, coffee_id, bag_size"),
+  ]);
+  state.coffees = coffees || [];
+  (fps || []).forEach(f => { state.fp[String(f.fp_code).toUpperCase()] = f; });
+  await fetch_orders();
+})();
+
+async function fetch_orders() {
+  state.loading = true; state.err = ""; render();
+  const { data, error } = await supabaseClient.functions.invoke("shopify-orders", { body: {} });
+  if (error) {
+    let msg = null;
+    try { msg = (await error.context.json()).error; } catch (_) {}
+    state.err = msg || "Couldn't reach Shopify. Please try again.";
+  } else {
+    state.orders = (data.orders || []).map(o => ({ ...o, items: o.items.map(parse_item) }));
+    state.fetched_at = data.fetched_at;
+    // Forget ticks for orders that are gone (fulfilled in Shopify)
+    const names = new Set(state.orders.map(o => o.name));
+    Object.keys(state.ticks).forEach(k => { if (k.startsWith("order|") && !names.has(k.slice(6))) delete state.ticks[k]; });
+    save_ticks();
+  }
+  state.loading = false;
+  render();
+}
+
+// ── Reading a Shopify line: which coffee, size and grind ───────────────────
+const GRIND_WORDS = /ground|grind|espresso|filter|v60|chemex|aeropress|cafeti|french|moka|stove|drip|pour|turkish|batch/i;
+function size_from(text) {
+  const m = String(text || "").match(/(\d+(?:[.,]\d+)?)\s*(kg|g)\b/i);
+  if (!m) return null;
+  const n = Number(m[1].replace(",", "."));
+  return m[2].toLowerCase() === "kg" ? { label: `${n}kg`, grams: n * 1000 } : { label: `${n}g`, grams: n };
+}
+function parse_item(it) {
+  const opt = re => (it.options || []).find(o => re.test(o.name))?.value || "";
+  const fp = state.fp[String(it.sku || "").toUpperCase()];
+  // Coffee: the SKU when it's one of our FP codes, else the coffee whose name is in the product title
+  let coffee = fp ? state.coffees.find(c => c.id === fp.coffee_id) : null;
+  if (!coffee) {
+    const t = it.title.toLowerCase();
+    coffee = state.coffees.filter(c => t.includes(c.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0] || null;
+  }
+  // Size: a "Size"/"Weight" option, else the FP code's size, else any "250g" / "1kg" in the names
+  const size = size_from(opt(/size|weight|bag/i)) || size_from(fp?.bag_size) || size_from(it.variant_title) || size_from(it.title);
+  // Grind: a "Grind" option, else a grind word in the variant name, else whole bean
+  let grind = opt(/grind/i);
+  if (!grind) grind = String(it.variant_title || "").split("/").map(s => s.trim()).find(p => GRIND_WORDS.test(p) && !size_from(p)) || "";
+  if (!grind || (/whole|bean/i.test(grind) && !/ground/i.test(grind))) grind = "Whole bean";
+  return { ...it, coffee_id: coffee?.id ?? null, coffee: coffee?.name || null, size: size?.label || "", grams: size?.grams || 0, grind };
+}
+
+// ── Building the lists ─────────────────────────────────────────────────────
+function build() {
+  const coffee_lines = [], other_lines = [];
+  state.orders.forEach(o => o.items.forEach(it => (it.coffee ? coffee_lines : other_lines).push({ ...it, order: o.name })));
+
+  // Packing order: coffee → grind (whole bean first) → sizes
+  const by_coffee = {};
+  coffee_lines.forEach(l => {
+    const c = (by_coffee[l.coffee] = by_coffee[l.coffee] || { coffee: l.coffee, bags: 0, grams: 0, grinds: {} });
+    const g = (c.grinds[l.grind] = c.grinds[l.grind] || { grind: l.grind, bags: 0, grams: 0, sizes: {} });
+    const key = l.size || "size?";
+    g.sizes[key] = g.sizes[key] || { size: key, grams: l.grams, qty: 0 };
+    g.sizes[key].qty += l.qty;
+    g.bags += l.qty; g.grams += l.qty * l.grams;
+    c.bags += l.qty; c.grams += l.qty * l.grams;
+  });
+  // Biggest coffee first; within a coffee, whole bean then the grinds A–Z; sizes small → large
+  const coffees = Object.values(by_coffee).sort((a, b) => b.bags - a.bags || a.coffee.localeCompare(b.coffee));
+  const steps = [];
+  coffees.forEach(c => {
+    Object.values(c.grinds)
+      .sort((a, b) => (a.grind === "Whole bean" ? -1 : b.grind === "Whole bean" ? 1 : a.grind.localeCompare(b.grind)))
+      .forEach(g => steps.push({ coffee: c.coffee, grind: g.grind, bags: g.bags, grams: g.grams,
+                                 sizes: Object.values(g.sizes).sort((a, b) => a.grams - b.grams) }));
+  });
+
+  // Totals: coffee × size (all grinds together)
+  const sizes = [...new Set(coffee_lines.map(l => l.size || "size?"))]
+    .sort((a, b) => (coffee_lines.find(l => (l.size || "size?") === a)?.grams || 0) - (coffee_lines.find(l => (l.size || "size?") === b)?.grams || 0));
+  const totals = coffees.map(c => {
+    const per = {};
+    coffee_lines.filter(l => l.coffee === c.coffee).forEach(l => { const k = l.size || "size?"; per[k] = (per[k] || 0) + l.qty; });
+    return { coffee: c.coffee, per, bags: c.bags, grams: c.grams };
+  });
+  return { steps, sizes, totals, coffee_lines, other_lines };
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────
+function render() {
+  const app = document.getElementById("app");
+  const header = `
+    <div class="header">
+      <div class="header-left">
+        <button class="header-back" id="back-btn">← Dashboard</button>
+        <div style="width:1px;height:24px;background:#333;margin:0 4px"></div>
+        <div><div class="header-title">🛒 Online Orders</div><div class="header-sub">Bear Mrkt · Shopify orders to pack, one coffee at a time</div></div>
+      </div>
+      <button class="btn-logout" id="logout-btn">Log Out</button>
+    </div>`;
+  if (state.loading) { app.innerHTML = header + `<div class="content"><div class="loading">Getting orders from Shopify…</div></div>`; attach(); return; }
+
+  const b = build();
+  const n_orders = state.orders.length;
+  const bags = b.coffee_lines.reduce((s, l) => s + l.qty, 0);
+  const grams = b.coffee_lines.reduce((s, l) => s + l.qty * l.grams, 0);
+  const when = state.fetched_at ? new Date(state.fetched_at).toLocaleString("en-IE", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  const fmt_date = iso => new Date(iso).toLocaleString("en-IE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+  const steps_html = b.steps.map((s, i) => {
+    const key = `step|${s.coffee}|${s.grind}|${s.sizes.map(z => z.size + "x" + z.qty).join(",")}`;
+    const done = !!state.ticks[key];
+    return `<label class="step${done ? " done" : ""}">
+        <input type="checkbox" class="no-print-box" data-tick="${esc(key)}" ${done ? "checked" : ""} />
+        <div class="num">${i + 1}</div>
+        <div class="what">
+          <div><span class="coffee">${esc(s.coffee)}</span> · <span class="grind">${esc(s.grind)}</span></div>
+          <div class="bags">${s.sizes.map(z => `<span class="bagchip">${esc(z.size)} <span>×</span> ${z.qty}</span>`).join("")}</div>
+        </div>
+        <div class="kg">${s.bags} bag${s.bags === 1 ? "" : "s"} · ${kg(s.grams / 1000)}kg</div>
+      </label>`;
+  }).join("");
+
+  const totals_html = `
+    <table>
+      <thead><tr><th>Coffee</th>${b.sizes.map(z => `<th>${esc(z)}</th>`).join("")}<th>Bags</th><th>kg</th></tr></thead>
+      <tbody>
+        ${b.totals.map(t => `<tr><td><b>${esc(t.coffee)}</b></td>${b.sizes.map(z => `<td>${t.per[z] || "—"}</td>`).join("")}<td>${t.bags}</td><td>${kg(t.grams / 1000)}</td></tr>`).join("")}
+        <tr class="total"><td>Total</td>${b.sizes.map(z => `<td>${b.totals.reduce((s, t) => s + (t.per[z] || 0), 0) || "—"}</td>`).join("")}<td>${bags}</td><td>${kg(grams / 1000)}</td></tr>
+      </tbody>
+    </table>`;
+
+  const orders_html = state.orders.map(o => {
+    const key = `order|${o.name}`;
+    const done = !!state.ticks[key];
+    const coffee = o.items.filter(i => i.coffee).sort((a, b) => a.coffee.localeCompare(b.coffee) || a.grams - b.grams);
+    const other = o.items.filter(i => !i.coffee);
+    return `<label class="order${done ? " done" : ""}">
+        <input type="checkbox" data-tick="${esc(key)}" ${done ? "checked" : ""} />
+        <div class="o-body">
+          <div class="o-h">${esc(o.name)}<span>${esc(fmt_date(o.created_at))}</span>${o.status === "PARTIALLY_FULFILLED" ? `<span class="tag-partial">part sent</span>` : ""}</div>
+          <ul>
+            ${coffee.map(i => `<li><b>${i.qty} ×</b> ${esc(i.coffee)} ${esc(i.size)} · ${esc(i.grind)}</li>`).join("")}
+            ${other.map(i => `<li class="other"><b>${i.qty} ×</b> ${esc(i.title)}${i.variant_title ? ` · ${esc(i.variant_title)}` : ""}</li>`).join("")}
+          </ul>
+          ${o.note ? `<div class="note">📝 ${esc(o.note)}</div>` : ""}
+        </div>
+      </label>`;
+  }).join("");
+
+  // Lines that aren't one of our coffees (merch, equipment, gift cards, or a coffee the page couldn't match)
+  const other_sum = {};
+  b.other_lines.forEach(l => { const k = l.title + (l.variant_title ? ` · ${l.variant_title}` : ""); other_sum[k] = (other_sum[k] || 0) + l.qty; });
+
+  app.innerHTML = header + `
+    <div class="content">
+      ${state.err ? `<div class="err-box">⚠️ ${esc(state.err)}</div>` : ""}
+      <div class="bar no-print">
+        <div class="d">${when ? `Orders from Shopify as of <strong>${esc(when)}</strong> · paid and not yet sent` : ""}</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" id="clear-btn">Clear ticks</button>
+          <button class="btn btn-ghost" id="print-btn">🖨️ Print</button>
+          <button class="btn" id="refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="print-title">Online orders — ${esc(when)}</div>
+
+      <div class="totals">
+        <div class="tstat"><div class="n">${n_orders}</div><div class="l">Orders</div></div>
+        <div class="tstat"><div class="n">${bags}</div><div class="l">Bags of coffee</div></div>
+        <div class="tstat"><div class="n">${kg(grams / 1000)}</div><div class="l">kg of coffee</div></div>
+      </div>
+
+      ${n_orders === 0 && !state.err ? `<div class="card"><h2>Nothing to pack 🎉</h2><div class="hint">No paid online orders waiting to be sent.</div></div>` : ""}
+
+      ${b.steps.length ? `
+      <div class="card">
+        <h2>1 · Packing order</h2>
+        <div class="hint">One coffee at a time — weigh all its bags together, whole bean first, then each grind. Tick each line when it's packed.</div>
+        ${steps_html}
+      </div>
+      <div class="card">
+        <h2>2 · Totals</h2>
+        <div class="hint">Bags per coffee and size (all grinds together).</div>
+        ${totals_html}
+      </div>` : ""}
+
+      ${Object.keys(other_sum).length ? `
+      <div class="card">
+        <h2>Other items</h2>
+        <div class="hint">Not one of our coffees (or a coffee this page couldn't match — tell Claude if so).</div>
+        <table><tbody>${Object.entries(other_sum).map(([k, q]) => `<tr><td>${esc(k)}</td><td style="width:60px"><b>× ${q}</b></td></tr>`).join("")}</tbody></table>
+      </div>` : ""}
+
+      ${n_orders ? `
+      <div class="card page-break">
+        <h2>3 · Put the orders together</h2>
+        <div class="hint">Oldest first. Tick each order when it's packed. Scan the bags out in Traceability as usual.</div>
+        ${orders_html}
+      </div>` : ""}
+    </div>`;
+  attach();
+}
+
+function attach() {
+  document.getElementById("back-btn")?.addEventListener("click", () => window.location.href = "index.html");
+  document.getElementById("logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; });
+  document.getElementById("refresh-btn")?.addEventListener("click", fetch_orders);
+  document.getElementById("print-btn")?.addEventListener("click", () => window.print());
+  document.getElementById("clear-btn")?.addEventListener("click", () => {
+    if (!confirm("Untick everything?")) return;
+    state.ticks = {}; save_ticks(); render();
+  });
+  document.querySelectorAll("[data-tick]").forEach(cb => cb.addEventListener("change", () => {
+    if (cb.checked) state.ticks[cb.dataset.tick] = true; else delete state.ticks[cb.dataset.tick];
+    save_ticks(); render();
+  }));
+}
+</script>
+<!-- Sends the user to log in if this login is ended elsewhere, then back here -->
+<script src="session-guard.js"></script>
+</body>
+</html>
