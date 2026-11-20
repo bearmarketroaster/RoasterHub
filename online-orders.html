@@ -25,6 +25,8 @@
     .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
     .bar .d { font-size: 13px; color: #666; }
     .bar .d strong { color: #1a1a1a; }
+    .range { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 13px; font-weight: 600; }
+    .range select, .range input { margin-left: 6px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; background: #fff; }
     .btn { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
     .btn-ghost { background: #fff; color: #1a1a1a; border: 1px solid #ddd; }
     .btn:disabled { opacity: .5; cursor: default; }
@@ -101,7 +103,25 @@ function kg(n){ return (Math.round((Number(n)||0)*100)/100).toFixed(2).replace(/
 // DPD labels — printing labels in Shopify marks the orders fulfilled, and they then drop off this page.
 try { localStorage.removeItem("online-orders-ticks"); } catch (_) {}   // old on-screen ticks
 
-const state = { loading: true, err: "", orders: [], fetched_at: null, coffees: [], fp: {} };
+const state = { loading: true, err: "", orders: [], fetched_at: null, since: null, coffees: [], fp: {},
+                range: "24", custom_from: "" };
+
+// How far back to look (user, 20 Nov: last 24 hours by default, or a custom time — only a short look back;
+// the Edge Function caps it at 14 days). Ranges are hours; "custom" uses the From box.
+const RANGES = [["24", "Last 24 hours"], ["48", "Last 2 days"], ["72", "Last 3 days (weekend)"], ["168", "Last 7 days"], ["custom", "From a date / time…"]];
+const MAX_DAYS = 14;
+function since_iso() {
+  if (state.range === "custom") {
+    const t = Date.parse(state.custom_from);
+    return isNaN(t) ? null : new Date(t).toISOString();
+  }
+  return new Date(Date.now() - Number(state.range) * 3600 * 1000).toISOString();
+}
+// datetime-local value ("2026-11-20T08:00") for a time, in local time
+function local_input(d) {
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 (async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
@@ -119,7 +139,7 @@ const state = { loading: true, err: "", orders: [], fetched_at: null, coffees: [
 
 async function fetch_orders() {
   state.loading = true; state.err = ""; render();
-  const { data, error } = await supabaseClient.functions.invoke("shopify-orders", { body: {} });
+  const { data, error } = await supabaseClient.functions.invoke("shopify-orders", { body: { since: since_iso() } });
   if (error) {
     let msg = null;
     try { msg = (await error.context.json()).error; } catch (_) {}
@@ -127,6 +147,7 @@ async function fetch_orders() {
   } else {
     state.orders = (data.orders || []).map(o => ({ ...o, items: o.items.map(parse_item) }));
     state.fetched_at = data.fetched_at;
+    state.since = data.since || since_iso();
   }
   state.loading = false;
   render();
@@ -233,6 +254,7 @@ function render() {
   const bags = b.coffee_lines.reduce((s, l) => s + l.qty, 0);
   const grams = b.coffee_lines.reduce((s, l) => s + l.qty * l.grams, 0);
   const when = state.fetched_at ? new Date(state.fetched_at).toLocaleString("en-IE", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  const since_txt = state.since ? new Date(state.since).toLocaleString("en-IE", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
   const fmt_date = iso => new Date(iso).toLocaleString("en-IE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
   const orders_html = state.orders.map(o => {
@@ -258,13 +280,20 @@ function render() {
     <div class="content">
       ${state.err ? `<div class="err-box">⚠️ ${esc(state.err)}</div>` : ""}
       <div class="bar no-print">
-        <div class="d">${when ? `Orders from Shopify as of <strong>${esc(when)}</strong> · everything not yet fulfilled (on-hold orders left out)` : ""}</div>
+        <div class="range">
+          <label>Orders placed
+            <select id="range-select">${RANGES.map(([v, l]) => `<option value="${v}" ${state.range === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+          </label>
+          ${state.range === "custom" ? `<label>from <input type="datetime-local" id="custom-from" value="${esc(state.custom_from)}"
+              min="${local_input(new Date(Date.now() - MAX_DAYS * 86400000))}" max="${local_input(new Date())}" /></label>` : ""}
+        </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost" id="print-btn">🖨️ Print</button>
           <button class="btn" id="refresh-btn">↻ Refresh</button>
         </div>
       </div>
-      <div class="print-title">Online orders — ${esc(when)}</div>
+      <div class="bar no-print" style="margin-top:-8px"><div class="d">${when ? `From Shopify as of <strong>${esc(when)}</strong> · orders placed since <strong>${esc(since_txt)}</strong> · not yet fulfilled (on-hold left out)` : ""}</div></div>
+      <div class="print-title">Online orders — placed since ${esc(since_txt)} · printed ${esc(when)}</div>
       ${n_orders ? `<div class="tip no-print">🖨️ <b>Print this sheet first, then the DPD labels.</b> Printing the labels marks the orders as sent in Shopify, and they drop off this page.</div>` : ""}
 
       <div class="totals">
@@ -308,6 +337,18 @@ function attach() {
   document.getElementById("logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; });
   document.getElementById("refresh-btn")?.addEventListener("click", fetch_orders);
   document.getElementById("print-btn")?.addEventListener("click", () => window.print());
+  document.getElementById("range-select")?.addEventListener("change", e => {
+    state.range = e.target.value;
+    if (state.range === "custom") {
+      // start the box 24 hours back; the user then changes it
+      if (!state.custom_from) state.custom_from = local_input(new Date(Date.now() - 24 * 3600 * 1000));
+    }
+    fetch_orders();
+  });
+  document.getElementById("custom-from")?.addEventListener("change", e => {
+    state.custom_from = e.target.value;
+    if (since_iso()) fetch_orders();
+  });
 }
 </script>
 <!-- Sends the user to log in if this login is ended elsewhere, then back here -->
