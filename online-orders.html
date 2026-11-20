@@ -137,27 +137,36 @@ async function fetch_orders() {
 // ── Reading a Shopify line: which coffee, size and grind ───────────────────
 const GRIND_WORDS = /ground|grind|espresso|filter|v60|chemex|aeropress|cafeti|french|moka|stove|drip|pour|turkish|batch/i;
 function size_from(text) {
-  const m = String(text || "").match(/(\d+(?:[.,]\d+)?)\s*(kg|g)\b/i);
+  // "200g", "200gr", "200 grams", "1kg", "1 kilo"
+  const m = String(text || "").match(/(\d+(?:[.,]\d+)?)\s*(kgs?|kilos?|g|gr|grams?)\b/i);
   if (!m) return null;
   const n = Number(m[1].replace(",", "."));
-  return m[2].toLowerCase() === "kg" ? { label: `${n}kg`, grams: n * 1000 } : { label: `${n}g`, grams: n };
+  return /^k/i.test(m[2]) ? { label: `${n}kg`, grams: n * 1000 } : { label: `${n}g`, grams: n };
 }
 function parse_item(it) {
   const opts = [...(it.options || []), ...(it.props || [])];
   const opt = re => opts.find(o => re.test(o.name))?.value || "";
   const fp = state.fp[String(it.sku || "").toUpperCase()];
   // Coffee: the SKU when it's one of our FP codes, else the coffee whose name is in the product title
+  // or the variant (Coffee Club subscriptions: "Coffee Club - Espresso" · "Dark Horse / Wholebean / 1kg").
+  // Compared on letters and digits only, so "Holy Roast (Filter)" still finds Holy Roast.
+  const plain = s => " " + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
   let coffee = fp ? state.coffees.find(c => c.id === fp.coffee_id) : null;
-  if (!coffee) {
-    const t = it.title.toLowerCase();
-    coffee = state.coffees.filter(c => t.includes(c.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0] || null;
+  // Pods / capsules aren't bags we pack from a drum → Other items
+  const is_pods = /\bpods?\b|capsule/i.test(it.title + " " + it.variant_title);
+  if (!coffee && !is_pods) {
+    const t = plain(it.title + " " + it.variant_title);
+    coffee = state.coffees.filter(c => t.includes(plain(c.name)))
+      .sort((a, b) => b.name.length - a.name.length)[0] || null;
   }
   // Size: a "Size"/"Weight" option, else the FP code's size, else any "250g" / "1kg" in the names
   const size = size_from(opt(/size|weight|bag/i)) || size_from(fp?.bag_size) || size_from(it.variant_title) || size_from(it.title)
     || opts.map(o => size_from(o.value)).find(Boolean);
   // Grind: a "Grind" option, else a grind word in the variant name, else whole bean
   let grind = opt(/grind/i);
-  if (!grind) grind = String(it.variant_title || "").split("/").map(s => s.trim()).find(p => GRIND_WORDS.test(p) && !size_from(p)) || "";
+  if (!grind) grind = String(it.variant_title || "").split("/").map(s => s.trim())
+    // skip the coffee's own name ("Holy Roast (Filter)" is the coffee, not a grind) and the size part
+    .find(p => GRIND_WORDS.test(p) && !size_from(p) && !(coffee && plain(p).includes(plain(coffee.name)))) || "";
   if (!grind || (/whole|bean/i.test(grind) && !/ground/i.test(grind))) grind = "Whole bean";
   return { ...it, coffee_id: coffee?.id ?? null, coffee: coffee?.name || null, size: size?.label || "", grams: size?.grams || 0, grind };
 }
