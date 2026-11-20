@@ -93,11 +93,9 @@ function kg(n){ return (Math.round((Number(n)||0)*100)/100).toFixed(2).replace(/
 
 // ── ONLINE ORDERS ──────────────────────────────────────────────────────────
 // Shopify orders still to pack (paid, open, not shipped), read live through the shopify-orders Edge
-// Function (read-only; supabase/functions/shopify-orders). Turned into:
-//   1. a PACKING ORDER — one coffee at a time, whole bean first then each grind, all sizes together,
-//      so everything can be weighed in one go on the scale;
-//   2. TOTALS per coffee and size;
-//   3. the ORDERS to put together at the end.
+// Function (read-only; supabase/functions/shopify-orders). The printed sheet is TOTALS only (user, 20 Nov):
+//   1. WHOLE BEAN — coffee × size;  2. GROUND — coffee · grind × size;  3. OTHER ITEMS to grab from upstairs.
+// The orders list is on screen only (for checking), not printed.
 // Nothing is saved and no drum stock is touched — the bags still get scanned out in Traceability.
 // No ticking on screen (user, 19 Nov): the sheet is printed and ticked by hand. Print it BEFORE the
 // DPD labels — printing labels in Shopify marks the orders fulfilled, and they then drop off this page.
@@ -183,36 +181,37 @@ function build() {
   const coffee_lines = [], other_lines = [];
   state.orders.forEach(o => o.items.forEach(it => (it.coffee ? coffee_lines : other_lines).push({ ...it, order: o.name })));
 
-  // Packing order: coffee → grind (whole bean first) → sizes
-  const by_coffee = {};
-  coffee_lines.forEach(l => {
-    const c = (by_coffee[l.coffee] = by_coffee[l.coffee] || { coffee: l.coffee, bags: 0, grams: 0, grinds: {} });
-    const g = (c.grinds[l.grind] = c.grinds[l.grind] || { grind: l.grind, bags: 0, grams: 0, sizes: {} });
-    const key = l.size || "size?";
-    g.sizes[key] = g.sizes[key] || { size: key, grams: l.grams, qty: 0 };
-    g.sizes[key].qty += l.qty;
-    g.bags += l.qty; g.grams += l.qty * l.grams;
-    c.bags += l.qty; c.grams += l.qty * l.grams;
-  });
-  // Biggest coffee first; within a coffee, whole bean then the grinds A–Z; sizes small → large
-  const coffees = Object.values(by_coffee).sort((a, b) => b.bags - a.bags || a.coffee.localeCompare(b.coffee));
-  const steps = [];
-  coffees.forEach(c => {
-    Object.values(c.grinds)
-      .sort((a, b) => (a.grind === "Whole bean" ? -1 : b.grind === "Whole bean" ? 1 : a.grind.localeCompare(b.grind)))
-      .forEach(g => steps.push({ coffee: c.coffee, grind: g.grind, bags: g.bags, grams: g.grams,
-                                 sizes: Object.values(g.sizes).sort((a, b) => a.grams - b.grams) }));
-  });
+  const whole = coffee_lines.filter(l => l.grind === "Whole bean");
+  const ground = coffee_lines.filter(l => l.grind !== "Whole bean");
+  return { whole: totals_for(whole, l => l.coffee), ground: totals_for(ground, l => `${l.coffee} · ${l.grind}`),
+           coffee_lines, other_lines };
+}
 
-  // Totals: coffee × size (all grinds together)
-  const sizes = [...new Set(coffee_lines.map(l => l.size || "size?"))]
-    .sort((a, b) => (coffee_lines.find(l => (l.size || "size?") === a)?.grams || 0) - (coffee_lines.find(l => (l.size || "size?") === b)?.grams || 0));
-  const totals = coffees.map(c => {
-    const per = {};
-    coffee_lines.filter(l => l.coffee === c.coffee).forEach(l => { const k = l.size || "size?"; per[k] = (per[k] || 0) + l.qty; });
-    return { coffee: c.coffee, per, bags: c.bags, grams: c.grams };
+// Totals table data: one row per label (coffee, or coffee · grind), one column per size
+function totals_for(lines, label_of) {
+  const size_key = l => l.size || "size?";
+  const grams_of = {};
+  lines.forEach(l => { grams_of[size_key(l)] = l.grams; });
+  const sizes = Object.keys(grams_of).sort((a, b) => grams_of[a] - grams_of[b]);
+  const rows = {};
+  lines.forEach(l => {
+    const r = (rows[label_of(l)] = rows[label_of(l)] || { label: label_of(l), per: {}, bags: 0, grams: 0 });
+    r.per[size_key(l)] = (r.per[size_key(l)] || 0) + l.qty;
+    r.bags += l.qty; r.grams += l.qty * l.grams;
   });
-  return { steps, sizes, totals, coffee_lines, other_lines };
+  return { sizes, rows: Object.values(rows).sort((a, b) => a.label.localeCompare(b.label)) };
+}
+
+function totals_table(t, first_col) {
+  const sum = f => t.rows.reduce((s, r) => s + f(r), 0);
+  return `
+    <table>
+      <thead><tr><th>${first_col}</th>${t.sizes.map(z => `<th>${esc(z)}</th>`).join("")}<th>Bags</th><th>kg</th></tr></thead>
+      <tbody>
+        ${t.rows.map(r => `<tr><td><b>${esc(r.label)}</b></td>${t.sizes.map(z => `<td>${r.per[z] || "—"}</td>`).join("")}<td>${r.bags}</td><td>${kg(r.grams / 1000)}</td></tr>`).join("")}
+        <tr class="total"><td>Total</td>${t.sizes.map(z => `<td>${sum(r => r.per[z] || 0) || "—"}</td>`).join("")}<td>${sum(r => r.bags)}</td><td>${kg(sum(r => r.grams) / 1000)}</td></tr>
+      </tbody>
+    </table>`;
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────
@@ -223,7 +222,7 @@ function render() {
       <div class="header-left">
         <button class="header-back" id="back-btn">← Dashboard</button>
         <div style="width:1px;height:24px;background:#333;margin:0 4px"></div>
-        <div><div class="header-title">🛒 Online Orders</div><div class="header-sub">Bear Mrkt · Shopify orders to pack, one coffee at a time</div></div>
+        <div><div class="header-title">🛒 Online Orders</div><div class="header-sub">Bear Mrkt · Shopify orders to pack — totals by coffee and size</div></div>
       </div>
       <button class="btn-logout" id="logout-btn">Log Out</button>
     </div>`;
@@ -236,32 +235,10 @@ function render() {
   const when = state.fetched_at ? new Date(state.fetched_at).toLocaleString("en-IE", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
   const fmt_date = iso => new Date(iso).toLocaleString("en-IE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
-  const steps_html = b.steps.map((s, i) => {
-    return `<div class="step">
-        <span class="box"></span>
-        <div class="num">${i + 1}</div>
-        <div class="what">
-          <div><span class="coffee">${esc(s.coffee)}</span> · <span class="grind">${esc(s.grind)}</span></div>
-          <div class="bags">${s.sizes.map(z => `<span class="bagchip">${esc(z.size)} <span>×</span> ${z.qty}</span>`).join("")}</div>
-        </div>
-        <div class="kg">${s.bags} bag${s.bags === 1 ? "" : "s"} · ${kg(s.grams / 1000)}kg</div>
-      </div>`;
-  }).join("");
-
-  const totals_html = `
-    <table>
-      <thead><tr><th>Coffee</th>${b.sizes.map(z => `<th>${esc(z)}</th>`).join("")}<th>Bags</th><th>kg</th></tr></thead>
-      <tbody>
-        ${b.totals.map(t => `<tr><td><b>${esc(t.coffee)}</b></td>${b.sizes.map(z => `<td>${t.per[z] || "—"}</td>`).join("")}<td>${t.bags}</td><td>${kg(t.grams / 1000)}</td></tr>`).join("")}
-        <tr class="total"><td>Total</td>${b.sizes.map(z => `<td>${b.totals.reduce((s, t) => s + (t.per[z] || 0), 0) || "—"}</td>`).join("")}<td>${bags}</td><td>${kg(grams / 1000)}</td></tr>
-      </tbody>
-    </table>`;
-
   const orders_html = state.orders.map(o => {
     const coffee = o.items.filter(i => i.coffee).sort((a, b) => a.coffee.localeCompare(b.coffee) || a.grams - b.grams);
     const other = o.items.filter(i => !i.coffee);
     return `<div class="order">
-        <span class="box"></span>
         <div class="o-body">
           <div class="o-h">${esc(o.name)}<span>${esc(fmt_date(o.created_at))}</span>${o.status === "PARTIALLY_FULFILLED" ? `<span class="tag-partial">part sent</span>` : ""}</div>
           <ul>
@@ -281,7 +258,7 @@ function render() {
     <div class="content">
       ${state.err ? `<div class="err-box">⚠️ ${esc(state.err)}</div>` : ""}
       <div class="bar no-print">
-        <div class="d">${when ? `Orders from Shopify as of <strong>${esc(when)}</strong> · paid and not yet sent` : ""}</div>
+        <div class="d">${when ? `Orders from Shopify as of <strong>${esc(when)}</strong> · everything not yet fulfilled (on-hold orders left out)` : ""}</div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost" id="print-btn">🖨️ Print</button>
           <button class="btn" id="refresh-btn">↻ Refresh</button>
@@ -296,31 +273,30 @@ function render() {
         <div class="tstat"><div class="n">${kg(grams / 1000)}</div><div class="l">kg of coffee</div></div>
       </div>
 
-      ${n_orders === 0 && !state.err ? `<div class="card"><h2>Nothing to pack 🎉</h2><div class="hint">No paid online orders waiting to be sent.</div></div>` : ""}
+      ${n_orders === 0 && !state.err ? `<div class="card"><h2>Nothing to pack 🎉</h2><div class="hint">No online orders waiting to be fulfilled.</div></div>` : ""}
 
-      ${b.steps.length ? `
+      ${b.whole.rows.length ? `
       <div class="card">
-        <h2>1 · Packing order</h2>
-        <div class="hint">One coffee at a time — weigh all its bags together, whole bean first, then each grind. Tick each line on the sheet when it's packed.</div>
-        ${steps_html}
-      </div>
+        <h2>Whole bean</h2>
+        ${totals_table(b.whole, "Coffee")}
+      </div>` : ""}
+
+      ${b.ground.rows.length ? `
       <div class="card">
-        <h2>2 · Totals</h2>
-        <div class="hint">Bags per coffee and size (all grinds together).</div>
-        ${totals_html}
+        <h2>Ground</h2>
+        ${totals_table(b.ground, "Coffee · grind")}
       </div>` : ""}
 
       ${Object.keys(other_sum).length ? `
       <div class="card">
-        <h2>Other items</h2>
-        <div class="hint">Not one of our coffees (or a coffee this page couldn't match — tell Claude if so).</div>
-        <table><tbody>${Object.entries(other_sum).map(([k, q]) => `<tr><td>${esc(k)}</td><td style="width:60px"><b>× ${q}</b></td></tr>`).join("")}</tbody></table>
+        <h2>Other items — from upstairs</h2>
+        <table><tbody>${Object.entries(other_sum).sort((a, b) => a[0].localeCompare(b[0])).map(([k, q]) => `<tr><td>${esc(k)}</td><td style="width:60px"><b>× ${q}</b></td></tr>`).join("")}</tbody></table>
       </div>` : ""}
 
       ${n_orders ? `
-      <div class="card page-break">
-        <h2>3 · Put the orders together</h2>
-        <div class="hint">Oldest first. Tick each order on the sheet when it's packed. Scan the bags out in Traceability as usual.</div>
+      <div class="card no-print">
+        <h2>Orders (on screen only — not printed)</h2>
+        <div class="hint">Oldest first, for checking. Scan the bags out in Traceability as usual.</div>
         ${orders_html}
       </div>` : ""}
     </div>`;
