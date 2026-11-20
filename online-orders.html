@@ -40,7 +40,9 @@
 
     .step { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid #f0eee9; }
     .step:first-of-type { border-top: none; }
-    .step input[type=checkbox] { width: 22px; height: 22px; margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+    /* An empty box to tick with a pen on the printed sheet */
+    .box { width: 20px; height: 20px; margin-top: 2px; flex-shrink: 0; border: 2px solid #1a1a1a; border-radius: 4px; }
+    .tip { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; }
     .step .num { font-weight: 800; color: #bbb; width: 22px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
     .step .what { flex: 1; }
     .step .coffee { font-weight: 800; font-size: 16px; }
@@ -49,7 +51,6 @@
     .bagchip { background: #f3f1ec; border-radius: 8px; padding: 5px 10px; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .bagchip span { color: #888; font-weight: 500; font-size: 12px; }
     .step .kg { font-size: 13px; color: #666; white-space: nowrap; font-variant-numeric: tabular-nums; }
-    .step.done .what { opacity: .45; text-decoration: line-through; }
 
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #888; padding: 6px 8px; border-bottom: 1px solid #e8e6e1; }
@@ -58,14 +59,12 @@
 
     .order { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid #f0eee9; align-items: flex-start; }
     .order:first-of-type { border-top: none; }
-    .order input[type=checkbox] { width: 22px; height: 22px; margin-top: 2px; flex-shrink: 0; cursor: pointer; }
     .order .o-h { font-weight: 800; }
     .order .o-h span { font-weight: 400; color: #888; font-size: 12px; margin-left: 6px; }
     .order ul { list-style: none; margin-top: 4px; }
     .order li { font-size: 14px; padding: 1px 0; }
     .order li b { font-variant-numeric: tabular-nums; }
     .order .note { font-size: 12px; color: #92400e; background: #fffbeb; border-radius: 6px; padding: 4px 8px; margin-top: 6px; display: inline-block; }
-    .order.done .o-body { opacity: .45; }
     .other { color: #666; }
     .tag-partial { background: #eef2ff; color: #3730a3; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 700; margin-left: 6px; }
 
@@ -100,20 +99,17 @@ function kg(n){ return (Math.round((Number(n)||0)*100)/100).toFixed(2).replace(/
 //   2. TOTALS per coffee and size;
 //   3. the ORDERS to put together at the end.
 // Nothing is saved and no drum stock is touched — the bags still get scanned out in Traceability.
-// Ticks are kept on this device only (browser storage) so a reload doesn't lose them.
+// No ticking on screen (user, 19 Nov): the sheet is printed and ticked by hand. Print it BEFORE the
+// DPD labels — printing labels in Shopify marks the orders fulfilled, and they then drop off this page.
+try { localStorage.removeItem("online-orders-ticks"); } catch (_) {}   // old on-screen ticks
 
-const state = { loading: true, err: "", orders: [], fetched_at: null, coffees: [], fp: {}, ticks: {} };
-
-const TICKS_KEY = "online-orders-ticks";
-function load_ticks() { try { state.ticks = JSON.parse(localStorage.getItem(TICKS_KEY) || "{}") || {}; } catch (_) { state.ticks = {}; } }
-function save_ticks() { try { localStorage.setItem(TICKS_KEY, JSON.stringify(state.ticks)); } catch (_) {} }
+const state = { loading: true, err: "", orders: [], fetched_at: null, coffees: [], fp: {} };
 
 (async () => {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) { window.location.href = "login.html?next=" + encodeURIComponent(location.pathname.split("/").pop()); return; }
   const { data: role_row } = await supabaseClient.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle();
   if (role_row?.role !== "admin" && role_row?.role !== "packer") { window.location.href = "reports.html"; return; }
-  load_ticks();
   const [{ data: coffees }, { data: fps }] = await Promise.all([
     supabaseClient.from("coffees").select("id, name, retired_at").order("name"),
     supabaseClient.from("fp_codes").select("fp_code, coffee_id, bag_size"),
@@ -133,10 +129,6 @@ async function fetch_orders() {
   } else {
     state.orders = (data.orders || []).map(o => ({ ...o, items: o.items.map(parse_item) }));
     state.fetched_at = data.fetched_at;
-    // Forget ticks for orders that are gone (fulfilled in Shopify)
-    const names = new Set(state.orders.map(o => o.name));
-    Object.keys(state.ticks).forEach(k => { if (k.startsWith("order|") && !names.has(k.slice(6))) delete state.ticks[k]; });
-    save_ticks();
   }
   state.loading = false;
   render();
@@ -151,7 +143,8 @@ function size_from(text) {
   return m[2].toLowerCase() === "kg" ? { label: `${n}kg`, grams: n * 1000 } : { label: `${n}g`, grams: n };
 }
 function parse_item(it) {
-  const opt = re => (it.options || []).find(o => re.test(o.name))?.value || "";
+  const opts = [...(it.options || []), ...(it.props || [])];
+  const opt = re => opts.find(o => re.test(o.name))?.value || "";
   const fp = state.fp[String(it.sku || "").toUpperCase()];
   // Coffee: the SKU when it's one of our FP codes, else the coffee whose name is in the product title
   let coffee = fp ? state.coffees.find(c => c.id === fp.coffee_id) : null;
@@ -160,12 +153,20 @@ function parse_item(it) {
     coffee = state.coffees.filter(c => t.includes(c.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0] || null;
   }
   // Size: a "Size"/"Weight" option, else the FP code's size, else any "250g" / "1kg" in the names
-  const size = size_from(opt(/size|weight|bag/i)) || size_from(fp?.bag_size) || size_from(it.variant_title) || size_from(it.title);
+  const size = size_from(opt(/size|weight|bag/i)) || size_from(fp?.bag_size) || size_from(it.variant_title) || size_from(it.title)
+    || opts.map(o => size_from(o.value)).find(Boolean);
   // Grind: a "Grind" option, else a grind word in the variant name, else whole bean
   let grind = opt(/grind/i);
   if (!grind) grind = String(it.variant_title || "").split("/").map(s => s.trim()).find(p => GRIND_WORDS.test(p) && !size_from(p)) || "";
   if (!grind || (/whole|bean/i.test(grind) && !/ground/i.test(grind))) grind = "Whole bean";
   return { ...it, coffee_id: coffee?.id ?? null, coffee: coffee?.name || null, size: size?.label || "", grams: size?.grams || 0, grind };
+}
+
+// What Shopify sent for a line whose size couldn't be found — so it can be matched properly
+function raw_shopify(i) {
+  const bits = [i.title, i.variant_title, i.sku && `SKU ${i.sku}`,
+                ...(i.props || []).map(p => `${p.name}: ${p.value}`)].filter(Boolean);
+  return ` <span style="color:#999;font-size:12px">(Shopify: ${esc(bits.join(" · "))})</span>`;
 }
 
 // ── Building the lists ─────────────────────────────────────────────────────
@@ -227,17 +228,15 @@ function render() {
   const fmt_date = iso => new Date(iso).toLocaleString("en-IE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
   const steps_html = b.steps.map((s, i) => {
-    const key = `step|${s.coffee}|${s.grind}|${s.sizes.map(z => z.size + "x" + z.qty).join(",")}`;
-    const done = !!state.ticks[key];
-    return `<label class="step${done ? " done" : ""}">
-        <input type="checkbox" class="no-print-box" data-tick="${esc(key)}" ${done ? "checked" : ""} />
+    return `<div class="step">
+        <span class="box"></span>
         <div class="num">${i + 1}</div>
         <div class="what">
           <div><span class="coffee">${esc(s.coffee)}</span> · <span class="grind">${esc(s.grind)}</span></div>
           <div class="bags">${s.sizes.map(z => `<span class="bagchip">${esc(z.size)} <span>×</span> ${z.qty}</span>`).join("")}</div>
         </div>
         <div class="kg">${s.bags} bag${s.bags === 1 ? "" : "s"} · ${kg(s.grams / 1000)}kg</div>
-      </label>`;
+      </div>`;
   }).join("");
 
   const totals_html = `
@@ -250,21 +249,19 @@ function render() {
     </table>`;
 
   const orders_html = state.orders.map(o => {
-    const key = `order|${o.name}`;
-    const done = !!state.ticks[key];
     const coffee = o.items.filter(i => i.coffee).sort((a, b) => a.coffee.localeCompare(b.coffee) || a.grams - b.grams);
     const other = o.items.filter(i => !i.coffee);
-    return `<label class="order${done ? " done" : ""}">
-        <input type="checkbox" data-tick="${esc(key)}" ${done ? "checked" : ""} />
+    return `<div class="order">
+        <span class="box"></span>
         <div class="o-body">
           <div class="o-h">${esc(o.name)}<span>${esc(fmt_date(o.created_at))}</span>${o.status === "PARTIALLY_FULFILLED" ? `<span class="tag-partial">part sent</span>` : ""}</div>
           <ul>
-            ${coffee.map(i => `<li><b>${i.qty} ×</b> ${esc(i.coffee)} ${esc(i.size)} · ${esc(i.grind)}</li>`).join("")}
+            ${coffee.map(i => `<li><b>${i.qty} ×</b> ${esc(i.coffee)} ${esc(i.size || "size?")} · ${esc(i.grind)}${i.size ? "" : raw_shopify(i)}</li>`).join("")}
             ${other.map(i => `<li class="other"><b>${i.qty} ×</b> ${esc(i.title)}${i.variant_title ? ` · ${esc(i.variant_title)}` : ""}</li>`).join("")}
           </ul>
           ${o.note ? `<div class="note">📝 ${esc(o.note)}</div>` : ""}
         </div>
-      </label>`;
+      </div>`;
   }).join("");
 
   // Lines that aren't one of our coffees (merch, equipment, gift cards, or a coffee the page couldn't match)
@@ -277,12 +274,12 @@ function render() {
       <div class="bar no-print">
         <div class="d">${when ? `Orders from Shopify as of <strong>${esc(when)}</strong> · paid and not yet sent` : ""}</div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-ghost" id="clear-btn">Clear ticks</button>
           <button class="btn btn-ghost" id="print-btn">🖨️ Print</button>
           <button class="btn" id="refresh-btn">↻ Refresh</button>
         </div>
       </div>
       <div class="print-title">Online orders — ${esc(when)}</div>
+      ${n_orders ? `<div class="tip no-print">🖨️ <b>Print this sheet first, then the DPD labels.</b> Printing the labels marks the orders as sent in Shopify, and they drop off this page.</div>` : ""}
 
       <div class="totals">
         <div class="tstat"><div class="n">${n_orders}</div><div class="l">Orders</div></div>
@@ -295,7 +292,7 @@ function render() {
       ${b.steps.length ? `
       <div class="card">
         <h2>1 · Packing order</h2>
-        <div class="hint">One coffee at a time — weigh all its bags together, whole bean first, then each grind. Tick each line when it's packed.</div>
+        <div class="hint">One coffee at a time — weigh all its bags together, whole bean first, then each grind. Tick each line on the sheet when it's packed.</div>
         ${steps_html}
       </div>
       <div class="card">
@@ -314,7 +311,7 @@ function render() {
       ${n_orders ? `
       <div class="card page-break">
         <h2>3 · Put the orders together</h2>
-        <div class="hint">Oldest first. Tick each order when it's packed. Scan the bags out in Traceability as usual.</div>
+        <div class="hint">Oldest first. Tick each order on the sheet when it's packed. Scan the bags out in Traceability as usual.</div>
         ${orders_html}
       </div>` : ""}
     </div>`;
@@ -326,14 +323,6 @@ function attach() {
   document.getElementById("logout-btn")?.addEventListener("click", async () => { await supabaseClient.auth.signOut(); window.location.href = "login.html"; });
   document.getElementById("refresh-btn")?.addEventListener("click", fetch_orders);
   document.getElementById("print-btn")?.addEventListener("click", () => window.print());
-  document.getElementById("clear-btn")?.addEventListener("click", () => {
-    if (!confirm("Untick everything?")) return;
-    state.ticks = {}; save_ticks(); render();
-  });
-  document.querySelectorAll("[data-tick]").forEach(cb => cb.addEventListener("change", () => {
-    if (cb.checked) state.ticks[cb.dataset.tick] = true; else delete state.ticks[cb.dataset.tick];
-    save_ticks(); render();
-  }));
 }
 </script>
 <!-- Sends the user to log in if this login is ended elsewhere, then back here -->
